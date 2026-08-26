@@ -1,0 +1,8 @@
+{
+  "name": "gha-indie-worker-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/contracts.e2e.mjs && node tests/transports.e2e.mjs"
+  }
+}

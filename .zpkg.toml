@@ -1,0 +1,4 @@
+name = "gha-indie-worker-e2e"
+kind = "e2e"
+version = "0.1.0"
+
