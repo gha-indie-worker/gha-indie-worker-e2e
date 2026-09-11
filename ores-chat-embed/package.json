@@ -1,0 +1,12 @@
+{
+  "name": "ores-chat-embed",
+  "private": true,
+  "type": "module",
+  "description": "External acceptance checks for this organization's ORES Chat embed.",
+  "scripts": {
+    "test": "node --test tests/*.e2e.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
