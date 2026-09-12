@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "consumer": "gha-indie-worker",
+  "bundle": {
+    "base_url": "https://ores-chat.github.io/components/v1/",
+    "package": "@ores-chat/external-components",
+    "artifact": "ores-chat-footer-link.js",
+    "sha256": "3dc8dd67ae7d45fb3fe67e64351deffc62b875dd0a4f21e3874818ee8fd9fe47",
+    "source_repository": "https://github.com/ores-chat/ores-chat-external-components",
+    "source_commit": "27ce4d4b63482c3d2c6e15eb298c3b7f53780278",
+    "source_pull_request": "https://github.com/ores-chat/ores-chat-external-components/pull/2",
+    "expected_surfaces": [
+      "html",
+      "custom-element"
+    ]
+  },
+  "surfaces": [
+    {
+      "name": "visitor",
+      "purpose": "Marketing-site sales and visitor chat",
+      "context_id": "gha-indie-worker-visitor",
+      "api_base": "https://api.indiebuild.dev/"
+    },
+    {
+      "name": "support",
+      "purpose": "Signed-in customer support chat",
+      "context_id": "gha-indie-worker-support",
+      "api_base": "https://api.indiebuild.dev/"
+    },
+    {
+      "name": "admin",
+      "purpose": "Owner and operator admin chat",
+      "context_id": "gha-indie-worker-admin",
+      "api_base": "https://admin-api.indiebuild.dev/"
+    },
+    {
+      "name": "internal-search",
+      "purpose": "Internal knowledge search chat",
+      "context_id": "gha-indie-worker-internal-search",
+      "api_base": "https://admin-api.indiebuild.dev/"
+    }
+  ]
+}
