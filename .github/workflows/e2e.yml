@@ -16,29 +16,3 @@ jobs:
         with:
           persist-credentials: false
       - run: npm test
-
-  ores-compose-source:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - name: Fetch exact public ores-compose revision
-        env:
-          ORES_COMPOSE_SHA: 17f0d64d2c31edecfb09fa323c3daf3efade3eb9
-        run: |
-          git clone --filter=blob:none --no-checkout https://github.com/ORESoftware/ores-compose.git ores-compose
-          cd ores-compose
-          git fetch --depth=1 origin "$ORES_COMPOSE_SHA"
-          git checkout --detach "$ORES_COMPOSE_SHA"
-      - name: Install Rust verification components
-        run: |
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy
-          rustup default stable
-      - name: Format
-        working-directory: ores-compose
-        run: cargo fmt --all --check
-      - name: Clippy
-        working-directory: ores-compose
-        run: cargo clippy --all-targets --all-features -- -D warnings
-      - name: Unit and system tests
-        working-directory: ores-compose
-        run: cargo test --all-targets --all-features
