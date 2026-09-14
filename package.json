@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/contracts.e2e.mjs && node tests/transports.e2e.mjs"
+    "test": "node tests/contracts.e2e.mjs && node tests/transports.e2e.mjs && node --test tests/ores-compose-machine.e2e.mjs"
   }
 }
