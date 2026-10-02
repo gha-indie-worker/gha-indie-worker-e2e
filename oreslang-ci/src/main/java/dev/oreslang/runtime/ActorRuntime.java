@@ -691,7 +691,10 @@ public final class ActorRuntime implements AutoCloseable {
         }
 
         private void invalidateFromRuntime() {
-            closeFromRuntime();
+            if (cellClosed.compareAndSet(false, true)) {
+                gcRegistration.cleanNow();
+            }
+            syncCells.remove(this);
         }
     }
 

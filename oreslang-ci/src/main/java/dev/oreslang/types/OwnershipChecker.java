@@ -568,9 +568,6 @@ public final class OwnershipChecker {
             if (!parameter.type().borrowedTarget().equals(returnType.borrowedTarget())) continue;
             compatible++;
         }
-        if (compatible == 0) {
-            throw error(callable + " returns a borrow but has no compatible borrowed parameter to anchor its lifetime");
-        }
         if (compatible > 1) {
             throw error(callable + " has an ambiguous returned-borrow lifetime; until explicit lifetime parameters are added, "
                     + "a borrowed return must be anchored to exactly one compatible borrowed parameter");
