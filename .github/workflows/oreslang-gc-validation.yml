@@ -1,0 +1,26 @@
+name: oreslang-gc-validation
+
+on:
+  push:
+    branches: ["ci/oreslang-gc-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+      - name: Verify mirrored Oreslang branch
+        working-directory: oreslang-ci
+        run: mvn -B -ntp verify
