@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: oreslang-gc-validation
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-24.04
