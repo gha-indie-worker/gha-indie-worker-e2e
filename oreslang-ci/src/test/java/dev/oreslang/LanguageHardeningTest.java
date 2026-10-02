@@ -336,6 +336,17 @@ final class LanguageHardeningTest {
     void processWideGcControlIsDeniedByStrictFaasPolicy() {
         assertTrue(IsolatePolicy.developer().allows(IsolatePolicy.Capability.GC_CONTROL));
         assertFalse(IsolatePolicy.strictFaas().allows(IsolatePolicy.Capability.GC_CONTROL));
+
+        Ast.Program program = TypeChecker.check(Parser.parse("""
+                define module app
+                  fnc maintenance() => void {
+                    process.gc();
+                    return;
+                  }
+                end
+                """));
+        assertThrows(SecurityException.class, () -> CapabilityChecker.check(program, IsolatePolicy.strictFaas()));
+        assertDoesNotThrow(() -> CapabilityChecker.check(program, IsolatePolicy.developer()));
     }
 
 }

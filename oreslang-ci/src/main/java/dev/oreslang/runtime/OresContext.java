@@ -94,7 +94,9 @@ public final class OresContext implements AutoCloseable {
                 "language", "oreslang",
                 "execution_mode", executionProfile.mode().name(),
                 "platform", executionProfile.platform().name(),
-                "scheduler_safepoints", schedulerSafepoints.get());
+                "scheduler_safepoints", schedulerSafepoints.get(),
+                "gc_tracked_resources", actors.trackedGcResources(),
+                "gc_model", "ownership+runtime-fallback");
     }
 
     @Override
