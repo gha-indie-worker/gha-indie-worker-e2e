@@ -26,6 +26,15 @@ jobs:
         run: |
           java --version
           mvn --version
-      - name: Verify mirrored Oreslang branch
+      - name: Compile entire mirrored Oreslang project
         working-directory: oreslang-ci
-        run: mvn -B -ntp verify
+        run: mvn -B -ntp -DskipTests package
+      - name: Run GC, ownership, and language hardening suites
+        working-directory: oreslang-ci
+        run: mvn -B -ntp -Dtest=RuntimeGcTest,OwnershipAndClosureTest,LanguageHardeningTest test
+      - name: Verify actor-local GC API
+        working-directory: oreslang-ci
+        run: mvn -B -ntp -Dtest=ActorRuntimeTest#actorCanRequestOnlyActorScopedGcDuringItsMailboxTurn test
+      - name: Verify nonblocking SyncCell teardown
+        working-directory: oreslang-ci
+        run: mvn -B -ntp -Dtest=ActorRuntimeTest#runtimeCloseDoesNotBlockOnActorHeldSyncCellLock test
