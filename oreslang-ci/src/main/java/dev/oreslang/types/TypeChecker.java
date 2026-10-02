@@ -44,6 +44,7 @@ public final class TypeChecker {
     private final Set<String> ambiguousTypeAliases = new HashSet<>();
     private final Set<String> importedValues = new HashSet<>();
     private final Set<Ast.TypeAliasDecl> resolvingAliases = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+    private int actorContextDepth;
 
     public static Ast.Program check(Ast.Program program) {
         TypeChecker checker = new TypeChecker();
@@ -186,7 +187,12 @@ public final class TypeChecker {
         Env env = new Env(null);
         for (Ast.Param param : fn.parameters()) env.define(param.name(), resolveParam(param, generics, null), param.mutable() ? Ast.BindingKind.LET : Ast.BindingKind.VAL);
         Type returns = resolve(fn.returnType(), generics, null);
-        checkBlock(fn.body(), env, generics, returns, null);
+        if (fn.actorKind() != Ast.ActorKind.NONE) actorContextDepth++;
+        try {
+            checkBlock(fn.body(), env, generics, returns, null);
+        } finally {
+            if (fn.actorKind() != Ast.ActorKind.NONE) actorContextDepth--;
+        }
         if (returns != Primitive.VOID && !definitelyReturns(fn.body())) {
             throw new IllegalArgumentException("non-void " + fn.kind().name().toLowerCase() + " '" + module + "." + fn.name() + "' must explicitly return on every path");
         }
@@ -266,7 +272,13 @@ public final class TypeChecker {
             if (!method.isStatic()) env.define("self", self, Ast.BindingKind.VAL);
             for (Ast.Param param : method.parameters()) env.define(param.name(), resolveParam(param, generics, callableSelf), param.mutable() ? Ast.BindingKind.LET : Ast.BindingKind.VAL);
             Type returns = resolve(method.returnType(), generics, callableSelf);
-            checkBlock(method.body(), env, generics, returns, callableSelf);
+            boolean actorMethod = klass.actorKind() != Ast.ActorKind.NONE && !method.isStatic();
+            if (actorMethod) actorContextDepth++;
+            try {
+                checkBlock(method.body(), env, generics, returns, callableSelf);
+            } finally {
+                if (actorMethod) actorContextDepth--;
+            }
             if (!method.isAbstract() && returns != Primitive.VOID && !definitelyReturns(method.body())) {
                 String label = method.isStatic() ? "static function" : "method";
                 throw new IllegalArgumentException("non-void " + label + " '" + module + "." + klass.name() + "." + method.name() + "' must explicitly return on every path");
@@ -593,7 +605,12 @@ public final class TypeChecker {
                 if (member.member().equals("stdout")) return new Named("stdio.stdout", List.of());
             }
             if (member.receiver() instanceof Ast.NameExpr name && name.name().equals("actor")) {
-                if (member.member().equals("gc")) return new Function(List.of(), Unknown.INSTANCE);
+                if (member.member().equals("gc")) {
+                    if (actorContextDepth <= 0) {
+                        throw new IllegalArgumentException("actor.gc() is only valid inside an actor mailbox context");
+                    }
+                    return new Function(List.of(), Unknown.INSTANCE);
+                }
                 throw new IllegalArgumentException("unknown actor runtime member '" + member.member() + "'");
             }
             if (member.receiver() instanceof Ast.NameExpr name && name.name().equals("process")

@@ -294,16 +294,33 @@ final class LanguageHardeningTest {
 
 
     @Test
-    void gcRuntimeFacadesAreTypedAsZeroArgumentCalls() {
+    void gcRuntimeFacadesAreScopedAndTypedAsZeroArgumentCalls() {
         assertDoesNotThrow(() -> TypeChecker.check(Parser.parse("""
+                actor Worker {
+                  pub fnc maintenance() => void {
+                    actor.gc();
+                    return;
+                  }
+                }
+
                 define module app
                   fnc maintenance() => void {
                     process.gc();
-                    actor.gc();
                     return;
                   }
                 end
                 """)));
+
+        IllegalArgumentException outsideActor = assertThrows(IllegalArgumentException.class, () ->
+                TypeChecker.check(Parser.parse("""
+                        define module app
+                          fnc bad() => void {
+                            actor.gc();
+                            return;
+                          }
+                        end
+                        """)));
+        assertTrue(outsideActor.getMessage().contains("actor.gc() is only valid"));
 
         assertThrows(IllegalArgumentException.class, () -> TypeChecker.check(Parser.parse("""
                 define module app
