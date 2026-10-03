@@ -1,0 +1,25 @@
+name: oreslang-pr-133-exact-head
+on:
+  push:
+    branches:
+      - test/oreslang-pr-133-b10ba18
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Verify exact source blob manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files 'pom.xml' 'src/main/**' 'src/test/java/dev/oreslang/ParserTest.java' | while read -r f; do
+            git hash-object "$f"
+          done >/tmp/blob-shas.txt
+          test "$(wc -l </tmp/blob-shas.txt)" -eq 32
+      - name: Run ParserTest
+        run: mvn -q -Dtest=ParserTest test
