@@ -215,7 +215,13 @@ public final class Ast {
             Visibility visibility,
             BindingKind bindingKind,
             TypeRef type,
-            Expr initializer) implements Decl { }
+            List<Annotation> annotations,
+            Expr initializer) implements Decl {
+        public FieldDecl { annotations = List.copyOf(annotations); }
+        public FieldDecl(String name, Visibility visibility, BindingKind bindingKind, TypeRef type, Expr initializer) {
+            this(name, visibility, bindingKind, type, List.of(), initializer);
+        }
+    }
 
     public record MethodDecl(
             String name,
@@ -245,7 +251,8 @@ public final class Ast {
     public enum BindingKind { CONST, VAL, LET }
 
     public sealed interface Stmt permits BindingStmt, DestructureStmt, ReturnStmt, ExprStmt, DeferStmt,
-            IfStmt, TryStmt, ForOfStmt, ForStmt { }
+            BlockStmt, BreakStmt, ContinueStmt, IfStmt, MatchStmt, SwitchStmt, TryStmt,
+            ForOfStmt, ForOfDestructureStmt, ForStmt, LoopStmt { }
 
     public record BindingStmt(BindingKind kind, TypeRef declaredType, String name, Expr initializer) implements Stmt { }
     public record DestructureBinding(BindingKind kind, String name) {
@@ -277,6 +284,12 @@ public final class Ast {
     public record ExprStmt(Expr expression) implements Stmt { }
     public record DeferStmt(Expr expression) implements Stmt { }
 
+    public record BlockStmt(List<Stmt> body) implements Stmt {
+        public BlockStmt { body = List.copyOf(body); }
+    }
+    public record BreakStmt() implements Stmt { }
+    public record ContinueStmt() implements Stmt { }
+
     public record IfBranch(Expr condition, List<Stmt> body) {
         public IfBranch { body = List.copyOf(body); }
     }
@@ -285,6 +298,47 @@ public final class Ast {
         public IfStmt {
             branches = List.copyOf(branches);
             elseBody = List.copyOf(elseBody);
+        }
+    }
+
+    /**
+     * Oreslang patterns are language-level values for static analysis and native lowering.
+     * They deliberately do not encode JVM Class/instanceof semantics.
+     */
+    public sealed interface Pattern permits WildcardPattern, LiteralPattern, BindingPattern,
+            TypePattern, ConstructorPattern { }
+
+    public record WildcardPattern() implements Pattern { }
+    public record LiteralPattern(Object value) implements Pattern { }
+    public record BindingPattern(String name) implements Pattern { }
+    public record TypePattern(TypeRef type, String binding) implements Pattern { }
+    public record ConstructorPattern(String constructor, List<Pattern> arguments) implements Pattern {
+        public ConstructorPattern { arguments = List.copyOf(arguments); }
+    }
+
+    public record MatchArm(Pattern pattern, Expr guard, List<Stmt> body) {
+        public MatchArm { body = List.copyOf(body); }
+    }
+
+    /**
+     * ordered=false is the normal proof-checked form: arm predicates must be disjoint.
+     * ordered=true ("match first") is an explicit priority/first-match escape hatch.
+     */
+    public record MatchStmt(Expr subject, boolean ordered, List<MatchArm> arms) implements Stmt {
+        public MatchStmt { arms = List.copyOf(arms); }
+    }
+
+    public record SwitchCase(List<Expr> constants, List<Stmt> body) {
+        public SwitchCase {
+            constants = List.copyOf(constants);
+            body = List.copyOf(body);
+        }
+    }
+
+    public record SwitchStmt(Expr subject, List<SwitchCase> cases, List<Stmt> defaultBody) implements Stmt {
+        public SwitchStmt {
+            cases = List.copyOf(cases);
+            defaultBody = List.copyOf(defaultBody);
         }
     }
 
@@ -300,11 +354,29 @@ public final class Ast {
         public ForOfStmt { body = List.copyOf(body); }
     }
 
+    public record ForOfDestructureStmt(
+            List<DestructureBinding> bindings,
+            Expr iterable,
+            List<Stmt> body) implements Stmt {
+        public ForOfDestructureStmt {
+            bindings = List.copyOf(bindings);
+            body = List.copyOf(body);
+            if (bindings.isEmpty()) {
+                throw new IllegalArgumentException("for-of destructure pattern cannot be empty");
+            }
+        }
+    }
+
     public record ForStmt(Stmt initializer, Expr condition, Expr update, List<Stmt> body) implements Stmt {
         public ForStmt { body = List.copyOf(body); }
     }
 
+    public record LoopStmt(List<Stmt> body) implements Stmt {
+        public LoopStmt { body = List.copyOf(body); }
+    }
+
     public sealed interface Expr permits LiteralExpr, NameExpr, BinaryExpr, UnaryExpr, AssignExpr, ConditionalExpr,
+            TypeTestExpr, PatternTestExpr, CastExpr,
             CallExpr, MemberExpr, IndexExpr, NewExpr, AwaitExpr, ListExpr, TupleExpr, ObjectExpr, LambdaExpr { }
 
     public record LiteralExpr(Object value) implements Expr { }
@@ -314,6 +386,17 @@ public final class Ast {
     public record UnaryExpr(String operator, Expr operand) implements Expr { }
     public record AssignExpr(Expr target, Expr value) implements Expr { }
     public record ConditionalExpr(Expr condition, Expr whenTrue, Expr whenFalse) implements Expr { }
+
+    /** "value is Type [binding]" -- a nominal/refinement test, not general pattern matching. */
+    public record TypeTestExpr(Expr value, TypeRef targetType, String binding) implements Expr { }
+
+    /** "value matches Pattern" -- full pattern predicate, with bindings scoped by the enclosing condition. */
+    public record PatternTestExpr(Expr value, Pattern pattern) implements Expr { }
+
+    public enum CastMode { CHECKED, OPTIONAL }
+
+    /** "value as Type" or "value as? Type". */
+    public record CastExpr(Expr value, TypeRef targetType, CastMode mode) implements Expr { }
 
     public record CallExpr(
             Expr callee,
