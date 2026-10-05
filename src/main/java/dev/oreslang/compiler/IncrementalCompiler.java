@@ -1,5 +1,6 @@
 package dev.oreslang.compiler;
 
+import dev.oreslang.ast.AnnotationExpander;
 import dev.oreslang.ast.Ast;
 import dev.oreslang.parser.Parser;
 
@@ -27,6 +28,13 @@ public final class IncrementalCompiler {
     private final Map<String, CompiledUnit> cache = new LinkedHashMap<>();
 
     public synchronized BuildResult compile(Map<String, String> sources) {
+        return compile(sources, Map.of());
+    }
+
+    public synchronized BuildResult compile(
+            Map<String, String> sources,
+            Map<String, Map<String, String>> importResolutions) {
+        if (importResolutions == null) throw new IllegalArgumentException("import resolutions cannot be null");
         if (sources.isEmpty()) return new BuildResult(Map.of(), Set.of(), Set.of(), List.of());
 
         LinkedHashMap<String, String> normalized = new LinkedHashMap<>();
@@ -46,14 +54,16 @@ public final class IncrementalCompiler {
         // neither unit is recursively compiled while discovering the other.
         for (Map.Entry<String, String> entry : normalized.entrySet()) {
             hashes.put(entry.getKey(), digest(entry.getValue()));
-            Ast.Program program = Parser.parse(entry.getValue());
+            Ast.Program program = AnnotationExpander.expand(Parser.parse(entry.getValue()));
             parsed.put(entry.getKey(), program);
             abiHashes.put(entry.getKey(), abiDigest(program));
         }
 
-        ImportGraph.validateLinkedImports(parsed);
+        Map<String, Map<String, String>> normalizedImportResolutions =
+                normalizeImportResolutions(importResolutions);
+        ImportGraph.validateLinkedImports(parsed, normalizedImportResolutions);
         Map<String, Set<String>> dependencies =
-                ImportGraph.resolveDependencies(parsed, normalized.keySet());
+                ImportGraph.resolveDependencies(parsed, normalized.keySet(), normalizedImportResolutions);
         List<List<String>> initializationGroups = ImportGraph.initializationGroups(dependencies);
 
         LinkedHashSet<String> dirty = new LinkedHashSet<>();
@@ -157,6 +167,13 @@ public final class IncrementalCompiler {
             for (Ast.TypeRef iface : klass.interfaces()) abi.append(typeRef(iface)).append(',');
             abi.append('\n');
             for (Ast.FieldDecl field : klass.fields()) {
+                String fromJsonKey = AnnotationExpander.fromJsonKey(field);
+                if (fromJsonKey != null) {
+                    abi.append(" from-json ")
+                            .append(field.name()).append('=')
+                            .append(fromJsonKey.length()).append(':').append(fromJsonKey)
+                            .append(':').append(field.type() == null ? "<inferred>" : typeRef(field.type())).append('\n');
+                }
                 if (field.visibility() != Ast.Visibility.PUBLIC) continue;
                 abi.append(" field ").append(field.bindingKind()).append(' ')
                         .append(field.type() == null ? "<inferred:" + field.initializer() + ">" : typeRef(field.type()))
@@ -251,6 +268,31 @@ public final class IncrementalCompiler {
             }
         }
         return Set.copyOf(result);
+    }
+
+    private static Map<String, Map<String, String>> normalizeImportResolutions(
+            Map<String, Map<String, String>> importResolutions) {
+        LinkedHashMap<String, Map<String, String>> normalized = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, String>> importer : importResolutions.entrySet()) {
+            String importerId = normalizeUnitId(importer.getKey());
+            if (importer.getValue() == null) {
+                throw new IllegalArgumentException("import resolution map cannot be null for '" + importerId + "'");
+            }
+            LinkedHashMap<String, String> imports = new LinkedHashMap<>();
+            for (Map.Entry<String, String> resolution : importer.getValue().entrySet()) {
+                if (resolution.getKey() == null || resolution.getKey().isBlank()) {
+                    throw new IllegalArgumentException("resolved import path cannot be blank");
+                }
+                String targetId = normalizeUnitId(resolution.getValue());
+                String previous = imports.putIfAbsent(resolution.getKey(), targetId);
+                if (previous != null && !previous.equals(targetId)) {
+                    throw new IllegalArgumentException(
+                            "conflicting resolved import '" + resolution.getKey() + "' for '" + importerId + "'");
+                }
+            }
+            normalized.put(importerId, Map.copyOf(imports));
+        }
+        return Map.copyOf(normalized);
     }
 
     private static Map<String, Set<String>> reverseDependencies(Map<String, Set<String>> dependencies) {
