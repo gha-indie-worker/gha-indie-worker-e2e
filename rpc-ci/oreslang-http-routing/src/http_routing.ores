@@ -42,23 +42,23 @@ define module http_routing as
       for (let int index = 0; index < self.segments_value.size; index = index + 1) {
         val PathSegment segment = self.segments_value.get(index);
 
-        if segment.kind < 0 || segment.kind > 2; do
+        if segment.kind < 0 || segment.kind > 2; then
           return false;
         fi
 
-        if segment.kind == 1 || segment.kind == 2; do
-          if segment.value == ""; do
+        if segment.kind == 1 || segment.kind == 2; then
+          if segment.value == ""; then
             return false;
           fi
 
           for (let int earlier = 0; earlier < index; earlier = earlier + 1) {
             val PathSegment previous = self.segments_value.get(earlier);
-            if (previous.kind == 1 || previous.kind == 2) && previous.value == segment.value; do
+            if (previous.kind == 1 || previous.kind == 2) && previous.value == segment.value; then
               return false;
             fi
           }
 
-          if segment.kind == 2 && index != self.segments_value.size - 1; do
+          if segment.kind == 2 && index != self.segments_value.size - 1; then
             return false;
           fi
         fi
@@ -108,14 +108,14 @@ define module http_routing as
     }
 
     pub at(int offset) -> Option<String> {
-      if offset < 0 || offset >= self.count_value; do
+      if offset < 0 || offset >= self.count_value; then
         return None;
       fi
       return Some(self.path_value.segment_at(self.start_index + offset));
     }
 
     pub one() -> Option<String> {
-      if self.count_value != 1; do
+      if self.count_value != 1; then
         return None;
       fi
       return Some(self.path_value.segment_at(self.start_index));
@@ -211,7 +211,7 @@ define module http_routing as
 
     pub child_for_literal(String literal_value) -> int {
       for (let int index = 0; index < self.static_names.size; index = index + 1) {
-        if self.static_names.get(index) == literal_value; do
+        if self.static_names.get(index) == literal_value; then
           return self.static_children.get(index);
         fi
       }
@@ -239,7 +239,7 @@ define module http_routing as
 
     pub find_method(String method_value) -> int {
       for (let int index = 0; index < self.targets_value.size; index = index + 1) {
-        if self.targets_value.get(index).method == method_value; do
+        if self.targets_value.get(index).method == method_value; then
           return index;
         fi
       }
@@ -279,7 +279,7 @@ define module http_routing as
     let int max_match_steps_value = 4096;
 
     ensure_root(): void {
-      if self.nodes.size == 0; do
+      if self.nodes.size == 0; then
         self.nodes.add(new BuildNode());
       fi
       return;
@@ -301,14 +301,14 @@ define module http_routing as
     }
 
     pub set_limits(int max_segments, int max_match_steps) -> Result<bool, String> {
-      if max_segments <= 0; do
+      if max_segments <= 0; then
         return Err("max_segments must be positive");
       fi
-      if max_match_steps <= 0; do
+      if max_match_steps <= 0; then
         return Err("max_match_steps must be positive");
       fi
       for (const endpoint of self.endpoints) {
-        if endpoint.size() > max_segments; do
+        if endpoint.size() > max_segments; then
           return Err("max_segments is smaller than an already registered route");
         fi
       }
@@ -334,16 +334,16 @@ define module http_routing as
       int contract_id,
       String operation_id
     ) -> Result<bool, String> {
-      if method_value == ""; do
+      if method_value == ""; then
         return Err("HTTP method must not be empty");
       fi
-      if handler_id < 0; do
+      if handler_id < 0; then
         return Err("handler_id must be non-negative");
       fi
-      if !pattern.is_valid(); do
+      if !pattern.is_valid(); then
         return Err("invalid route pattern");
       fi
-      if pattern.size() > self.max_segments_value; do
+      if pattern.size() > self.max_segments_value; then
         return Err("route pattern exceeds max_segments");
       fi
 
@@ -354,26 +354,26 @@ define module http_routing as
         val PathSegment segment = pattern.segment_at(segment_index);
         val BuildNode current = self.nodes.get(node_index);
 
-        if segment.kind == 0; do
+        if segment.kind == 0; then
           let int child_index = current.child_for_literal(segment.value);
-          if child_index < 0; do
+          if child_index < 0; then
             child_index = self.new_node();
             current.add_literal(segment.value, child_index);
           fi
           node_index = child_index;
-        elseif segment.kind == 1; do
-          if current.param_child < 0; do
+        elseif segment.kind == 1; then
+          if current.param_child < 0; then
             current.param_child = self.new_node();
             current.param_name = segment.value;
-          elseif current.param_name != segment.value; do
+          elseif current.param_name != segment.value; then
             return Err("conflicting parameter name at the same route position");
           fi
           node_index = current.param_child;
         else
-          if current.wildcard_child < 0; do
+          if current.wildcard_child < 0; then
             current.wildcard_child = self.new_node();
             current.wildcard_name = segment.value;
-          elseif current.wildcard_name != segment.value; do
+          elseif current.wildcard_name != segment.value; then
             return Err("conflicting wildcard name at the same route position");
           fi
           node_index = current.wildcard_child;
@@ -382,19 +382,19 @@ define module http_routing as
 
       val BuildNode leaf = self.nodes.get(node_index);
 
-      if leaf.endpoint_index < 0; do
+      if leaf.endpoint_index < 0; then
         self.endpoints.add(new BuildEndpoint(pattern.copy()));
         leaf.endpoint_index = self.endpoints.size - 1;
       else
         val BuildEndpoint existing_endpoint = self.endpoints.get(leaf.endpoint_index);
-        if existing_endpoint.template() != pattern.template(); do
+        if existing_endpoint.template() != pattern.template(); then
           return Err("same route shape registered with a different canonical template");
         fi
       fi
 
       val BuildEndpoint endpoint = self.endpoints.get(leaf.endpoint_index);
 
-      if endpoint.find_method(method_value) >= 0; do
+      if endpoint.find_method(method_value) >= 0; then
         return Err("duplicate method for route");
       fi
 
@@ -526,7 +526,7 @@ define module http_routing as
 
       for (let int offset = 0; offset < count; offset = offset + 1) {
         val int edge_index = start + offset;
-        if self.static_literals.get(edge_index) == segment; do
+        if self.static_literals.get(edge_index) == segment; then
           return self.static_children.get(edge_index);
         fi
       }
@@ -540,19 +540,19 @@ define module http_routing as
       RequestPath request_path_value,
       SearchBudget budget
     ) -> int {
-      if budget.remaining <= 0; do
+      if budget.remaining <= 0; then
         return -2;
       fi
       budget.remaining = budget.remaining - 1;
 
-      if segment_index == request_path_value.size(); do
+      if segment_index == request_path_value.size(); then
         val int endpoint_index = self.node_endpoint.get(node_index);
-        if endpoint_index >= 0; do
+        if endpoint_index >= 0; then
           return endpoint_index;
         fi
 
         val int empty_wildcard = self.node_wildcard_child.get(node_index);
-        if empty_wildcard >= 0; do
+        if empty_wildcard >= 0; then
           return self.match_node(empty_wildcard, segment_index, request_path_value, budget);
         fi
 
@@ -562,33 +562,33 @@ define module http_routing as
       val String current_segment = request_path_value.segment_at(segment_index);
 
       val int literal_child = self.static_child(node_index, current_segment);
-      if literal_child >= 0; do
+      if literal_child >= 0; then
         val int literal_match = self.match_node(
           literal_child,
           segment_index + 1,
           request_path_value,
           budget
         );
-        if literal_match != -1; do
+        if literal_match != -1; then
           return literal_match;
         fi
       fi
 
       val int parameter_child = self.node_param_child.get(node_index);
-      if parameter_child >= 0; do
+      if parameter_child >= 0; then
         val int parameter_match = self.match_node(
           parameter_child,
           segment_index + 1,
           request_path_value,
           budget
         );
-        if parameter_match != -1; do
+        if parameter_match != -1; then
           return parameter_match;
         fi
       fi
 
       val int wildcard_child = self.node_wildcard_child.get(node_index);
-      if wildcard_child >= 0; do
+      if wildcard_child >= 0; then
         return self.match_node(
           wildcard_child,
           request_path_value.size(),
@@ -602,20 +602,20 @@ define module http_routing as
 
     target_for_method(Endpoint endpoint, String method_value) -> int {
       for (let int index = 0; index < endpoint.target_count(); index = index + 1) {
-        if endpoint.target_at(index).method == method_value; do
+        if endpoint.target_at(index).method == method_value; then
           return index;
         fi
       }
 
       for (let int index = 0; index < endpoint.target_count(); index = index + 1) {
-        if endpoint.target_at(index).method == "*"; do
+        if endpoint.target_at(index).method == "*"; then
           return index;
         fi
       }
 
-      if method_value == "HEAD" && self.automatic_head_value; do
+      if method_value == "HEAD" && self.automatic_head_value; then
         for (let int index = 0; index < endpoint.target_count(); index = index + 1) {
-          if endpoint.target_at(index).method == "GET"; do
+          if endpoint.target_at(index).method == "GET"; then
             return index;
           fi
         }
@@ -626,7 +626,7 @@ define module http_routing as
 
     has_method(Endpoint endpoint, String method_value) -> bool {
       for (let int index = 0; index < endpoint.target_count(); index = index + 1) {
-        if endpoint.target_at(index).method == method_value; do
+        if endpoint.target_at(index).method == method_value; then
           return true;
         fi
       }
@@ -634,25 +634,25 @@ define module http_routing as
     }
 
     pub resolve(String method_value, RequestPath request_path_value) -> Decision {
-      if request_path_value.size() > self.max_segments_value; do
+      if request_path_value.size() > self.max_segments_value; then
         return new Decision(4, -1, -1, -1, -1, -1, "", "", false, request_path_value);
       fi
 
       let SearchBudget budget = new SearchBudget(self.max_match_steps_value);
       val int endpoint_index = self.match_node(0, 0, request_path_value, budget);
 
-      if endpoint_index == -2; do
+      if endpoint_index == -2; then
         return new Decision(4, -1, -1, -1, -1, -1, "", "", false, request_path_value);
       fi
 
-      if endpoint_index < 0; do
+      if endpoint_index < 0; then
         return new Decision(1, -1, -1, -1, -1, -1, "", "", false, request_path_value);
       fi
 
       val Endpoint endpoint = self.endpoints.get(endpoint_index);
       val int target_index = self.target_for_method(endpoint, method_value);
 
-      if target_index >= 0; do
+      if target_index >= 0; then
         val RouteTarget target = endpoint.target_at(target_index);
         return new Decision(
           0,
@@ -668,7 +668,7 @@ define module http_routing as
         );
       fi
 
-      if method_value == "OPTIONS" && self.automatic_options_value; do
+      if method_value == "OPTIONS" && self.automatic_options_value; then
         return new Decision(
           3,
           endpoint_index,
@@ -698,7 +698,7 @@ define module http_routing as
     }
 
     pub capture(Decision decision, String name) -> Option<PathCapture> {
-      if decision.endpoint_index < 0; do
+      if decision.endpoint_index < 0; then
         return None;
       fi
 
@@ -708,15 +708,15 @@ define module http_routing as
       for (let int pattern_index = 0; pattern_index < endpoint.pattern().size(); pattern_index = pattern_index + 1) {
         val PathSegment segment = endpoint.pattern().segment_at(pattern_index);
 
-        if segment.kind == 0; do
+        if segment.kind == 0; then
           request_index = request_index + 1;
-        elseif segment.kind == 1; do
-          if segment.value == name; do
+        elseif segment.kind == 1; then
+          if segment.value == name; then
             return Some(new PathCapture(decision.path(), request_index, 1));
           fi
           request_index = request_index + 1;
         else
-          if segment.value == name; do
+          if segment.value == name; then
             return Some(new PathCapture(
               decision.path(),
               request_index,
@@ -732,25 +732,25 @@ define module http_routing as
 
     pub capture_one(Decision decision, String name) -> Option<String> {
       val Option<PathCapture> captured = self.capture(decision, name);
-      if captured.is_none(); do
+      if captured.is_none(); then
         return None;
       fi
       return captured.unwrap().one();
     }
 
     pub allow_count(Decision decision) -> int {
-      if decision.endpoint_index < 0; do
+      if decision.endpoint_index < 0; then
         return 0;
       fi
 
       val Endpoint endpoint = self.endpoints.get(decision.endpoint_index);
       let int count = endpoint.target_count();
 
-      if self.automatic_head_value && self.has_method(endpoint, "GET") && !self.has_method(endpoint, "HEAD"); do
+      if self.automatic_head_value && self.has_method(endpoint, "GET") && !self.has_method(endpoint, "HEAD"); then
         count = count + 1;
       fi
 
-      if self.automatic_options_value && !self.has_method(endpoint, "OPTIONS"); do
+      if self.automatic_options_value && !self.has_method(endpoint, "OPTIONS"); then
         count = count + 1;
       fi
 
@@ -758,26 +758,26 @@ define module http_routing as
     }
 
     pub allow_method_at(Decision decision, int requested_index) -> Option<String> {
-      if decision.endpoint_index < 0 || requested_index < 0; do
+      if decision.endpoint_index < 0 || requested_index < 0; then
         return None;
       fi
 
       val Endpoint endpoint = self.endpoints.get(decision.endpoint_index);
-      if requested_index < endpoint.target_count(); do
+      if requested_index < endpoint.target_count(); then
         return Some(endpoint.target_at(requested_index).method);
       fi
 
       let int synthetic_index = endpoint.target_count();
 
-      if self.automatic_head_value && self.has_method(endpoint, "GET") && !self.has_method(endpoint, "HEAD"); do
-        if requested_index == synthetic_index; do
+      if self.automatic_head_value && self.has_method(endpoint, "GET") && !self.has_method(endpoint, "HEAD"); then
+        if requested_index == synthetic_index; then
           return Some("HEAD");
         fi
         synthetic_index = synthetic_index + 1;
       fi
 
-      if self.automatic_options_value && !self.has_method(endpoint, "OPTIONS"); do
-        if requested_index == synthetic_index; do
+      if self.automatic_options_value && !self.has_method(endpoint, "OPTIONS"); then
+        if requested_index == synthetic_index; then
           return Some("OPTIONS");
         fi
       fi
