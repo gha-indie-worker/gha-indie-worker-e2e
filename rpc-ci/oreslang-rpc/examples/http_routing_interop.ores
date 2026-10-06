@@ -1,0 +1,57 @@
+import module rpc from "../src/rpc";
+import module http_routing from "http_routing";
+
+pub routine main(): void {
+  // One authoritative RPC definition can produce an HTTP handler binding.
+  val get_user = rpc.rpc_method(
+    42,
+    "Users",
+    "GetUser",
+    "users.get",
+    "GetUserRequest",
+    "User"
+  );
+
+  val handler = rpc.http_from_rpc(
+    &get_user,
+    "GET",
+    "/users/{id}",
+    1001,
+    7
+  );
+
+  let routes = http_routing.builder();
+  val pattern = http_routing.path("/users/{id}", arr[
+    http_routing.literal("users"),
+    http_routing.param("id")
+  ]);
+
+  // The exact metadata seam used by oreslang-http-routing.
+  routes.route(
+    handler.method,
+    pattern,
+    handler.handler_id,
+    handler.pipeline_id,
+    handler.contract_id,
+    handler.operation_id
+  ).unwrap();
+
+  // The reverse direction is equally explicit: route/handler metadata can be
+  // represented as HttpHandlerDef and raised back into an RPC definition.
+  val discovered = rpc.http_handler(
+    "GET",
+    "/users/{id}",
+    1001,
+    7,
+    42,
+    "users.get",
+    "Users",
+    "GetUser",
+    "GetUserRequest",
+    "User"
+  );
+
+  val rpc_again = rpc.rpc_from_http(&discovered);
+  stdio.println(rpc_again.operation_id);
+  return;
+}

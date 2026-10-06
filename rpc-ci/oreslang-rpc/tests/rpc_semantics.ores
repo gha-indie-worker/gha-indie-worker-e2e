@@ -36,6 +36,9 @@ pub routine main(): void {
     1001,
     7
   ));
+  contracts_builder.add_http_field_binding(
+    rpc.http_path_field(42, "id", "id")
+  ).unwrap();
 
   val built = contracts_builder.build();
   stdio.println(built.is_ok());
@@ -87,6 +90,23 @@ pub routine main(): void {
   stdio.println(bundle.protobuf.has_part("GetUser"));
   stdio.println(bundle.messagepack.has_part("mpackdef 1"));
   stdio.println(bundle.typespec.has_part("@get"));
+  stdio.println(bundle.typespec.has_part("  @path(\""));
+  stdio.println(bundle.typespec.has_part("interface "));
+
+  // Unsupported HTTP methods fail closed instead of producing ambiguous
+  // TypeSpec transport semantics.
+  stdio.println(rpc.http_handler(
+    "OPTIONS",
+    "/users/{id}",
+    1003,
+    7,
+    44,
+    "users.options",
+    "Users",
+    "OptionsUser",
+    "GetUserRequest",
+    "User"
+  ).is_valid());
 
   // Streaming RPC metadata reaches the gRPC emitter without magic integers.
   let stream_builder = rpc.builder();
@@ -217,6 +237,53 @@ pub routine main(): void {
     "User"
   )));
   stdio.println(mismatch_builder.build().is_err());
+
+  // HTTP field bindings must name real request fields.
+  let unknown_binding_builder = rpc.builder();
+  unknown_binding_builder.add_message(rpc.message("Req", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false)
+  ])).unwrap();
+  unknown_binding_builder.add_message(rpc.message("Res", arr[
+    rpc.field("ok", 1, "1", rpc.bool_type(), true, false)
+  ])).unwrap();
+  unknown_binding_builder.add_rpc_as_http(
+    rpc.rpc_method(120, "Test", "UnknownField", "test.unknown", "Req", "Res"),
+    "GET",
+    "/unknown/{missing}",
+    3001,
+    1
+  ).unwrap();
+  unknown_binding_builder.add_http_field_binding(
+    rpc.http_path_field(120, "missing", "missing")
+  ).unwrap();
+  stdio.println(unknown_binding_builder.build().is_err());
+
+  // Path parameters cannot point at optional request fields.
+  let optional_path_builder = rpc.builder();
+  optional_path_builder.add_message(rpc.message("OptionalReq", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), false, false)
+  ])).unwrap();
+  optional_path_builder.add_message(rpc.message("OptionalRes", arr[
+    rpc.field("ok", 1, "1", rpc.bool_type(), true, false)
+  ])).unwrap();
+  optional_path_builder.add_rpc_as_http(
+    rpc.rpc_method(
+      121,
+      "Test",
+      "OptionalPath",
+      "test.optional_path",
+      "OptionalReq",
+      "OptionalRes"
+    ),
+    "GET",
+    "/optional/{id}",
+    3002,
+    1
+  ).unwrap();
+  optional_path_builder.add_http_field_binding(
+    rpc.http_path_field(121, "id", "id")
+  ).unwrap();
+  stdio.println(optional_path_builder.build().is_err());
 
   // Fail closed when an RPC references a message not present in the registry.
   let missing_builder = rpc.builder();
