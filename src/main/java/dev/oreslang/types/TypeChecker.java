@@ -332,6 +332,13 @@ public final class TypeChecker {
                     && fn.actorKind() == Ast.ActorKind.NONE) {
                 Type signature = callableContractType(
                         fn.genericParameters(), fn.parameters(), fn.returnType(), fn.async(), fn.generator(), Set.of(), null);
+                if (fn.trapped() && signature instanceof Function trappedSignature) {
+                    signature = new Function(
+                            trappedSignature.parameters(),
+                            trappedSignature.mutableParameters(),
+                            trappedSignature.async(),
+                            trapResult(true, trappedSignature.result()));
+                }
 
                 // Only concretely reifiable fnc declarations become raw
                 // function-valued namespace members. Routines remain
@@ -401,6 +408,17 @@ public final class TypeChecker {
     }
 
     private void checkFunction(String module, Ast.FunctionDecl fn) {
+        if (fn.trapped()) {
+            if (fn.async()) {
+                throw new IllegalArgumentException("async trap callables are not enabled until the trap boundary spans every await");
+            }
+            if (fn.generator()) {
+                throw new IllegalArgumentException("trap generators are not enabled until the trap boundary spans generator suspension");
+            }
+            if (fn.actorKind() != Ast.ActorKind.NONE) {
+                throw new IllegalArgumentException("trap actor callables are not enabled until actor supervision preserves the trap effect");
+            }
+        }
         if (fn.name().equals("init")) {
             Ast.TypeRef initReturn = fn.returnType();
             if (fn.visibility() != Ast.Visibility.PRIVATE
@@ -408,6 +426,7 @@ public final class TypeChecker {
                     || fn.generator()
                     || fn.structural()
                     || fn.nonLexical()
+                    || fn.trapped()
                     || fn.actorKind() != Ast.ActorKind.NONE
                     || !fn.genericParameters().isEmpty()
                     || !fn.parameters().isEmpty()
@@ -1293,7 +1312,7 @@ public final class TypeChecker {
                             "generic callable '" + fn.name()
                                     + "' must be specialized by a direct call; polymorphic function values are not supported yet");
                 }
-                return functionType(fn.parameters(), fn.returnType(), fn.async(), fn.generator(), Set.of(), null);
+                return trapFunctionType(fn, Set.of(), null);
             }
             throw new IllegalArgumentException("unknown name '" + name.name() + "'");
         }
@@ -1480,7 +1499,7 @@ public final class TypeChecker {
                             null,
                             explicitGenericBindings(target.genericParameters(), call.typeArguments(), generics, self, label),
                             label);
-                    return callableResult(target.async(), target.generator(), result);
+                    return trapResult(target.trapped(), callableResult(target.async(), target.generator(), result));
                 }
             }
             String booleanIntrinsic = booleanIntrinsicName(call, env);
@@ -1513,7 +1532,7 @@ public final class TypeChecker {
                             null,
                             explicitGenericBindings(target.genericParameters(), call.typeArguments(), generics, self, label),
                             label);
-                    return callableResult(target.async(), target.generator(), result);
+                    return trapResult(target.trapped(), callableResult(target.async(), target.generator(), result));
                 }
             }
             if (call.callee() instanceof Ast.MemberExpr channelCall
@@ -1992,7 +2011,7 @@ public final class TypeChecker {
                                 "generic callable '" + namespace.name() + "." + member.member()
                                         + "' must be specialized by a direct call; polymorphic function values are not supported yet");
                     }
-                    return functionType(moduleFunction.parameters(), moduleFunction.returnType(), moduleFunction.async(), moduleFunction.generator(), Set.of(), null);
+                    return trapFunctionType(moduleFunction, Set.of(), null);
                 }
                 Ast.ClassDecl memberClass = classes.get(namespace.name() + "." + member.member());
                 if (memberClass != null) return new ClassNamespace(qualifiedClassName(memberClass));
@@ -2004,6 +2023,8 @@ public final class TypeChecker {
             }
             Type receiver = typeOf(member.receiver(), env, generics, self);
             Type sumReceiver = receiverDispatchType(deref(receiver));
+            Type futureMember = builtinFutureMember(sumReceiver, member.member());
+            if (futureMember != null) return futureMember;
             Type collectionMember = builtinCollectionMember(sumReceiver, member.member());
             if (collectionMember != null) return collectionMember;
             if (sumReceiver instanceof ListType || sumReceiver instanceof Tuple) {
@@ -2291,10 +2312,10 @@ public final class TypeChecker {
             // remain Unknown until collection generic constraints are richer.
             typeOf(selected.cases(), env, generics, self);
             Type result = new Named("SelectResult", List.of());
+            Type optional = new Named("Option", List.of(result));
             return switch (selected.mode()) {
-                case BLOCKING -> result;
-                case NONBLOCKING -> new Named("Future", List.of(result));
-                case IMMEDIATE -> new Named("Option", List.of(result));
+                case BLOCKING, IMMEDIATE -> optional;
+                case NONBLOCKING -> new Named("Future", List.of(optional));
             };
         }
         if (expr instanceof Ast.ListExpr list) {
@@ -3359,6 +3380,29 @@ public final class TypeChecker {
         return type;
     }
 
+    private Type builtinFutureMember(Type receiver, String member) {
+        if (!(receiver instanceof Named named)
+                || !named.name().equals("Future")
+                || named.arguments().size() != 1) {
+            return null;
+        }
+
+        Type element = named.arguments().getFirst();
+        Type unknownFuture = new Named("Future", List.of(Unknown.INSTANCE));
+        return switch (member) {
+            case "map" -> new Function(
+                    List.of(new Function(List.of(element), Unknown.INSTANCE)),
+                    unknownFuture);
+            case "compose", "flatMap" -> new Function(
+                    List.of(new Function(List.of(element), unknownFuture)),
+                    unknownFuture);
+            case "onSuccess" -> new Function(
+                    List.of(new Function(List.of(element), Primitive.VOID)),
+                    named);
+            default -> null;
+        };
+    }
+
     private Type builtinOptionResultMember(Type receiver, String member) {
         if (!(receiver instanceof Named named)) return null;
         if (named.name().equals("Option") && named.arguments().size() == 1) {
@@ -4222,6 +4266,26 @@ public final class TypeChecker {
             throw new IllegalArgumentException("conflicting member '" + name + "' in " + owner + ": " + existing + " vs " + type);
         }
         members.put(name, type);
+    }
+
+    private Type trapResult(boolean trapped, Type result) {
+        return trapped ? new Named("Option", List.of(result)) : result;
+    }
+
+    private Function trapFunctionType(Ast.FunctionDecl fn, Set<String> generics, Type self) {
+        Function raw = functionType(
+                fn.parameters(),
+                fn.returnType(),
+                fn.async(),
+                fn.generator(),
+                generics,
+                self);
+        if (!fn.trapped()) return raw;
+        return new Function(
+                raw.parameters(),
+                raw.mutableParameters(),
+                raw.async(),
+                trapResult(true, raw.result()));
     }
 
     private Type callableResult(boolean async, boolean generator, Type result) {
@@ -5093,7 +5157,6 @@ public final class TypeChecker {
             case "Option" -> {
                 if (ref.inferArguments() || ref.arguments().size() != 1) throw new IllegalArgumentException("Option requires exactly one explicit type argument");
                 Type element = resolve(ref.arguments().getFirst(), generics, self, true);
-                if (element == Primitive.VOID) throw new IllegalArgumentException("Option<void> is invalid; use void for no return value");
                 yield new Named("Option", List.of(element));
             }
             case "Result" -> {
