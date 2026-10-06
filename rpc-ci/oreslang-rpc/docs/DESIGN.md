@@ -24,6 +24,8 @@ HTTP is a binding of an RPC contract, not a second source of truth. `rpc_from_ht
 
 The path pattern itself stays with the routing library. RPC stores the canonical path template so generated TypeSpec/front-end clients see the same public route identity.
 
+`HttpFieldBindingDef` adds the transport-specific request projection. A request field may be bound to an HTTP path, query parameter, header, or cookie while the underlying `MessageDef` remains transport-neutral. The builder verifies that the HTTP contract exists, that the field exists on the RPC request type, and that path-bound fields are required. Unbound request properties remain HTTP body/payload data in TypeSpec output.
+
 ## Code generation
 
 All emitters are native Oreslang:
