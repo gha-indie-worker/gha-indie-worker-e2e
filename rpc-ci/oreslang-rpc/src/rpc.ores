@@ -499,12 +499,12 @@ define module rpc as
         let bool found = false;
         for (const method_value of self.methods_value) {
           if method_value.contract_id == handler_value.contract_id &&
-             method_value.operation_id == handler_value.operation_id; do
+             method_value.operation_id == handler_value.operation_id; then
             if method_value.service != handler_value.rpc_service ||
                method_value.name != handler_value.rpc_name ||
                method_value.request_type != handler_value.request_type ||
                method_value.response_type != handler_value.response_type ||
-               method_value.streaming_kind != handler_value.streaming_kind; do
+               method_value.streaming_kind != handler_value.streaming_kind; then
               return Err("HTTP/RPC contract metadata mismatch");
             fi
             found = true;
