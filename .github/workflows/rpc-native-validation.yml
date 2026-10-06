@@ -1,0 +1,52 @@
+name: rpc-native-validation
+
+on:
+  push:
+    branches: ["feat/rpc-native-validation-20261006"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rpc-native-validation
+  cancel-in-progress: true
+
+jobs:
+  rpc:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify mirrored compiler blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          while read -r expected path; do
+            actual="$(git hash-object "$path")"
+            test "$actual" = "$expected" || {
+              echo "::error file=$path::compiler blob mismatch expected=$expected actual=$actual"
+              exit 1
+            }
+          done < rpc-ci/compiler-blobs.txt
+          test "$(wc -l < rpc-ci/compiler-blobs.txt)" -eq 56
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+      - name: Compile current compiler slice
+        run: mvn -B -ntp -Dmaven.test.skip=true compile
+      - name: Typecheck native RPC library
+        run: mvn -B -ntp -Dmaven.test.skip=true exec:java -Dexec.args="--check --platform=server rpc-ci/main.ores"
+      - name: Execute RPC semantics and generators
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -q -Dstyle.color=never -Dmaven.test.skip=true exec:java -Dexec.args="--platform=server rpc-ci/main.ores" > rpc-ci/actual.txt
+          diff -u rpc-ci/expected.txt rpc-ci/actual.txt
