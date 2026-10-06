@@ -5413,6 +5413,44 @@ public final class OresEvalRootNode extends RootNode {
                 }
                 throw new IllegalArgumentException("unknown member " + object.klass.name() + "." + name);
             }
+            if (receiver instanceof List<?> rawList) {
+                return switch (name) {
+                    case "size" -> (long) rawList.size();
+                    case "get" -> (Invokable) args -> {
+                        requireOne(args, "List.get");
+                        Object index = args.getFirst();
+                        if (!(index instanceof Number number)) {
+                            throw new IllegalArgumentException(
+                                    "List.get index must be an integer");
+                        }
+                        return rawList.get(Math.toIntExact(number.longValue()));
+                    };
+                    case "add" -> (Invokable) args -> {
+                        requireOne(args, "List.add");
+                        @SuppressWarnings("unchecked")
+                        List<Object> list = (List<Object>) rawList;
+                        list.add(args.getFirst());
+                        return null;
+                    };
+                    case "set" -> (Invokable) args -> {
+                        if (args.size() != 2) {
+                            throw new IllegalArgumentException(
+                                    "List.set expects exactly 2 argument(s)");
+                        }
+                        Object index = args.getFirst();
+                        if (!(index instanceof Number number)) {
+                            throw new IllegalArgumentException(
+                                    "List.set index must be an integer");
+                        }
+                        @SuppressWarnings("unchecked")
+                        List<Object> list = (List<Object>) rawList;
+                        list.set(Math.toIntExact(number.longValue()), args.get(1));
+                        return null;
+                    };
+                    default -> throw new IllegalArgumentException(
+                            "unknown List member " + name);
+                };
+            }
             if (receiver instanceof DynamicStructValue dynamic) {
                 if (!dynamic.fields.containsKey(name)) {
                     throw new IllegalArgumentException("unknown DynamicStruct member " + name);
