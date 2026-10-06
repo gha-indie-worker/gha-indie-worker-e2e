@@ -597,7 +597,7 @@ define module rpc as
     pub val TextDocument typespec;
   end
 
-  emit_json_type(TextDocument out, TypeRef type_value): void {
+  fnc emit_json_type(TextDocument out, TypeRef type_value): void {
     if type_value.kind == 0; do
       out.write("{\"type\":\"string\"}");
     elseif type_value.kind == 1; do
@@ -620,7 +620,7 @@ define module rpc as
     return;
   }
 
-  emit_proto_type(TextDocument out, TypeRef type_value): void {
+  fnc emit_proto_type(TextDocument out, TypeRef type_value): void {
     if type_value.kind == 0; do
       out.write("string");
     elseif type_value.kind == 1; do
@@ -645,7 +645,7 @@ define module rpc as
     return;
   }
 
-  emit_typespec_type(TextDocument out, TypeRef type_value): void {
+  fnc emit_typespec_type(TextDocument out, TypeRef type_value): void {
     if type_value.kind == 0; do
       out.write("string");
     elseif type_value.kind == 1; do
@@ -670,7 +670,7 @@ define module rpc as
     return;
   }
 
-  emit_msgpack_type(TextDocument out, TypeRef type_value): void {
+  fnc emit_msgpack_type(TextDocument out, TypeRef type_value): void {
     if type_value.kind == 0; do
       out.write("str");
     elseif type_value.kind == 1; do
