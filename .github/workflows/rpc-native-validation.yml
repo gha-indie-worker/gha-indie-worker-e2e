@@ -20,10 +20,15 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Verify mirrored compiler blobs
+
+      - name: Verify exact mirrored provenance
         shell: bash
         run: |
           set -euo pipefail
+          grep -Fx "compiler_source=ores-truffle-oreslang/oreslang-source.java@9cd0dc9eae40669827062dcc05c5c1fe6a924895" rpc-ci/PROVENANCE.txt
+          grep -Fx "rpc_source=ores-truffle-oreslang/oreslang-rpc@014ade3547aab9bb13b739a19b17f065597ab036" rpc-ci/PROVENANCE.txt
+          grep -Fx "rpc_tree=7c41aa026305f7cd08bd5003bd4f20d6a0cfaf91" rpc-ci/PROVENANCE.txt
+          test "$(git rev-parse HEAD:rpc-ci/oreslang-rpc)" = "7c41aa026305f7cd08bd5003bd4f20d6a0cfaf91"
           while read -r expected path; do
             actual="$(git hash-object "$path")"
             test "$actual" = "$expected" || {
@@ -32,6 +37,7 @@ jobs:
             }
           done < rpc-ci/compiler-blobs.txt
           test "$(wc -l < rpc-ci/compiler-blobs.txt)" -eq 56
+
       - name: Set up GraalVM
         uses: graalvm/setup-graalvm@v1
         with:
@@ -40,13 +46,45 @@ jobs:
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cache: maven
-      - name: Compile current compiler slice
+
+      - name: Compile exact compiler mirror
         run: mvn -B -ntp -Dmaven.test.skip=true compile
-      - name: Typecheck native RPC library
-        run: mvn -B -ntp -Dmaven.test.skip=true exec:java -Dexec.args="--check --platform=server rpc-ci/main.ores"
+
+      - name: Typecheck native collection regression
+        run: mvn -B -ntp -Dmaven.test.skip=true exec:java -Dexec.args="--check --platform=server rpc-ci/collection-runtime/main.ores"
+
+      - name: Execute native collection regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -q -Dstyle.color=never -Dmaven.test.skip=true exec:java -Dexec.args="--platform=server rpc-ci/collection-runtime/main.ores" > rpc-ci/collection-runtime/actual.txt
+          diff -u rpc-ci/collection-runtime/expected.txt rpc-ci/collection-runtime/actual.txt
+
+      - name: Run native collection regression test
+        run: mvn -B -ntp -Dtest=NativeCollectionMemberRuntimeTest test
+
+      - name: Typecheck HTTP routing module directly
+        run: mvn -B -ntp -Dmaven.test.skip=true exec:java -Dexec.args="--check --platform=server rpc-ci/oreslang-http-routing/src/http_routing.ores"
+
+      - name: Typecheck native RPC module directly
+        run: mvn -B -ntp -Dmaven.test.skip=true exec:java -Dexec.args="--check --platform=server rpc-ci/oreslang-rpc/src/rpc.ores"
+
+      - name: Typecheck linked RPC semantics
+        run: mvn -B -ntp -Dmaven.test.skip=true exec:java -Dexec.args="--check --platform=server rpc-ci/oreslang-rpc/tests/rpc_semantics.ores"
+
       - name: Execute RPC semantics and generators
         shell: bash
         run: |
           set -euo pipefail
-          mvn -q -Dstyle.color=never -Dmaven.test.skip=true exec:java -Dexec.args="--platform=server rpc-ci/main.ores" > rpc-ci/actual.txt
-          diff -u rpc-ci/expected.txt rpc-ci/actual.txt
+          mvn -q -Dstyle.color=never -Dmaven.test.skip=true exec:java -Dexec.args="--platform=server rpc-ci/oreslang-rpc/tests/rpc_semantics.ores" > rpc-ci/oreslang-rpc/tests/actual.txt
+          diff -u rpc-ci/oreslang-rpc/tests/expected.txt rpc-ci/oreslang-rpc/tests/actual.txt
+
+      - name: Typecheck RPC HTTP-routing integration
+        run: mvn -B -ntp -Dmaven.test.skip=true exec:java -Dexec.args="--check --platform=server rpc-ci/http-interop/main.ores"
+
+      - name: Execute RPC HTTP-routing round trip
+        shell: bash
+        run: |
+          set -euo pipefail
+          mvn -q -Dstyle.color=never -Dmaven.test.skip=true exec:java -Dexec.args="--platform=server rpc-ci/http-interop/main.ores" > rpc-ci/http-interop/actual.txt
+          diff -u rpc-ci/http-interop/expected.txt rpc-ci/http-interop/actual.txt
