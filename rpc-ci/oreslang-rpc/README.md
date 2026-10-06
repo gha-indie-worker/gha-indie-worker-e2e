@@ -35,6 +35,20 @@ The routing library owns path matching and dispatch. The RPC library owns wire-c
 
 A route generated from an RPC definition therefore preserves the exact IDs expected by `RouterBuilder.route(...)`. The reverse direction accepts those same HTTP handler fields and raises them into an RPC method.
 
+HTTP request fields can also be bound explicitly without polluting the transport-neutral message type:
+
+```ores
+contracts.add_http_field_binding(
+  rpc.http_path_field(42, "id", "id")
+).unwrap();
+
+contracts.add_http_field_binding(
+  rpc.http_query_field(42, "include_deleted", "includeDeleted")
+).unwrap();
+```
+
+Path/query/header/cookie bindings are validated against the RPC request message. Path fields must be required. Unbound request fields remain payload/body data when TypeSpec is generated.
+
 See `examples/http_routing_interop.ores`.
 
 ## Contract model

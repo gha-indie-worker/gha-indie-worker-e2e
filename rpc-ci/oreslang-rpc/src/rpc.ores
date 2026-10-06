@@ -1360,8 +1360,9 @@ define module rpc as
           val RpcMethodDef method_value = contracts.method_at(sibling_index);
           if method_value.service == first_method.service; then
             val Option<HttpHandlerDef> http_value = contracts.http_by_contract(method_value.contract_id);
+            val bool has_http_binding = http_value.is_some();
 
-            if http_value.is_some(); then
+            if has_http_binding; then
               val HttpHandlerDef handler_value = http_value.unwrap();
               out.write("@route(\"");
               out.write(handler_value.path_template);
@@ -1383,7 +1384,7 @@ define module rpc as
 
             out.write("op ");
             out.write(method_value.name);
-            if http_value.is_some(); then
+            if has_http_binding; then
               out.write("(...");
               out.write(method_value.service);
               out.write("_");
