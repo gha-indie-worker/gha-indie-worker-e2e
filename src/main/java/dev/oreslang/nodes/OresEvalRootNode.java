@@ -3705,6 +3705,15 @@ public final class OresEvalRootNode extends RootNode {
                 Ast.NewExpr created,
                 List<Object> args,
                 Env env) {
+            if (created.type().name().equals("Array")
+                    || created.type().name().equals("List")) {
+                if (!args.isEmpty()) {
+                    throw new IllegalArgumentException(
+                            created.type().name()
+                                    + "<T> constructor takes no positional arguments");
+                }
+                return new ArrayList<>();
+            }
             if (created.type().name().equals("DynamicStruct")) {
                 if (!args.isEmpty()) {
                     throw new IllegalArgumentException(
@@ -5176,6 +5185,15 @@ public final class OresEvalRootNode extends RootNode {
                 throw new IllegalArgumentException("value is not indexable: " + receiver);
             }
             if (expr instanceof Ast.NewExpr created) {
+                if (created.type().name().equals("Array")
+                        || created.type().name().equals("List")) {
+                    if (!created.arguments().isEmpty()) {
+                        throw new IllegalArgumentException(
+                                created.type().name()
+                                        + "<T> constructor takes no positional arguments");
+                    }
+                    return new ArrayList<>();
+                }
                 if (created.type().name().equals("DynamicStruct")) {
                     if (!created.arguments().isEmpty()) {
                         throw new IllegalArgumentException("DynamicStruct<T> constructor takes no positional arguments");
