@@ -1,0 +1,16 @@
+pub routine main(): void {
+  let Array<int> values = new Array<int>();
+  values.add(4);
+  values.add(9);
+
+  stdio.println(values.size);
+  stdio.println(values.get(0));
+
+  values.set(1, 7);
+  stdio.println(values.get(1));
+
+  val pair = (11, 13);
+  stdio.println(pair.size);
+  stdio.println(pair.get(1));
+  return;
+}
