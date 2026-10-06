@@ -18,10 +18,10 @@ define module rpc as
     }
 
     pub is_valid(): bool {
-      if self.kind < 0 || self.kind > 9; do
+      if self.kind < 0 || self.kind > 9; then
         return false;
       fi
-      if self.kind == 7 && self.name == ""; do
+      if self.kind == 7 && self.name == ""; then
         return false;
       fi
       return true;
@@ -49,14 +49,14 @@ define module rpc as
     }
 
     pub is_valid(): bool {
-      if self.name == ""; do
+      if self.name == ""; then
         return false;
       fi
-      if self.number <= 0 || self.number > 536870911 || self.number_text == ""; do
+      if self.number <= 0 || self.number > 536870911 || self.number_text == ""; then
         return false;
       fi
       // Protocol Buffers reserves 19000..19999 for its own implementation.
-      if self.number >= 19000 && self.number <= 19999; do
+      if self.number >= 19000 && self.number <= 19999; then
         return false;
       fi
       return self.type_value.is_valid();
@@ -77,7 +77,7 @@ define module rpc as
 
     pub field_named(String name): Option<FieldDef> {
       for (const field_value of self.fields_value) {
-        if field_value.name == name; do
+        if field_value.name == name; then
           return Some(field_value);
         fi
       }
@@ -85,19 +85,19 @@ define module rpc as
     }
 
     pub is_valid(): bool {
-      if self.name == ""; do
+      if self.name == ""; then
         return false;
       fi
 
       for (let int index = 0; index < self.field_count(); index = index + 1) {
         val FieldDef field_value = self.fields_value.get(index);
-        if !field_value.is_valid(); do
+        if !field_value.is_valid(); then
           return false;
         fi
 
         for (let int earlier = 0; earlier < index; earlier = earlier + 1) {
           val FieldDef previous = self.fields_value.get(earlier);
-          if previous.name == field_value.name || previous.number == field_value.number; do
+          if previous.name == field_value.name || previous.number == field_value.number; then
             return false;
           fi
         }
@@ -119,13 +119,13 @@ define module rpc as
     pub val int streaming_kind;
 
     pub is_valid(): bool {
-      if self.contract_id < 0; do
+      if self.contract_id < 0; then
         return false;
       fi
-      if self.service == "" || self.name == "" || self.operation_id == ""; do
+      if self.service == "" || self.name == "" || self.operation_id == ""; then
         return false;
       fi
-      if self.request_type == "" || self.response_type == ""; do
+      if self.request_type == "" || self.response_type == ""; then
         return false;
       fi
       return self.streaming_kind >= 0 && self.streaming_kind <= 3;
@@ -149,16 +149,16 @@ define module rpc as
     pub val int streaming_kind;
 
     pub is_valid(): bool {
-      if self.method == "" || self.path_template == ""; do
+      if self.method == "" || self.path_template == ""; then
         return false;
       fi
-      if self.handler_id < 0 || self.contract_id < 0; do
+      if self.handler_id < 0 || self.contract_id < 0; then
         return false;
       fi
-      if self.operation_id == "" || self.rpc_service == "" || self.rpc_name == ""; do
+      if self.operation_id == "" || self.rpc_service == "" || self.rpc_name == ""; then
         return false;
       fi
-      if self.request_type == "" || self.response_type == ""; do
+      if self.request_type == "" || self.response_type == ""; then
         return false;
       fi
       return self.streaming_kind >= 0 && self.streaming_kind <= 3;
@@ -209,7 +209,7 @@ define module rpc as
 
     pub message_named(String name): Option<MessageDef> {
       for (const message_value of self.messages_value) {
-        if message_value.name == name; do
+        if message_value.name == name; then
           return Some(message_value);
         fi
       }
@@ -218,7 +218,7 @@ define module rpc as
 
     pub method_by_contract(int contract_id): Option<RpcMethodDef> {
       for (const method_value of self.methods_value) {
-        if method_value.contract_id == contract_id; do
+        if method_value.contract_id == contract_id; then
           return Some(method_value);
         fi
       }
@@ -227,7 +227,7 @@ define module rpc as
 
     pub method_by_operation(String operation_id): Option<RpcMethodDef> {
       for (const method_value of self.methods_value) {
-        if method_value.operation_id == operation_id; do
+        if method_value.operation_id == operation_id; then
           return Some(method_value);
         fi
       }
@@ -236,7 +236,7 @@ define module rpc as
 
     pub http_by_contract(int contract_id): Option<HttpHandlerDef> {
       for (const handler_value of self.http_handlers_value) {
-        if handler_value.contract_id == contract_id; do
+        if handler_value.contract_id == contract_id; then
           return Some(handler_value);
         fi
       }
@@ -245,9 +245,9 @@ define module rpc as
   end
 
   pub define class ContractBuilder as
-    let Array<MessageDef> messages_value = new Array<MessageDef>();
-    let Array<RpcMethodDef> methods_value = new Array<RpcMethodDef>();
-    let Array<HttpHandlerDef> http_handlers_value = new Array<HttpHandlerDef>();
+    let Array<MessageDef> messages_value = arr[];
+    let Array<RpcMethodDef> methods_value = arr[];
+    let Array<HttpHandlerDef> http_handlers_value = arr[];
 
     pub message_count(): int {
       return self.messages_value.size;
@@ -262,12 +262,12 @@ define module rpc as
     }
 
     pub add_message(MessageDef message_value): Result<bool, String> {
-      if !message_value.is_valid(); do
+      if !message_value.is_valid(); then
         return Err("invalid message definition");
       fi
 
       for (const existing of self.messages_value) {
-        if existing.name == message_value.name; do
+        if existing.name == message_value.name; then
           return Err("duplicate message name");
         fi
       }
@@ -277,18 +277,18 @@ define module rpc as
     }
 
     check_rpc(&RpcMethodDef method_value): Result<bool, String> {
-      if !method_value.is_valid(); do
+      if !method_value.is_valid(); then
         return Err("invalid RPC method definition");
       fi
 
       for (const existing of self.methods_value) {
-        if existing.contract_id == method_value.contract_id; do
+        if existing.contract_id == method_value.contract_id; then
           return Err("duplicate RPC contract_id");
         fi
-        if existing.operation_id == method_value.operation_id; do
+        if existing.operation_id == method_value.operation_id; then
           return Err("duplicate RPC operation_id");
         fi
-        if existing.service == method_value.service && existing.name == method_value.name; do
+        if existing.service == method_value.service && existing.name == method_value.name; then
           return Err("duplicate RPC service/method");
         fi
       }
@@ -297,18 +297,18 @@ define module rpc as
     }
 
     check_http(&HttpHandlerDef handler_value): Result<bool, String> {
-      if !handler_value.is_valid(); do
+      if !handler_value.is_valid(); then
         return Err("invalid HTTP handler definition");
       fi
 
       for (const existing of self.http_handlers_value) {
-        if existing.contract_id == handler_value.contract_id; do
+        if existing.contract_id == handler_value.contract_id; then
           return Err("duplicate HTTP contract_id");
         fi
-        if existing.operation_id == handler_value.operation_id; do
+        if existing.operation_id == handler_value.operation_id; then
           return Err("duplicate HTTP operation_id");
         fi
-        if existing.method == handler_value.method && existing.path_template == handler_value.path_template; do
+        if existing.method == handler_value.method && existing.path_template == handler_value.path_template; then
           return Err("duplicate HTTP method/path");
         fi
       }
@@ -318,7 +318,7 @@ define module rpc as
 
     pub add_rpc(RpcMethodDef method_value): Result<bool, String> {
       val Result<bool, String> checked = self.check_rpc(&method_value);
-      if checked.is_err(); do
+      if checked.is_err(); then
         return checked;
       fi
       self.methods_value.add(method_value);
@@ -327,7 +327,7 @@ define module rpc as
 
     pub add_http(HttpHandlerDef handler_value): Result<bool, String> {
       val Result<bool, String> checked = self.check_http(&handler_value);
-      if checked.is_err(); do
+      if checked.is_err(); then
         return checked;
       fi
       self.http_handlers_value.add(handler_value);
@@ -338,11 +338,11 @@ define module rpc as
     pub add_http_as_rpc(HttpHandlerDef handler_value): Result<bool, String> {
       val RpcMethodDef method_value = rpc_from_http(&handler_value);
       val Result<bool, String> http_checked = self.check_http(&handler_value);
-      if http_checked.is_err(); do
+      if http_checked.is_err(); then
         return http_checked;
       fi
       val Result<bool, String> rpc_checked = self.check_rpc(&method_value);
-      if rpc_checked.is_err(); do
+      if rpc_checked.is_err(); then
         return rpc_checked;
       fi
 
@@ -368,11 +368,11 @@ define module rpc as
       );
 
       val Result<bool, String> rpc_checked = self.check_rpc(&method_value);
-      if rpc_checked.is_err(); do
+      if rpc_checked.is_err(); then
         return rpc_checked;
       fi
       val Result<bool, String> http_checked = self.check_http(&handler_value);
-      if http_checked.is_err(); do
+      if http_checked.is_err(); then
         return http_checked;
       fi
 
@@ -386,14 +386,14 @@ define module rpc as
       for (const owner_message of self.messages_value) {
         for (let int field_index = 0; field_index < owner_message.field_count(); field_index = field_index + 1) {
           val FieldDef field_value = owner_message.field_at(field_index);
-          if field_value.type_value.is_named(); do
+          if field_value.type_value.is_named(); then
             let bool named_type_found = false;
             for (const candidate_message of self.messages_value) {
-              if candidate_message.name == field_value.type_value.name; do
+              if candidate_message.name == field_value.type_value.name; then
                 named_type_found = true;
               fi
             }
-            if !named_type_found; do
+            if !named_type_found; then
               return Err("message field references an unregistered message type");
             fi
           fi
@@ -406,18 +406,18 @@ define module rpc as
         let bool response_found = false;
 
         for (const message_value of self.messages_value) {
-          if message_value.name == method_value.request_type; do
+          if message_value.name == method_value.request_type; then
             request_found = true;
           fi
-          if message_value.name == method_value.response_type; do
+          if message_value.name == method_value.response_type; then
             response_found = true;
           fi
         }
 
-        if !request_found; do
+        if !request_found; then
           return Err("RPC request type is not registered");
         fi
-        if !response_found; do
+        if !response_found; then
           return Err("RPC response type is not registered");
         fi
       }
@@ -438,14 +438,14 @@ define module rpc as
             found = true;
           fi
         }
-        if !found; do
+        if !found; then
           return Err("HTTP handler has no matching RPC method");
         fi
       }
 
-      let Array<MessageDef> messages_copy = new Array<MessageDef>();
-      let Array<RpcMethodDef> methods_copy = new Array<RpcMethodDef>();
-      let Array<HttpHandlerDef> http_copy = new Array<HttpHandlerDef>();
+      let Array<MessageDef> messages_copy = arr[];
+      let Array<RpcMethodDef> methods_copy = arr[];
+      let Array<HttpHandlerDef> http_copy = arr[];
 
       for (const message_value of self.messages_value) {
         messages_copy.add(message_value);
@@ -529,7 +529,7 @@ define module rpc as
   }
 
   pub fnc message(String name, Array<FieldDef> fields): MessageDef {
-    let Array<FieldDef> copied = new Array<FieldDef>();
+    let Array<FieldDef> copied = arr[];
     for (const field_value of fields) {
       copied.add(field_value);
     }
@@ -677,7 +677,7 @@ define module rpc as
   // stream fragments directly to a file/socket/stdout without Java
   // StringBuilder interop or requiring String concatenation in the core.
   pub define class TextDocument as
-    let Array<String> parts_value = new Array<String>();
+    let Array<String> parts_value = arr[];
 
     pub write(String value): void {
       self.parts_value.add(value);
@@ -710,7 +710,7 @@ define module rpc as
 
     pub has_part(String expected): bool {
       for (const part of self.parts_value) {
-        if part == expected; do
+        if part == expected; then
           return true;
         fi
       }
@@ -726,21 +726,21 @@ define module rpc as
   end
 
   fnc emit_json_type(&mut TextDocument out, int type_kind, String type_name): void {
-    if type_kind == 0; do
+    if type_kind == 0; then
       out.write("{\"type\":\"string\"}");
-    elseif type_kind == 1; do
+    elseif type_kind == 1; then
       out.write("{\"type\":\"boolean\"}");
-    elseif type_kind == 2 || type_kind == 3; do
+    elseif type_kind == 2 || type_kind == 3; then
       out.write("{\"type\":\"integer\"}");
-    elseif type_kind == 4 || type_kind == 5; do
+    elseif type_kind == 4 || type_kind == 5; then
       out.write("{\"type\":\"number\"}");
-    elseif type_kind == 6; do
+    elseif type_kind == 6; then
       out.write("{\"type\":\"string\",\"contentEncoding\":\"base64\"}");
-    elseif type_kind == 7; do
+    elseif type_kind == 7; then
       out.write("{\"$ref\":\"#/$defs/");
       out.write(type_name);
       out.write("\"}");
-    elseif type_kind == 8; do
+    elseif type_kind == 8; then
       out.write("{\"type\":\"string\",\"format\":\"date-time\"}");
     else
       out.write("{}");
@@ -749,23 +749,23 @@ define module rpc as
   }
 
   fnc emit_proto_type(&mut TextDocument out, int type_kind, String type_name): void {
-    if type_kind == 0; do
+    if type_kind == 0; then
       out.write("string");
-    elseif type_kind == 1; do
+    elseif type_kind == 1; then
       out.write("bool");
-    elseif type_kind == 2; do
+    elseif type_kind == 2; then
       out.write("int32");
-    elseif type_kind == 3; do
+    elseif type_kind == 3; then
       out.write("int64");
-    elseif type_kind == 4; do
+    elseif type_kind == 4; then
       out.write("float");
-    elseif type_kind == 5; do
+    elseif type_kind == 5; then
       out.write("double");
-    elseif type_kind == 6; do
+    elseif type_kind == 6; then
       out.write("bytes");
-    elseif type_kind == 7; do
+    elseif type_kind == 7; then
       out.write(type_name);
-    elseif type_kind == 8; do
+    elseif type_kind == 8; then
       out.write("google.protobuf.Timestamp");
     else
       out.write("google.protobuf.Value");
@@ -774,23 +774,23 @@ define module rpc as
   }
 
   fnc emit_typespec_type(&mut TextDocument out, int type_kind, String type_name): void {
-    if type_kind == 0; do
+    if type_kind == 0; then
       out.write("string");
-    elseif type_kind == 1; do
+    elseif type_kind == 1; then
       out.write("boolean");
-    elseif type_kind == 2; do
+    elseif type_kind == 2; then
       out.write("int32");
-    elseif type_kind == 3; do
+    elseif type_kind == 3; then
       out.write("int64");
-    elseif type_kind == 4; do
+    elseif type_kind == 4; then
       out.write("float32");
-    elseif type_kind == 5; do
+    elseif type_kind == 5; then
       out.write("float64");
-    elseif type_kind == 6; do
+    elseif type_kind == 6; then
       out.write("bytes");
-    elseif type_kind == 7; do
+    elseif type_kind == 7; then
       out.write(type_name);
-    elseif type_kind == 8; do
+    elseif type_kind == 8; then
       out.write("utcDateTime");
     else
       out.write("unknown");
@@ -799,19 +799,19 @@ define module rpc as
   }
 
   fnc emit_msgpack_type(&mut TextDocument out, int type_kind, String type_name): void {
-    if type_kind == 0; do
+    if type_kind == 0; then
       out.write("str");
-    elseif type_kind == 1; do
+    elseif type_kind == 1; then
       out.write("bool");
-    elseif type_kind == 2 || type_kind == 3; do
+    elseif type_kind == 2 || type_kind == 3; then
       out.write("int");
-    elseif type_kind == 4 || type_kind == 5; do
+    elseif type_kind == 4 || type_kind == 5; then
       out.write("float");
-    elseif type_kind == 6; do
+    elseif type_kind == 6; then
       out.write("bin");
-    elseif type_kind == 7; do
+    elseif type_kind == 7; then
       out.write(type_name);
-    elseif type_kind == 8; do
+    elseif type_kind == 8; then
       out.write("timestamp");
     else
       out.write("any");
@@ -845,7 +845,7 @@ define module rpc as
         out.write(field_value.name);
         out.write("\": ");
 
-        if field_value.repeated; do
+        if field_value.repeated; then
           out.write("{\"type\":\"array\",\"items\":");
           emit_json_type(&mut out, field_value.type_kind(), field_value.type_name());
           out.write("}");
@@ -853,7 +853,7 @@ define module rpc as
           emit_json_type(&mut out, field_value.type_kind(), field_value.type_name());
         fi
 
-        if field_index + 1 < message_value.field_count(); do
+        if field_index + 1 < message_value.field_count(); then
           out.write(",");
         fi
         out.newline();
@@ -863,7 +863,7 @@ define module rpc as
 
       let int required_count = 0;
       for (let int required_index = 0; required_index < message_value.field_count(); required_index = required_index + 1) {
-        if message_value.field_at(required_index).required; do
+        if message_value.field_at(required_index).required; then
           required_count = required_count + 1;
         fi
       }
@@ -872,8 +872,8 @@ define module rpc as
       let int emitted_required = 0;
       for (let int required_index = 0; required_index < message_value.field_count(); required_index = required_index + 1) {
         val FieldDef required_field = message_value.field_at(required_index);
-        if required_field.required; do
-          if emitted_required > 0; do
+        if required_field.required; then
+          if emitted_required > 0; then
             out.write(", ");
           fi
           out.write("\"");
@@ -886,7 +886,7 @@ define module rpc as
       out.write("      ]");
       out.newline();
       out.write("    }");
-      if message_index + 1 < contracts.message_count(); do
+      if message_index + 1 < contracts.message_count(); then
         out.write(",");
       fi
       out.newline();
@@ -917,9 +917,9 @@ define module rpc as
       for (let int field_index = 0; field_index < message_value.field_count(); field_index = field_index + 1) {
         val FieldDef field_value = message_value.field_at(field_index);
         out.write("  ");
-        if field_value.repeated; do
+        if field_value.repeated; then
           out.write("repeated ");
-        elseif !field_value.required; do
+        elseif !field_value.required; then
           out.write("optional ");
         fi
         emit_proto_type(&mut out, field_value.type_kind(), field_value.type_name());
@@ -939,28 +939,28 @@ define module rpc as
       val RpcMethodDef method_value = contracts.method_at(method_index);
       let bool seen = false;
       for (let int earlier = 0; earlier < method_index; earlier = earlier + 1) {
-        if contracts.method_at(earlier).service == method_value.service; do
+        if contracts.method_at(earlier).service == method_value.service; then
           seen = true;
         fi
       }
 
-      if !seen; do
+      if !seen; then
         out.write("service ");
         out.write(method_value.service);
         out.line(" {");
 
         for (let int sibling_index = 0; sibling_index < contracts.method_count(); sibling_index = sibling_index + 1) {
           val RpcMethodDef sibling = contracts.method_at(sibling_index);
-          if sibling.service == method_value.service; do
+          if sibling.service == method_value.service; then
             out.write("  rpc ");
             out.write(sibling.name);
             out.write("(");
-            if sibling.streaming_kind == 2 || sibling.streaming_kind == 3; do
+            if sibling.streaming_kind == 2 || sibling.streaming_kind == 3; then
               out.write("stream ");
             fi
             out.write(sibling.request_type);
             out.write(") returns (");
-            if sibling.streaming_kind == 1 || sibling.streaming_kind == 3; do
+            if sibling.streaming_kind == 1 || sibling.streaming_kind == 3; then
               out.write("stream ");
             fi
             out.write(sibling.response_type);
@@ -999,14 +999,14 @@ define module rpc as
         out.space();
         out.write(field_value.name);
         out.write(": ");
-        if field_value.repeated; do
+        if field_value.repeated; then
           out.write("array<");
           emit_msgpack_type(&mut out, field_value.type_kind(), field_value.type_name());
           out.write(">");
         else
           emit_msgpack_type(&mut out, field_value.type_kind(), field_value.type_name());
         fi
-        if field_value.required; do
+        if field_value.required; then
           out.write(" required");
         else
           out.write(" optional");
@@ -1028,11 +1028,11 @@ define module rpc as
       out.write(method_value.request_type);
       out.write(") -> ");
       out.write(method_value.response_type);
-      if method_value.streaming_kind != 0; do
+      if method_value.streaming_kind != 0; then
         out.write(" streaming=");
-        if method_value.streaming_kind == 1; do
+        if method_value.streaming_kind == 1; then
           out.write("server");
-        elseif method_value.streaming_kind == 2; do
+        elseif method_value.streaming_kind == 2; then
           out.write("client");
         else
           out.write("bidi");
@@ -1064,11 +1064,11 @@ define module rpc as
         val FieldDef field_value = message_value.field_at(field_index);
         out.write("  ");
         out.write(field_value.name);
-        if !field_value.required; do
+        if !field_value.required; then
           out.write("?");
         fi
         out.write(": ");
-        if field_value.repeated; do
+        if field_value.repeated; then
           emit_typespec_type(&mut out, field_value.type_kind(), field_value.type_name());
           out.write("[]");
         else
@@ -1085,20 +1085,20 @@ define module rpc as
       val RpcMethodDef method_value = contracts.method_at(method_index);
       val Option<HttpHandlerDef> http_value = contracts.http_by_contract(method_value.contract_id);
 
-      if http_value.is_some(); do
+      if http_value.is_some(); then
         val HttpHandlerDef handler_value = http_value.unwrap();
         out.write("@route(\"");
         out.write(handler_value.path_template);
         out.line("\")");
-        if handler_value.method == "GET"; do
+        if handler_value.method == "GET"; then
           out.line("@get");
-        elseif handler_value.method == "POST"; do
+        elseif handler_value.method == "POST"; then
           out.line("@post");
-        elseif handler_value.method == "PUT"; do
+        elseif handler_value.method == "PUT"; then
           out.line("@put");
-        elseif handler_value.method == "PATCH"; do
+        elseif handler_value.method == "PATCH"; then
           out.line("@patch");
-        elseif handler_value.method == "DELETE"; do
+        elseif handler_value.method == "DELETE"; then
           out.line("@delete");
         fi
       fi
