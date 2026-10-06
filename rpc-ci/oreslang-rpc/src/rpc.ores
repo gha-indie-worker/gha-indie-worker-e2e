@@ -152,6 +152,14 @@ define module rpc as
       if self.method == "" || self.path_template == ""; then
         return false;
       fi
+      if self.method != "GET" &&
+         self.method != "POST" &&
+         self.method != "PUT" &&
+         self.method != "PATCH" &&
+         self.method != "DELETE" &&
+         self.method != "HEAD"; then
+        return false;
+      fi
       if self.handler_id < 0 || self.contract_id < 0; then
         return false;
       fi
@@ -162,6 +170,30 @@ define module rpc as
         return false;
       fi
       return self.streaming_kind >= 0 && self.streaming_kind <= 3;
+    }
+  end
+
+  // HTTP request-field locations:
+  // 0 path, 1 query, 2 header, 3 cookie.
+  //
+  // Fields without an explicit binding remain payload/body data. Keeping these
+  // bindings separate from MessageDef means the same logical RPC request type
+  // can be exposed through more than one HTTP shape without contaminating the
+  // transport-neutral message schema.
+  pub define class HttpFieldBindingDef as
+    pub val int contract_id;
+    pub val String field_name;
+    pub val String wire_name;
+    pub val int location;
+
+    pub is_valid(): bool {
+      if self.contract_id < 0; then
+        return false;
+      fi
+      if self.field_name == "" || self.wire_name == ""; then
+        return false;
+      fi
+      return self.location >= 0 && self.location <= 3;
     }
   end
 
@@ -182,6 +214,7 @@ define module rpc as
     val Array<MessageDef> messages_value;
     val Array<RpcMethodDef> methods_value;
     val Array<HttpHandlerDef> http_handlers_value;
+    val Array<HttpFieldBindingDef> http_field_bindings_value;
 
     pub message_count(): int {
       return self.messages_value.size;
@@ -205,6 +238,24 @@ define module rpc as
 
     pub http_handler_at(int index): HttpHandlerDef {
       return self.http_handlers_value.get(index);
+    }
+
+    pub http_field_binding_count(): int {
+      return self.http_field_bindings_value.size;
+    }
+
+    pub http_field_binding_at(int index): HttpFieldBindingDef {
+      return self.http_field_bindings_value.get(index);
+    }
+
+    pub http_field_binding(int contract_id, String field_name): Option<HttpFieldBindingDef> {
+      for (const binding_value of self.http_field_bindings_value) {
+        if binding_value.contract_id == contract_id &&
+           binding_value.field_name == field_name; then
+          return Some(binding_value);
+        fi
+      }
+      return None;
     }
 
     pub message_named(String name): Option<MessageDef> {
@@ -248,6 +299,7 @@ define module rpc as
     let Array<MessageDef> messages_value = arr[];
     let Array<RpcMethodDef> methods_value = arr[];
     let Array<HttpHandlerDef> http_handlers_value = arr[];
+    let Array<HttpFieldBindingDef> http_field_bindings_value = arr[];
 
     pub message_count(): int {
       return self.messages_value.size;
@@ -259,6 +311,26 @@ define module rpc as
 
     pub http_handler_count(): int {
       return self.http_handlers_value.size;
+    }
+
+    pub http_field_binding_count(): int {
+      return self.http_field_bindings_value.size;
+    }
+
+    pub add_http_field_binding(HttpFieldBindingDef binding_value): Result<bool, String> {
+      if !binding_value.is_valid(); then
+        return Err("invalid HTTP field binding");
+      fi
+
+      for (const existing of self.http_field_bindings_value) {
+        if existing.contract_id == binding_value.contract_id &&
+           existing.field_name == binding_value.field_name; then
+          return Err("duplicate HTTP field binding");
+        fi
+      }
+
+      self.http_field_bindings_value.add(binding_value);
+      return Ok(true);
     }
 
     pub add_message(MessageDef message_value): Result<bool, String> {
@@ -443,9 +515,47 @@ define module rpc as
         fi
       }
 
+      // HTTP metadata bindings must point at a registered HTTP contract and
+      // a real field on that contract's RPC request message.
+      for (const binding_value of self.http_field_bindings_value) {
+        let bool handler_found = false;
+        let String request_type_name = "";
+
+        for (const handler_value of self.http_handlers_value) {
+          if handler_value.contract_id == binding_value.contract_id; then
+            handler_found = true;
+            request_type_name = handler_value.request_type;
+          fi
+        }
+
+        if !handler_found; then
+          return Err("HTTP field binding has no matching HTTP handler");
+        fi
+
+        let bool request_field_found = false;
+        for (const message_value of self.messages_value) {
+          if message_value.name == request_type_name; then
+            for (let int field_index = 0; field_index < message_value.field_count(); field_index = field_index + 1) {
+              val FieldDef request_field = message_value.field_at(field_index);
+              if request_field.name == binding_value.field_name; then
+                request_field_found = true;
+                if binding_value.location == 0 && !request_field.required; then
+                  return Err("HTTP path field must be required");
+                fi
+              fi
+            }
+          fi
+        }
+
+        if !request_field_found; then
+          return Err("HTTP field binding references an unknown request field");
+        fi
+      }
+
       let Array<MessageDef> messages_copy = arr[];
       let Array<RpcMethodDef> methods_copy = arr[];
       let Array<HttpHandlerDef> http_copy = arr[];
+      let Array<HttpFieldBindingDef> http_field_bindings_copy = arr[];
 
       for (const message_value of self.messages_value) {
         messages_copy.add(message_value);
@@ -456,8 +566,16 @@ define module rpc as
       for (const handler_value of self.http_handlers_value) {
         http_copy.add(handler_value);
       }
+      for (const binding_value of self.http_field_bindings_value) {
+        http_field_bindings_copy.add(binding_value);
+      }
 
-      return Ok(new ContractSet(messages_copy, methods_copy, http_copy));
+      return Ok(new ContractSet(
+        messages_copy,
+        methods_copy,
+        http_copy,
+        http_field_bindings_copy
+      ));
     }
   end
 
@@ -515,6 +633,88 @@ define module rpc as
 
   pub fnc bidi_stream(): int {
     return 3;
+  }
+
+  pub fnc http_path_location(): int {
+    return 0;
+  }
+
+  pub fnc http_query_location(): int {
+    return 1;
+  }
+
+  pub fnc http_header_location(): int {
+    return 2;
+  }
+
+  pub fnc http_cookie_location(): int {
+    return 3;
+  }
+
+  pub fnc http_field_binding(
+    int contract_id,
+    String field_name,
+    String wire_name,
+    int location
+  ): HttpFieldBindingDef {
+    return new HttpFieldBindingDef(
+      contract_id,
+      field_name,
+      wire_name,
+      location
+    );
+  }
+
+  pub fnc http_path_field(
+    int contract_id,
+    String field_name,
+    String wire_name
+  ): HttpFieldBindingDef {
+    return http_field_binding(
+      contract_id,
+      field_name,
+      wire_name,
+      http_path_location()
+    );
+  }
+
+  pub fnc http_query_field(
+    int contract_id,
+    String field_name,
+    String wire_name
+  ): HttpFieldBindingDef {
+    return http_field_binding(
+      contract_id,
+      field_name,
+      wire_name,
+      http_query_location()
+    );
+  }
+
+  pub fnc http_header_field(
+    int contract_id,
+    String field_name,
+    String wire_name
+  ): HttpFieldBindingDef {
+    return http_field_binding(
+      contract_id,
+      field_name,
+      wire_name,
+      http_header_location()
+    );
+  }
+
+  pub fnc http_cookie_field(
+    int contract_id,
+    String field_name,
+    String wire_name
+  ): HttpFieldBindingDef {
+    return http_field_binding(
+      contract_id,
+      field_name,
+      wire_name,
+      http_cookie_location()
+    );
   }
 
   pub fnc field(
@@ -1081,36 +1281,128 @@ define module rpc as
       out.newline();
     }
 
+    // Build an operation-specific HTTP request projection. Explicit path,
+    // query, header, and cookie fields become TypeSpec metadata; all unbound
+    // request fields remain body data under TypeSpec's normal HTTP rules.
     for (let int method_index = 0; method_index < contracts.method_count(); method_index = method_index + 1) {
       val RpcMethodDef method_value = contracts.method_at(method_index);
       val Option<HttpHandlerDef> http_value = contracts.http_by_contract(method_value.contract_id);
 
       if http_value.is_some(); then
-        val HttpHandlerDef handler_value = http_value.unwrap();
-        out.write("@route(\"");
-        out.write(handler_value.path_template);
-        out.line("\")");
-        if handler_value.method == "GET"; then
-          out.line("@get");
-        elseif handler_value.method == "POST"; then
-          out.line("@post");
-        elseif handler_value.method == "PUT"; then
-          out.line("@put");
-        elseif handler_value.method == "PATCH"; then
-          out.line("@patch");
-        elseif handler_value.method == "DELETE"; then
-          out.line("@delete");
+        val Option<MessageDef> request_message_value = contracts.message_named(method_value.request_type);
+        if request_message_value.is_some(); then
+          val MessageDef request_message = request_message_value.unwrap();
+
+          out.write("model ");
+          out.write(method_value.service);
+          out.write("_");
+          out.write(method_value.name);
+          out.line("_HttpRequest {");
+
+          for (let int field_index = 0; field_index < request_message.field_count(); field_index = field_index + 1) {
+            val FieldDef field_value = request_message.field_at(field_index);
+            val Option<HttpFieldBindingDef> binding_value =
+              contracts.http_field_binding(method_value.contract_id, field_value.name);
+
+            if binding_value.is_some(); then
+              val HttpFieldBindingDef binding = binding_value.unwrap();
+              if binding.location == 0; then
+                out.write("  @path(\"");
+              elseif binding.location == 1; then
+                out.write("  @query(\"");
+              elseif binding.location == 2; then
+                out.write("  @header(\"");
+              else
+                out.write("  @cookie(\"");
+              fi
+              out.write(binding.wire_name);
+              out.line("\")");
+            fi
+
+            out.write("  ");
+            out.write(field_value.name);
+            if !field_value.required; then
+              out.write("?");
+            fi
+            out.write(": ");
+            if field_value.repeated; then
+              emit_typespec_type(&mut out, field_value.type_kind(), field_value.type_name());
+              out.write("[]");
+            else
+              emit_typespec_type(&mut out, field_value.type_kind(), field_value.type_name());
+            fi
+            out.line(";");
+          }
+
+          out.line("}");
+          out.newline();
         fi
       fi
+    }
 
-      out.write("op ");
-      out.write(method_value.name);
-      out.write("(request: ");
-      out.write(method_value.request_type);
-      out.write("): ");
-      out.write(method_value.response_type);
-      out.line(";");
-      out.newline();
+    // TypeSpec operations are scoped by RPC service so identical method names
+    // in different services remain distinct, exactly like protobuf services.
+    for (let int method_index = 0; method_index < contracts.method_count(); method_index = method_index + 1) {
+      val RpcMethodDef first_method = contracts.method_at(method_index);
+      let bool service_seen = false;
+      for (let int earlier = 0; earlier < method_index; earlier = earlier + 1) {
+        if contracts.method_at(earlier).service == first_method.service; then
+          service_seen = true;
+        fi
+      }
+
+      if !service_seen; then
+        out.write("interface ");
+        out.write(first_method.service);
+        out.line(" {");
+
+        for (let int sibling_index = 0; sibling_index < contracts.method_count(); sibling_index = sibling_index + 1) {
+          val RpcMethodDef method_value = contracts.method_at(sibling_index);
+          if method_value.service == first_method.service; then
+            val Option<HttpHandlerDef> http_value = contracts.http_by_contract(method_value.contract_id);
+
+            if http_value.is_some(); then
+              val HttpHandlerDef handler_value = http_value.unwrap();
+              out.write("@route(\"");
+              out.write(handler_value.path_template);
+              out.line("\")");
+              if handler_value.method == "GET"; then
+                out.line("@get");
+              elseif handler_value.method == "POST"; then
+                out.line("@post");
+              elseif handler_value.method == "PUT"; then
+                out.line("@put");
+              elseif handler_value.method == "PATCH"; then
+                out.line("@patch");
+              elseif handler_value.method == "DELETE"; then
+                out.line("@delete");
+              elseif handler_value.method == "HEAD"; then
+                out.line("@head");
+              fi
+            fi
+
+            out.write("op ");
+            out.write(method_value.name);
+            if http_value.is_some(); then
+              out.write("(...");
+              out.write(method_value.service);
+              out.write("_");
+              out.write(method_value.name);
+              out.write("_HttpRequest");
+            else
+              out.write("(request: ");
+              out.write(method_value.request_type);
+            fi
+            out.write("): ");
+            out.write(method_value.response_type);
+            out.line(";");
+            out.newline();
+          fi
+        }
+
+        out.line("}");
+        out.newline();
+      fi
     }
 
     return out;
