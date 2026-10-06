@@ -1,0 +1,109 @@
+import module rpc from "./rpc.ores";
+
+fnc ok(Result<bool, String> result): void {
+  stdio.println(result.is_ok());
+  return;
+}
+
+pub routine main(): void {
+  val GetUserRequest = rpc.message("GetUserRequest", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false)
+  ]);
+
+  val User = rpc.message("User", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false),
+    rpc.field("display_name", 2, "2", rpc.string_type(), true, false),
+    rpc.field("tags", 3, "3", rpc.string_type(), false, true)
+  ]);
+
+  let contracts_builder = rpc.builder();
+  ok(contracts_builder.add_message(GetUserRequest));
+  ok(contracts_builder.add_message(User));
+
+  val get_user = rpc.rpc_method(
+    42,
+    "Users",
+    "GetUser",
+    "users.get",
+    "GetUserRequest",
+    "User"
+  );
+
+  ok(contracts_builder.add_rpc_as_http(
+    get_user,
+    "GET",
+    "/users/{id}",
+    1001,
+    7
+  ));
+
+  val built = contracts_builder.build();
+  stdio.println(built.is_ok());
+
+  val contracts = built.unwrap();
+  stdio.println(contracts.message_count());
+  stdio.println(contracts.method_count());
+  stdio.println(contracts.http_handler_count());
+
+  val http = contracts.http_by_contract(42).unwrap();
+  stdio.println(http.method);
+  stdio.println(http.path_template);
+  stdio.println(http.handler_id);
+  stdio.println(http.pipeline_id);
+  stdio.println(http.contract_id);
+  stdio.println(http.operation_id);
+
+  val round_trip_rpc = rpc.rpc_from_http(http);
+  stdio.println(round_trip_rpc.service);
+  stdio.println(round_trip_rpc.name);
+  stdio.println(round_trip_rpc.request_type);
+  stdio.println(round_trip_rpc.response_type);
+
+  val round_trip_http = rpc.http_from_rpc(
+    round_trip_rpc,
+    "POST",
+    "/rpc/users/get",
+    1002,
+    8
+  );
+  stdio.println(round_trip_http.contract_id);
+  stdio.println(round_trip_http.operation_id);
+
+  val bundle = rpc.generate_all(
+    contracts,
+    "https://example.test/schema/rpc",
+    "example.rpc",
+    "Example.Rpc"
+  );
+
+  stdio.println(bundle.json_schema.part_count() > 20);
+  stdio.println(bundle.json_schema.part_at(0));
+  stdio.println(bundle.protobuf.part_count() > 20);
+  stdio.println(bundle.protobuf.part_at(0));
+  stdio.println(bundle.messagepack.part_count() > 10);
+  stdio.println(bundle.messagepack.part_at(0));
+  stdio.println(bundle.typespec.part_count() > 20);
+  stdio.println(bundle.typespec.part_at(0));
+
+  // Fail closed on duplicate wire field numbers.
+  val Bad = rpc.message("Bad", arr[
+    rpc.field("a", 1, "1", rpc.string_type(), true, false),
+    rpc.field("b", 1, "1", rpc.int32_type(), true, false)
+  ]);
+  stdio.println(Bad.is_valid());
+
+  // Fail closed when an RPC references a message not present in the registry.
+  let missing_builder = rpc.builder();
+  ok(missing_builder.add_message(GetUserRequest));
+  ok(missing_builder.add_rpc(rpc.rpc_method(
+    99,
+    "Users",
+    "Missing",
+    "users.missing",
+    "GetUserRequest",
+    "MissingResponse"
+  )));
+  stdio.println(missing_builder.build().is_err());
+
+  return;
+}

@@ -1,0 +1,31 @@
+true
+true
+true
+true
+2
+1
+1
+GET
+/users/{id}
+1001
+7
+42
+users.get
+Users
+GetUser
+GetUserRequest
+User
+42
+users.get
+true
+{
+true
+syntax = "proto3";
+true
+mpackdef 1
+true
+import "@typespec/http";
+false
+true
+true
+true
