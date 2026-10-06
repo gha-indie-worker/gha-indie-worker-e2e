@@ -1,0 +1,10 @@
+name: funded-runner-probe
+on:
+  push:
+    branches:
+      - test/rx-variants-20261006
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo funded-runner-ok
