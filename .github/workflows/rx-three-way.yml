@@ -1,0 +1,29 @@
+name: RX three-way validation
+on:
+  push:
+    branches:
+      - test/rx-three-way-20261006
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build mirrored Oreslang compiler
+        run: mvn -q -DskipTests package
+      - name: Resolve runtime classpath
+        run: |
+          mvn -q dependency:build-classpath -Dmdep.outputFile=.rx-classpath
+          echo "ORES_CLASSPATH=$PWD/target/classes:$(cat .rx-classpath)" >> "$GITHUB_ENV"
+      - name: Validate and benchmark RX variants
+        run: python3 rx-validation/validate_and_benchmark.py
