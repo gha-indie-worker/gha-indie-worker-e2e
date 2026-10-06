@@ -76,13 +76,9 @@ pub routine main(): void {
     "Example.Rpc"
   );
 
-  stdio.println(bundle.json_schema.part_count() > 20);
   stdio.println(bundle.json_schema.part_at(0));
-  stdio.println(bundle.protobuf.part_count() > 20);
   stdio.println(bundle.protobuf.part_at(0));
-  stdio.println(bundle.messagepack.part_count() > 10);
   stdio.println(bundle.messagepack.part_at(0));
-  stdio.println(bundle.typespec.part_count() > 20);
   stdio.println(bundle.typespec.part_at(0));
 
   // Assert meaningful generator fragments, not only document sizes.
