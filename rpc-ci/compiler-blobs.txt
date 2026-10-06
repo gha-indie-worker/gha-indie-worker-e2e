@@ -15,7 +15,7 @@ de316dac42fdb07200587a32c422530e2e354c66  src/main/java/dev/oreslang/imports/Imp
 11705078a26495011cbcae4d0d9f78a98fc3a5c6  src/main/java/dev/oreslang/interop/MixedJavaCompiler.java
 40c4cdb69929867da99252a24157b097715588cb  src/main/java/dev/oreslang/interop/MixedSourceUnit.java
 27a79ea0ec91832ffd83d1679b9653076f14a670  src/main/java/dev/oreslang/launcher/OresMain.java
-ab9bf387a9e923d08d8eb149813aba6e7df45422  src/main/java/dev/oreslang/nodes/OresEvalRootNode.java
+9dac590e956bc70d575592c543b30dc13de1a38e  src/main/java/dev/oreslang/nodes/OresEvalRootNode.java
 62ac55ad410d3e07d9494b73b3f658d43de70351  src/main/java/dev/oreslang/nodes/OresInteropRootNode.java
 18cbb9d07f62ee6ca5a11d3642ee1191dfebcc9e  src/main/java/dev/oreslang/OresLanguage.java
 11ceb91e0e99cabc262314e21f118bce5890ac44  src/main/java/dev/oreslang/parser/Lexer.java
@@ -25,7 +25,7 @@ ab8b1ea3ca8863b9ab54c384f9214d51d59fe5c3  src/main/java/dev/oreslang/parser/Toke
 cdbbfdbe8e136de04fc2a427b73257108c1c704b  src/main/java/dev/oreslang/runtime/ActorGroupContext.java
 24c47c9c2db140535a9e0da8de18304fcceff776  src/main/java/dev/oreslang/runtime/ActorMail.java
 238ccf92cd5d59bcc529be445b12c4f14c21b3f5  src/main/java/dev/oreslang/runtime/ActorMailman.java
-d62856f924976319e123912ce00930fc15243f2f  src/main/java/dev/oreslang/runtime/ActorRuntime.java
+4aefc2cc90afc0684373fcc5be40b029d5adf5ed  src/main/java/dev/oreslang/runtime/ActorRuntime.java
 fa33ffdb0f479fa891df78053882ab4c8fd4f042  src/main/java/dev/oreslang/runtime/AsyncRuntime.java
 63826cd4ccdbc316240d448cae9d83c1c7647d29  src/main/java/dev/oreslang/runtime/Awaitable.java
 9d1a30509aecb70f4fd391b982bc44fed05615e9  src/main/java/dev/oreslang/runtime/CapabilityChecker.java
@@ -49,7 +49,7 @@ ef77a3bdb81750b5541d69a2e2e624b150977e5e  src/main/java/dev/oreslang/runtime/Ore
 bb8bf710d5849a1b0daee8c3f3d2055f71c9739f  src/main/java/dev/oreslang/runtime/RuntimeGarbageCollector.java
 90bcb9305c04dfe593cd75045ad604d887d4c66f  src/main/java/dev/oreslang/runtime/RuntimePermissions.java
 65642329daa7d184d082e573666feabddce818a2  src/main/java/dev/oreslang/types/OwnershipChecker.java
-76e2bf5a50c453f7468a38b9f7471d0e8819243c  src/main/java/dev/oreslang/types/TypeChecker.java
+c53660ce5d6d3c5099416b3289e5503bbefec769  src/main/java/dev/oreslang/types/TypeChecker.java
 cdc753a0ab5226c3a7eed4b967578928ac0ea142  src/main/java/dev/oreslang/types/Types.java
 d6b785bf9f70229f08ecfd99dc5f1b0ededd6b99  src/main/java/module-info.java
 b7d162e2377f6c75c883fdcbbee71b7ccfeb892a  src/main/resources/META-INF/native-image/dev.oreslang/oreslang/native-image.properties

@@ -1,2 +1,2 @@
-compiler_source=ores-truffle-oreslang/oreslang-source.java@3a41bed317060cc7cbab1c6be3a0ea92913c6fc9
-rpc_source=ores-truffle-oreslang/oreslang-rpc@fff5027674caa1cf34009c574d1eb413907e7206
+compiler_source=ores-truffle-oreslang/oreslang-source.java@f104a20b45bf305f19d88f540a400f7df37ac4b9
+rpc_source=ores-truffle-oreslang/oreslang-rpc@6a1a714d2536436fc041fe90689d176ceaf37f3b
