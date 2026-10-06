@@ -1,0 +1,237 @@
+import module rpc from "../src/rpc.ores";
+
+fnc ok(Result<bool, String> result): void {
+  stdio.println(result.is_ok());
+  return;
+}
+
+pub routine main(): void {
+  val GetUserRequest = rpc.message("GetUserRequest", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false)
+  ]);
+
+  val User = rpc.message("User", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false),
+    rpc.field("display_name", 2, "2", rpc.string_type(), true, false),
+    rpc.field("tags", 3, "3", rpc.string_type(), false, true)
+  ]);
+
+  let contracts_builder = rpc.builder();
+  ok(contracts_builder.add_message(GetUserRequest));
+  ok(contracts_builder.add_message(User));
+
+  val get_user = rpc.rpc_method(
+    42,
+    "Users",
+    "GetUser",
+    "users.get",
+    "GetUserRequest",
+    "User"
+  );
+
+  ok(contracts_builder.add_rpc_as_http(
+    get_user,
+    "GET",
+    "/users/{id}",
+    1001,
+    7
+  ));
+
+  val built = contracts_builder.build();
+  stdio.println(built.is_ok());
+
+  val contracts = built.unwrap();
+  stdio.println(contracts.message_count());
+  stdio.println(contracts.method_count());
+  stdio.println(contracts.http_handler_count());
+
+  val http = contracts.http_by_contract(42).unwrap();
+  stdio.println(http.method);
+  stdio.println(http.path_template);
+  stdio.println(http.handler_id);
+  stdio.println(http.pipeline_id);
+  stdio.println(http.contract_id);
+  stdio.println(http.operation_id);
+
+  val round_trip_rpc = rpc.rpc_from_http(&http);
+  stdio.println(round_trip_rpc.service);
+  stdio.println(round_trip_rpc.name);
+  stdio.println(round_trip_rpc.request_type);
+  stdio.println(round_trip_rpc.response_type);
+
+  val round_trip_http = rpc.http_from_rpc(
+    &round_trip_rpc,
+    "POST",
+    "/rpc/users/get",
+    1002,
+    8
+  );
+  stdio.println(round_trip_http.contract_id);
+  stdio.println(round_trip_http.operation_id);
+
+  val bundle = rpc.generate_all(
+    &contracts,
+    "https://example.test/schema/rpc",
+    "example.rpc",
+    "Example.Rpc"
+  );
+
+  stdio.println(bundle.json_schema.part_at(0));
+  stdio.println(bundle.protobuf.part_at(0));
+  stdio.println(bundle.messagepack.part_at(0));
+  stdio.println(bundle.typespec.part_at(0));
+
+  // Assert meaningful generator fragments, not only document sizes.
+  stdio.println(bundle.json_schema.has_part("  \"$defs\": {"));
+  stdio.println(bundle.protobuf.has_part("service "));
+  stdio.println(bundle.protobuf.has_part("GetUser"));
+  stdio.println(bundle.messagepack.has_part("mpackdef 1"));
+  stdio.println(bundle.typespec.has_part("@get"));
+
+  // Streaming RPC metadata reaches the gRPC emitter without magic integers.
+  let stream_builder = rpc.builder();
+  ok(stream_builder.add_message(rpc.message("GetUserRequest", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false)
+  ])));
+  ok(stream_builder.add_message(rpc.message("User", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false),
+    rpc.field("display_name", 2, "2", rpc.string_type(), true, false),
+    rpc.field("tags", 3, "3", rpc.string_type(), false, true)
+  ])));
+  ok(stream_builder.add_rpc(rpc.streaming_rpc_method(
+    43,
+    "Users",
+    "WatchUsers",
+    "users.watch",
+    "GetUserRequest",
+    "User",
+    rpc.server_stream()
+  )));
+  val stream_contracts = stream_builder.build().unwrap();
+  stdio.println(rpc.protobuf(&stream_contracts, "example.rpc").has_part("stream "));
+
+  // Fail closed on duplicate wire field numbers.
+  val Bad = rpc.message("Bad", arr[
+    rpc.field("a", 1, "1", rpc.string_type(), true, false),
+    rpc.field("b", 1, "1", rpc.int32_type(), true, false)
+  ]);
+  stdio.println(Bad.is_valid());
+
+  // Protobuf field numbers must stay inside the legal user range.
+  stdio.println(rpc.field(
+    "reserved",
+    19000,
+    "19000",
+    rpc.string_type(),
+    true,
+    false
+  ).is_valid());
+
+  // Named message fields must resolve against the same contract registry.
+  let named_builder = rpc.builder();
+  ok(named_builder.add_message(rpc.message("Wrapper", arr[
+    rpc.field("child", 1, "1", rpc.message_type("MissingChild"), true, false)
+  ])));
+  stdio.println(named_builder.build().is_err());
+
+  // add_http_as_rpc is transactional: duplicate RPC identity must not leave
+  // behind the HTTP half of a failed combined registration.
+  let tx_http_builder = rpc.builder();
+  ok(tx_http_builder.add_message(rpc.message("GetUserRequest", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false)
+  ])));
+  ok(tx_http_builder.add_message(rpc.message("User", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false),
+    rpc.field("display_name", 2, "2", rpc.string_type(), true, false),
+    rpc.field("tags", 3, "3", rpc.string_type(), false, true)
+  ])));
+  ok(tx_http_builder.add_rpc(rpc.rpc_method(
+    42, "Users", "GetUser", "users.get", "GetUserRequest", "User"
+  )));
+  val tx_http_method = rpc.rpc_method(
+    42, "Users", "GetUser", "users.get", "GetUserRequest", "User"
+  );
+  stdio.println(tx_http_builder.add_http_as_rpc(rpc.http_from_rpc(
+    &tx_http_method,
+    "POST",
+    "/alias/users/get",
+    2001,
+    9
+  )).is_err());
+  stdio.println(tx_http_builder.method_count());
+  stdio.println(tx_http_builder.http_handler_count());
+
+  // add_rpc_as_http is transactional in the opposite direction too.
+  let tx_rpc_builder = rpc.builder();
+  ok(tx_rpc_builder.add_message(rpc.message("GetUserRequest", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false)
+  ])));
+  ok(tx_rpc_builder.add_message(rpc.message("User", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false),
+    rpc.field("display_name", 2, "2", rpc.string_type(), true, false),
+    rpc.field("tags", 3, "3", rpc.string_type(), false, true)
+  ])));
+  val tx_rpc_http_method = rpc.rpc_method(
+    42, "Users", "GetUser", "users.get", "GetUserRequest", "User"
+  );
+  ok(tx_rpc_builder.add_http(rpc.http_from_rpc(
+    &tx_rpc_http_method,
+    "GET",
+    "/users/{id}",
+    1001,
+    7
+  )));
+  stdio.println(tx_rpc_builder.add_rpc_as_http(
+    rpc.rpc_method(42, "Users", "GetUser", "users.get", "GetUserRequest", "User"),
+    "GET",
+    "/users/{id}",
+    1001,
+    7
+  ).is_err());
+  stdio.println(tx_rpc_builder.method_count());
+  stdio.println(tx_rpc_builder.http_handler_count());
+
+  // IDs alone are not enough: the full HTTP/RPC identity must agree.
+  let mismatch_builder = rpc.builder();
+  ok(mismatch_builder.add_message(rpc.message("GetUserRequest", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false)
+  ])));
+  ok(mismatch_builder.add_message(rpc.message("User", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false),
+    rpc.field("display_name", 2, "2", rpc.string_type(), true, false),
+    rpc.field("tags", 3, "3", rpc.string_type(), false, true)
+  ])));
+  ok(mismatch_builder.add_rpc(rpc.rpc_method(
+    42, "Users", "GetUser", "users.get", "GetUserRequest", "User"
+  )));
+  ok(mismatch_builder.add_http(rpc.http_handler(
+    "GET",
+    "/users/{id}",
+    1001,
+    7,
+    42,
+    "users.get",
+    "WrongService",
+    "GetUser",
+    "GetUserRequest",
+    "User"
+  )));
+  stdio.println(mismatch_builder.build().is_err());
+
+  // Fail closed when an RPC references a message not present in the registry.
+  let missing_builder = rpc.builder();
+  ok(missing_builder.add_message(rpc.message("GetUserRequest", arr[
+    rpc.field("id", 1, "1", rpc.string_type(), true, false)
+  ])));
+  ok(missing_builder.add_rpc(rpc.rpc_method(
+    99,
+    "Users",
+    "Missing",
+    "users.missing",
+    "GetUserRequest",
+    "MissingResponse"
+  )));
+  stdio.println(missing_builder.build().is_err());
+
+  return;
+}
