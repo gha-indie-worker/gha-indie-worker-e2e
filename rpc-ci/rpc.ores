@@ -40,6 +40,14 @@ define module rpc as
     pub val bool required;
     pub val bool repeated;
 
+    pub type_kind(): int {
+      return self.type_value.kind;
+    }
+
+    pub type_name(): String {
+      return self.type_value.name;
+    }
+
     pub is_valid(): bool {
       if self.name == ""; do
         return false;
@@ -717,22 +725,22 @@ define module rpc as
     pub val TextDocument typespec;
   end
 
-  fnc emit_json_type(&mut TextDocument out, &TypeRef type_value): void {
-    if type_value.kind == 0; do
+  fnc emit_json_type(&mut TextDocument out, int type_kind, String type_name): void {
+    if type_kind == 0; do
       out.write("{\"type\":\"string\"}");
-    elseif type_value.kind == 1; do
+    elseif type_kind == 1; do
       out.write("{\"type\":\"boolean\"}");
-    elseif type_value.kind == 2 || type_value.kind == 3; do
+    elseif type_kind == 2 || type_kind == 3; do
       out.write("{\"type\":\"integer\"}");
-    elseif type_value.kind == 4 || type_value.kind == 5; do
+    elseif type_kind == 4 || type_kind == 5; do
       out.write("{\"type\":\"number\"}");
-    elseif type_value.kind == 6; do
+    elseif type_kind == 6; do
       out.write("{\"type\":\"string\",\"contentEncoding\":\"base64\"}");
-    elseif type_value.kind == 7; do
+    elseif type_kind == 7; do
       out.write("{\"$ref\":\"#/$defs/");
-      out.write(type_value.name);
+      out.write(type_name);
       out.write("\"}");
-    elseif type_value.kind == 8; do
+    elseif type_kind == 8; do
       out.write("{\"type\":\"string\",\"format\":\"date-time\"}");
     else
       out.write("{}");
@@ -740,24 +748,24 @@ define module rpc as
     return;
   }
 
-  fnc emit_proto_type(&mut TextDocument out, &TypeRef type_value): void {
-    if type_value.kind == 0; do
+  fnc emit_proto_type(&mut TextDocument out, int type_kind, String type_name): void {
+    if type_kind == 0; do
       out.write("string");
-    elseif type_value.kind == 1; do
+    elseif type_kind == 1; do
       out.write("bool");
-    elseif type_value.kind == 2; do
+    elseif type_kind == 2; do
       out.write("int32");
-    elseif type_value.kind == 3; do
+    elseif type_kind == 3; do
       out.write("int64");
-    elseif type_value.kind == 4; do
+    elseif type_kind == 4; do
       out.write("float");
-    elseif type_value.kind == 5; do
+    elseif type_kind == 5; do
       out.write("double");
-    elseif type_value.kind == 6; do
+    elseif type_kind == 6; do
       out.write("bytes");
-    elseif type_value.kind == 7; do
-      out.write(type_value.name);
-    elseif type_value.kind == 8; do
+    elseif type_kind == 7; do
+      out.write(type_name);
+    elseif type_kind == 8; do
       out.write("google.protobuf.Timestamp");
     else
       out.write("google.protobuf.Value");
@@ -765,24 +773,24 @@ define module rpc as
     return;
   }
 
-  fnc emit_typespec_type(&mut TextDocument out, &TypeRef type_value): void {
-    if type_value.kind == 0; do
+  fnc emit_typespec_type(&mut TextDocument out, int type_kind, String type_name): void {
+    if type_kind == 0; do
       out.write("string");
-    elseif type_value.kind == 1; do
+    elseif type_kind == 1; do
       out.write("boolean");
-    elseif type_value.kind == 2; do
+    elseif type_kind == 2; do
       out.write("int32");
-    elseif type_value.kind == 3; do
+    elseif type_kind == 3; do
       out.write("int64");
-    elseif type_value.kind == 4; do
+    elseif type_kind == 4; do
       out.write("float32");
-    elseif type_value.kind == 5; do
+    elseif type_kind == 5; do
       out.write("float64");
-    elseif type_value.kind == 6; do
+    elseif type_kind == 6; do
       out.write("bytes");
-    elseif type_value.kind == 7; do
-      out.write(type_value.name);
-    elseif type_value.kind == 8; do
+    elseif type_kind == 7; do
+      out.write(type_name);
+    elseif type_kind == 8; do
       out.write("utcDateTime");
     else
       out.write("unknown");
@@ -790,20 +798,20 @@ define module rpc as
     return;
   }
 
-  fnc emit_msgpack_type(&mut TextDocument out, &TypeRef type_value): void {
-    if type_value.kind == 0; do
+  fnc emit_msgpack_type(&mut TextDocument out, int type_kind, String type_name): void {
+    if type_kind == 0; do
       out.write("str");
-    elseif type_value.kind == 1; do
+    elseif type_kind == 1; do
       out.write("bool");
-    elseif type_value.kind == 2 || type_value.kind == 3; do
+    elseif type_kind == 2 || type_kind == 3; do
       out.write("int");
-    elseif type_value.kind == 4 || type_value.kind == 5; do
+    elseif type_kind == 4 || type_kind == 5; do
       out.write("float");
-    elseif type_value.kind == 6; do
+    elseif type_kind == 6; do
       out.write("bin");
-    elseif type_value.kind == 7; do
-      out.write(type_value.name);
-    elseif type_value.kind == 8; do
+    elseif type_kind == 7; do
+      out.write(type_name);
+    elseif type_kind == 8; do
       out.write("timestamp");
     else
       out.write("any");
@@ -839,10 +847,10 @@ define module rpc as
 
         if field_value.repeated; do
           out.write("{\"type\":\"array\",\"items\":");
-          emit_json_type(&mut out, &field_value.type_value);
+          emit_json_type(&mut out, field_value.type_kind(), field_value.type_name());
           out.write("}");
         else
-          emit_json_type(&mut out, &field_value.type_value);
+          emit_json_type(&mut out, field_value.type_kind(), field_value.type_name());
         fi
 
         if field_index + 1 < message_value.field_count(); do
@@ -914,7 +922,7 @@ define module rpc as
         elseif !field_value.required; do
           out.write("optional ");
         fi
-        emit_proto_type(&mut out, &field_value.type_value);
+        emit_proto_type(&mut out, field_value.type_kind(), field_value.type_name());
         out.space();
         out.write(field_value.name);
         out.write(" = ");
@@ -993,10 +1001,10 @@ define module rpc as
         out.write(": ");
         if field_value.repeated; do
           out.write("array<");
-          emit_msgpack_type(&mut out, &field_value.type_value);
+          emit_msgpack_type(&mut out, field_value.type_kind(), field_value.type_name());
           out.write(">");
         else
-          emit_msgpack_type(&mut out, &field_value.type_value);
+          emit_msgpack_type(&mut out, field_value.type_kind(), field_value.type_name());
         fi
         if field_value.required; do
           out.write(" required");
@@ -1061,10 +1069,10 @@ define module rpc as
         fi
         out.write(": ");
         if field_value.repeated; do
-          emit_typespec_type(&mut out, &field_value.type_value);
+          emit_typespec_type(&mut out, field_value.type_kind(), field_value.type_name());
           out.write("[]");
         else
-          emit_typespec_type(&mut out, &field_value.type_value);
+          emit_typespec_type(&mut out, field_value.type_kind(), field_value.type_name());
         fi
         out.line(";");
       }
