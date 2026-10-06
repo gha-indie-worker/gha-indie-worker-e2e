@@ -19,7 +19,7 @@ de316dac42fdb07200587a32c422530e2e354c66  src/main/java/dev/oreslang/imports/Imp
 62ac55ad410d3e07d9494b73b3f658d43de70351  src/main/java/dev/oreslang/nodes/OresInteropRootNode.java
 18cbb9d07f62ee6ca5a11d3642ee1191dfebcc9e  src/main/java/dev/oreslang/OresLanguage.java
 0cf7df3e1fd70bc68811074e3669324d1623b3c3  src/main/java/dev/oreslang/parser/Lexer.java
-a06636e16d9c3b6c6fae680a481fae81ca093433  src/main/java/dev/oreslang/parser/Parser.java
+4db828e4c11cf9c509598163f3c5583f8a97affb  src/main/java/dev/oreslang/parser/Parser.java
 34fc369835c878659ba9fa30b29409ec96908df0  src/main/java/dev/oreslang/parser/Token.java
 74d12762c4e0a57eae398e48d2ca8e58b5856bd5  src/main/java/dev/oreslang/runtime/ActorEventBus.java
 cdbbfdbe8e136de04fc2a427b73257108c1c704b  src/main/java/dev/oreslang/runtime/ActorGroupContext.java
