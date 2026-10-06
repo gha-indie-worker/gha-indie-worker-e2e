@@ -1,0 +1,8 @@
+true
+true
+1001
+7
+42
+users.get
+/users/{id}
+abc-123

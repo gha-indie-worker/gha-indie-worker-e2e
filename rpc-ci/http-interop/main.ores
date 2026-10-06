@@ -1,0 +1,51 @@
+import module rpc from "../oreslang-rpc/src/rpc.ores";
+import module http_routing from "../oreslang-http-routing/src/http_routing.ores";
+
+pub routine main(): void {
+  val method = rpc.rpc_method(
+    42,
+    "Users",
+    "GetUser",
+    "users.get",
+    "GetUserRequest",
+    "User"
+  );
+
+  val binding = rpc.http_from_rpc(
+    &method,
+    "GET",
+    "/users/{id}",
+    1001,
+    7
+  );
+
+  let routes = http_routing.builder();
+  val pattern = http_routing.path("/users/{id}", arr[
+    http_routing.literal("users"),
+    http_routing.param("id")
+  ]);
+
+  val registered = routes.route(
+    binding.method,
+    pattern,
+    binding.handler_id,
+    binding.pipeline_id,
+    binding.contract_id,
+    binding.operation_id
+  );
+  stdio.println(registered.is_ok());
+
+  val router = routes.build();
+  val request_path = http_routing.request_path(arr["users", "abc-123"]);
+  val decision = router.resolve("GET", request_path);
+
+  stdio.println(decision.is_match());
+  stdio.println(decision.handler_id);
+  stdio.println(decision.pipeline_id);
+  stdio.println(decision.contract_id);
+  stdio.println(decision.operation_id);
+  stdio.println(decision.route_template);
+  stdio.println(router.capture_one(decision, "id").unwrap());
+
+  return;
+}
