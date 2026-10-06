@@ -1,2 +1,2 @@
 compiler_source=ores-truffle-oreslang/oreslang-source.java@3a41bed317060cc7cbab1c6be3a0ea92913c6fc9
-rpc_source=ores-truffle-oreslang/oreslang-rpc@feat/native-rpc-contract-codegen
+rpc_source=ores-truffle-oreslang/oreslang-rpc@74dc9bdd732c68866af2b4b85d6882ea0cf50042

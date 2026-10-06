@@ -92,6 +92,79 @@ pub routine main(): void {
   ]);
   stdio.println(Bad.is_valid());
 
+  // Protobuf field numbers must stay inside the legal user range.
+  stdio.println(rpc.field(
+    "reserved",
+    19000,
+    "19000",
+    rpc.string_type(),
+    true,
+    false
+  ).is_valid());
+
+  // Named message fields must resolve against the same contract registry.
+  let named_builder = rpc.builder();
+  ok(named_builder.add_message(rpc.message("Wrapper", arr[
+    rpc.field("child", 1, "1", rpc.message_type("MissingChild"), true, false)
+  ])));
+  stdio.println(named_builder.build().is_err());
+
+  // add_http_as_rpc is transactional: duplicate RPC identity must not leave
+  // behind the HTTP half of a failed combined registration.
+  let tx_http_builder = rpc.builder();
+  ok(tx_http_builder.add_message(GetUserRequest));
+  ok(tx_http_builder.add_message(User));
+  ok(tx_http_builder.add_rpc(get_user));
+  stdio.println(tx_http_builder.add_http_as_rpc(rpc.http_from_rpc(
+    get_user,
+    "POST",
+    "/alias/users/get",
+    2001,
+    9
+  )).is_err());
+  stdio.println(tx_http_builder.method_count());
+  stdio.println(tx_http_builder.http_handler_count());
+
+  // add_rpc_as_http is transactional in the opposite direction too.
+  let tx_rpc_builder = rpc.builder();
+  ok(tx_rpc_builder.add_message(GetUserRequest));
+  ok(tx_rpc_builder.add_message(User));
+  ok(tx_rpc_builder.add_http(rpc.http_from_rpc(
+    get_user,
+    "GET",
+    "/users/{id}",
+    1001,
+    7
+  )));
+  stdio.println(tx_rpc_builder.add_rpc_as_http(
+    get_user,
+    "GET",
+    "/users/{id}",
+    1001,
+    7
+  ).is_err());
+  stdio.println(tx_rpc_builder.method_count());
+  stdio.println(tx_rpc_builder.http_handler_count());
+
+  // IDs alone are not enough: the full HTTP/RPC identity must agree.
+  let mismatch_builder = rpc.builder();
+  ok(mismatch_builder.add_message(GetUserRequest));
+  ok(mismatch_builder.add_message(User));
+  ok(mismatch_builder.add_rpc(get_user));
+  ok(mismatch_builder.add_http(rpc.http_handler(
+    "GET",
+    "/users/{id}",
+    1001,
+    7,
+    42,
+    "users.get",
+    "WrongService",
+    "GetUser",
+    "GetUserRequest",
+    "User"
+  )));
+  stdio.println(mismatch_builder.build().is_err());
+
   // Fail closed when an RPC references a message not present in the registry.
   let missing_builder = rpc.builder();
   ok(missing_builder.add_message(GetUserRequest));

@@ -44,7 +44,11 @@ define module rpc as
       if self.name == ""; do
         return false;
       fi
-      if self.number <= 0 || self.number_text == ""; do
+      if self.number <= 0 || self.number > 536870911 || self.number_text == ""; do
+        return false;
+      fi
+      // Protocol Buffers reserves 19000..19999 for its own implementation.
+      if self.number >= 19000 && self.number <= 19999; do
         return false;
       fi
       return self.type_value.is_valid();
@@ -237,6 +241,18 @@ define module rpc as
     let Array<RpcMethodDef> methods_value = new Array<RpcMethodDef>();
     let Array<HttpHandlerDef> http_handlers_value = new Array<HttpHandlerDef>();
 
+    pub message_count(): int {
+      return self.messages_value.size;
+    }
+
+    pub method_count(): int {
+      return self.methods_value.size;
+    }
+
+    pub http_handler_count(): int {
+      return self.http_handlers_value.size;
+    }
+
     pub add_message(MessageDef message_value): Result<bool, String> {
       if !message_value.is_valid(); do
         return Err("invalid message definition");
@@ -252,7 +268,7 @@ define module rpc as
       return Ok(true);
     }
 
-    pub add_rpc(RpcMethodDef method_value): Result<bool, String> {
+    check_rpc(RpcMethodDef method_value): Result<bool, String> {
       if !method_value.is_valid(); do
         return Err("invalid RPC method definition");
       fi
@@ -269,11 +285,10 @@ define module rpc as
         fi
       }
 
-      self.methods_value.add(method_value);
       return Ok(true);
     }
 
-    pub add_http(HttpHandlerDef handler_value): Result<bool, String> {
+    check_http(HttpHandlerDef handler_value): Result<bool, String> {
       if !handler_value.is_valid(); do
         return Err("invalid HTTP handler definition");
       fi
@@ -290,26 +305,45 @@ define module rpc as
         fi
       }
 
+      return Ok(true);
+    }
+
+    pub add_rpc(RpcMethodDef method_value): Result<bool, String> {
+      val Result<bool, String> checked = self.check_rpc(method_value);
+      if checked.is_err(); do
+        return checked;
+      fi
+      self.methods_value.add(method_value);
+      return Ok(true);
+    }
+
+    pub add_http(HttpHandlerDef handler_value): Result<bool, String> {
+      val Result<bool, String> checked = self.check_http(handler_value);
+      if checked.is_err(); do
+        return checked;
+      fi
       self.http_handlers_value.add(handler_value);
       return Ok(true);
     }
 
-    // Adds an HTTP handler and derives the corresponding RPC method.
+    // Transactional: neither collection changes unless both definitions pass.
     pub add_http_as_rpc(HttpHandlerDef handler_value): Result<bool, String> {
-      val Result<bool, String> http_result = self.add_http(handler_value);
-      if http_result.is_err(); do
-        return http_result;
+      val RpcMethodDef method_value = rpc_from_http(handler_value);
+      val Result<bool, String> http_checked = self.check_http(handler_value);
+      if http_checked.is_err(); do
+        return http_checked;
+      fi
+      val Result<bool, String> rpc_checked = self.check_rpc(method_value);
+      if rpc_checked.is_err(); do
+        return rpc_checked;
       fi
 
-      val Result<bool, String> rpc_result = self.add_rpc(rpc_from_http(handler_value));
-      if rpc_result.is_err(); do
-        return rpc_result;
-      fi
-
+      self.http_handlers_value.add(handler_value);
+      self.methods_value.add(method_value);
       return Ok(true);
     }
 
-    // Adds an RPC method and derives its HTTP handler binding.
+    // Transactional: neither collection changes unless both definitions pass.
     pub add_rpc_as_http(
       RpcMethodDef method_value,
       String http_method,
@@ -317,21 +351,47 @@ define module rpc as
       int handler_id,
       int pipeline_id
     ): Result<bool, String> {
-      val Result<bool, String> rpc_result = self.add_rpc(method_value);
-      if rpc_result.is_err(); do
-        return rpc_result;
-      fi
-
-      return self.add_http(http_from_rpc(
+      val HttpHandlerDef handler_value = http_from_rpc(
         method_value,
         http_method,
         path_template,
         handler_id,
         pipeline_id
-      ));
+      );
+
+      val Result<bool, String> rpc_checked = self.check_rpc(method_value);
+      if rpc_checked.is_err(); do
+        return rpc_checked;
+      fi
+      val Result<bool, String> http_checked = self.check_http(handler_value);
+      if http_checked.is_err(); do
+        return http_checked;
+      fi
+
+      self.methods_value.add(method_value);
+      self.http_handlers_value.add(handler_value);
+      return Ok(true);
     }
 
     pub build(): Result<ContractSet, String> {
+      // Every named message field must resolve inside this contract set.
+      for (const owner_message of self.messages_value) {
+        for (let int field_index = 0; field_index < owner_message.field_count(); field_index = field_index + 1) {
+          val FieldDef field_value = owner_message.field_at(field_index);
+          if field_value.type_value.is_named(); do
+            let bool named_type_found = false;
+            for (const candidate_message of self.messages_value) {
+              if candidate_message.name == field_value.type_value.name; do
+                named_type_found = true;
+              fi
+            }
+            if !named_type_found; do
+              return Err("message field references an unregistered message type");
+            fi
+          fi
+        }
+      }
+
       // Cross-reference every RPC input/output against the message table.
       for (const method_value of self.methods_value) {
         let bool request_found = false;
@@ -360,6 +420,13 @@ define module rpc as
         for (const method_value of self.methods_value) {
           if method_value.contract_id == handler_value.contract_id &&
              method_value.operation_id == handler_value.operation_id; do
+            if method_value.service != handler_value.rpc_service ||
+               method_value.name != handler_value.rpc_name ||
+               method_value.request_type != handler_value.request_type ||
+               method_value.response_type != handler_value.response_type ||
+               method_value.streaming_kind != handler_value.streaming_kind; do
+              return Err("HTTP/RPC contract metadata mismatch");
+            fi
             found = true;
           fi
         }
