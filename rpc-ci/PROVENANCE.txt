@@ -1,3 +1,3 @@
 compiler_source=ores-truffle-oreslang/oreslang-source.java@43ec8b5e1a2c36e9f0b277dcc609f5383a326f37
-rpc_source=ores-truffle-oreslang/oreslang-rpc@e9af5b01942b31e0a4850d68849f0ef00cf788b5
-rpc_tree=c664428e3069de4b0c142e4e5f98ccfe163e7ba1
+rpc_source=ores-truffle-oreslang/oreslang-rpc@e24797c1d9b23ffa430c1e610d9205c112a79caf
+rpc_tree=24325867836dc2a8b18fa0cc370f32efbaa10735
