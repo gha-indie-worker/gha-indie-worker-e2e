@@ -190,6 +190,7 @@ public final class TreeShaker {
             if (expression instanceof Ast.TypeTestExpr test) return containsLambda(test.value());
             if (expression instanceof Ast.PatternTestExpr test) return containsLambda(test.value());
             if (expression instanceof Ast.CastExpr cast) return containsLambda(cast.value());
+            if (expression instanceof Ast.SpreadExpr spread) return containsLambda(spread.expression());
             if (expression instanceof Ast.BinaryExpr binary) {
                 return containsLambda(binary.left()) || containsLambda(binary.right());
             }
@@ -201,6 +202,9 @@ public final class TreeShaker {
                 return containsLambda(conditional.condition())
                         || containsLambda(conditional.whenTrue())
                         || containsLambda(conditional.whenFalse());
+            }
+            if (expression instanceof Ast.RuntimeCallExpr runtime) {
+                return runtime.arguments().stream().anyMatch(this::containsLambda);
             }
             if (expression instanceof Ast.CallExpr call) {
                 if (containsLambda(call.callee())) return true;
@@ -276,6 +280,9 @@ public final class TreeShaker {
                         cast.targetType(),
                         cast.mode());
             }
+            if (expression instanceof Ast.SpreadExpr spread) {
+                return new Ast.SpreadExpr(substitute(spread.expression(), substitutions, shadowed));
+            }
             if (expression instanceof Ast.BinaryExpr binary) {
                 return new Ast.BinaryExpr(
                         binary.operator(),
@@ -297,6 +304,13 @@ public final class TreeShaker {
                         substitute(conditional.condition(), substitutions, shadowed),
                         substitute(conditional.whenTrue(), substitutions, shadowed),
                         substitute(conditional.whenFalse(), substitutions, shadowed));
+            }
+            if (expression instanceof Ast.RuntimeCallExpr runtime) {
+                List<Ast.Expr> arguments = new ArrayList<>();
+                for (Ast.Expr argument : runtime.arguments()) {
+                    arguments.add(substitute(argument, substitutions, shadowed));
+                }
+                return new Ast.RuntimeCallExpr(runtime.operation(), arguments);
             }
             if (expression instanceof Ast.CallExpr call) {
                 List<Ast.Expr> arguments = new ArrayList<>();
@@ -354,7 +368,7 @@ public final class TreeShaker {
                                     field.name(),
                                     substitute(field.value(), substitutions, shadowed)));
                 }
-                return new Ast.ObjectExpr(fields);
+                return new Ast.ObjectExpr(fields, object.inferredStruct());
             }
             if (expression instanceof Ast.LambdaExpr lambda) {
                 LinkedHashSet<String> nestedShadowed = new LinkedHashSet<>(shadowed);
@@ -422,6 +436,20 @@ public final class TreeShaker {
             }
         }
 
+        private boolean constantEquals(Object left, Object right) {
+            if (left == right) return true;
+            if (left == null || right == null) return false;
+            if (left instanceof Number a && right instanceof Number b) {
+                boolean aIntegral = a instanceof Byte || a instanceof Short
+                        || a instanceof Integer || a instanceof Long;
+                boolean bIntegral = b instanceof Byte || b instanceof Short
+                        || b instanceof Integer || b instanceof Long;
+                if (aIntegral && bIntegral) return a.longValue() == b.longValue();
+                return a.doubleValue() == b.doubleValue();
+            }
+            return Objects.equals(left, right);
+        }
+
         private Object evaluate(Ast.Expr expression, String module, Map<String, Object> locals) {
             if (expression == null) return UNKNOWN;
             if (expression instanceof Ast.LiteralExpr literal) return literal.value();
@@ -454,8 +482,8 @@ public final class TreeShaker {
                 return switch (binary.operator()) {
                     case "&&" -> left instanceof Boolean l && right instanceof Boolean r ? l && r : UNKNOWN;
                     case "||" -> left instanceof Boolean l && right instanceof Boolean r ? l || r : UNKNOWN;
-                    case "==" -> Objects.equals(left, right);
-                    case "!=" -> !Objects.equals(left, right);
+                    case "eq", "==" -> constantEquals(left, right);
+                    case "neq", "!=" -> !constantEquals(left, right);
                     case "<" -> compare(left, right, c -> c < 0);
                     case "<=" -> compare(left, right, c -> c <= 0);
                     case ">" -> compare(left, right, c -> c > 0);
@@ -503,6 +531,8 @@ public final class TreeShaker {
                         function.kind(),
                         function.visibility(),
                         function.async(),
+                        function.generator(),
+                        function.structural(),
                         function.nonLexical(),
                         function.actorKind(),
                         function.genericParameters(),
@@ -523,12 +553,27 @@ public final class TreeShaker {
                         field.visibility(),
                         field.bindingKind(),
                         field.type(),
-                        initializer);
+                        field.annotations(),
+                        initializer,
+                        field.mutableReferent());
             }
             if (declaration instanceof Ast.ClassDecl klass) {
                 List<Ast.FieldDecl> fields = new ArrayList<>();
                 for (Ast.FieldDecl field : klass.fields()) {
                     fields.add((Ast.FieldDecl) rewriteDeclaration(module, field));
+                }
+                Ast.ConstructorDecl constructor = klass.constructor();
+                if (constructor != null) {
+                    LinkedHashMap<String, Object> locals = new LinkedHashMap<>();
+                    locals.put("self", UNKNOWN);
+                    for (Ast.Param parameter : constructor.parameters()) {
+                        locals.put(parameter.name(), UNKNOWN);
+                    }
+                    constructor = new Ast.ConstructorDecl(
+                            constructor.visibility(),
+                            constructor.parameters(),
+                            constructor.annotations(),
+                            rewriteStatements(constructor.body(), module, locals));
                 }
                 List<Ast.MethodDecl> methods = new ArrayList<>();
                 for (Ast.MethodDecl method : klass.methods()) {
@@ -541,6 +586,7 @@ public final class TreeShaker {
                             method.isStatic(),
                             method.isAbstract(),
                             method.async(),
+                            method.structural(),
                             method.explicitReceiverType(),
                             method.genericParameters(),
                             method.parameters(),
@@ -550,12 +596,14 @@ public final class TreeShaker {
                 }
                 return new Ast.ClassDecl(
                         klass.name(),
+                        klass.visibility(),
                         klass.isAbstract(),
                         klass.actorKind(),
                         klass.genericParameters(),
                         klass.parents(),
                         klass.interfaces(),
                         fields,
+                        constructor,
                         methods);
             }
             return declaration;
@@ -583,7 +631,11 @@ public final class TreeShaker {
                         : evaluate(initializer, module, locals);
                 locals.put(binding.name(), value);
                 return List.of(new Ast.BindingStmt(
-                        binding.kind(), binding.declaredType(), binding.name(), initializer));
+                        binding.kind(),
+                        binding.declaredType(),
+                        binding.name(),
+                        initializer,
+                        binding.mutableReferent()));
             }
             if (statement instanceof Ast.DestructureStmt destructure) {
                 Ast.Expr initializer = rewriteExpression(destructure.initializer(), module, locals);
@@ -596,6 +648,11 @@ public final class TreeShaker {
             if (statement instanceof Ast.ReturnStmt returned) {
                 return List.of(new Ast.ReturnStmt(
                         rewriteExpression(returned.value(), module, locals)));
+            }
+            if (statement instanceof Ast.YieldStmt yielded) {
+                return List.of(new Ast.YieldStmt(
+                        rewriteExpression(yielded.value(), module, locals),
+                        yielded.delegated()));
             }
             if (statement instanceof Ast.ExprStmt expression) {
                 return List.of(new Ast.ExprStmt(
@@ -677,6 +734,28 @@ public final class TreeShaker {
                         cases,
                         rewriteStatements(switched.defaultBody(), module, new LinkedHashMap<>(locals))));
             }
+            if (statement instanceof Ast.SelectStmt selected) {
+                List<Ast.SelectArm> arms = new ArrayList<>();
+                for (Ast.SelectArm arm : selected.arms()) {
+                    LinkedHashMap<String, Object> armLocals =
+                            new LinkedHashMap<>(locals);
+                    if (arm.bindingName() != null) {
+                        armLocals.put(arm.bindingName(), UNKNOWN);
+                    }
+                    arms.add(new Ast.SelectArm(
+                            arm.operation(),
+                            rewriteExpression(arm.channel(), module, locals),
+                            rewriteExpression(arm.value(), module, locals),
+                            arm.bindingKind(),
+                            arm.bindingName(),
+                            rewriteStatements(arm.body(), module, armLocals),
+                            arm.mutableReferent()));
+                }
+                return List.of(new Ast.SelectStmt(
+                        selected.mode(),
+                        selected.policy(),
+                        arms));
+            }
             if (statement instanceof Ast.TryStmt tried) {
                 LinkedHashMap<String, Object> catchLocals = new LinkedHashMap<>(locals);
                 if (tried.errorName() != null) catchLocals.put(tried.errorName(), UNKNOWN);
@@ -695,6 +774,7 @@ public final class TreeShaker {
                 return List.of(new Ast.ForOfDestructureStmt(
                         loop.bindings(),
                         iterable,
+                        loop.asyncIteration(),
                         rewriteStatements(loop.body(), module, bodyLocals)));
             }
             if (statement instanceof Ast.ForOfStmt loop) {
@@ -705,7 +785,9 @@ public final class TreeShaker {
                         loop.bindingKind(),
                         loop.bindingName(),
                         iterable,
-                        rewriteStatements(loop.body(), module, bodyLocals)));
+                        loop.asyncIteration(),
+                        rewriteStatements(loop.body(), module, bodyLocals),
+                        loop.mutableReferent()));
             }
             if (statement instanceof Ast.ForStmt loop) {
                 LinkedHashMap<String, Object> loopLocals = new LinkedHashMap<>(locals);
@@ -752,6 +834,9 @@ public final class TreeShaker {
                         cast.targetType(),
                         cast.mode());
             }
+            if (expression instanceof Ast.SpreadExpr spread) {
+                return new Ast.SpreadExpr(rewriteExpression(spread.expression(), module, locals));
+            }
             if (expression instanceof Ast.BinaryExpr binary) {
                 Ast.Expr left = rewriteExpression(binary.left(), module, locals);
                 Ast.Expr right = rewriteExpression(binary.right(), module, locals);
@@ -783,6 +868,13 @@ public final class TreeShaker {
                         condition,
                         rewriteExpression(conditional.whenTrue(), module, locals),
                         rewriteExpression(conditional.whenFalse(), module, locals));
+            }
+            if (expression instanceof Ast.RuntimeCallExpr runtime) {
+                List<Ast.Expr> arguments = new ArrayList<>();
+                for (Ast.Expr argument : runtime.arguments()) {
+                    arguments.add(rewriteExpression(argument, module, locals));
+                }
+                return new Ast.RuntimeCallExpr(runtime.operation(), arguments);
             }
             if (expression instanceof Ast.CallExpr call) {
                 Ast.Expr callee = rewriteExpression(call.callee(), module, locals);
@@ -822,6 +914,19 @@ public final class TreeShaker {
             if (expression instanceof Ast.AwaitExpr awaited) {
                 return new Ast.AwaitExpr(rewriteExpression(awaited.expression(), module, locals));
             }
+            if (expression instanceof Ast.ChannelOpExpr operation) {
+                return new Ast.ChannelOpExpr(
+                        operation.operation(),
+                        operation.mode(),
+                        rewriteExpression(operation.channel(), module, locals),
+                        rewriteExpression(operation.value(), module, locals));
+            }
+            if (expression instanceof Ast.DynamicSelectExpr selected) {
+                return new Ast.DynamicSelectExpr(
+                        selected.mode(),
+                        selected.policy(),
+                        rewriteExpression(selected.cases(), module, locals));
+            }
             if (expression instanceof Ast.ListExpr list) {
                 List<Ast.Expr> elements = new ArrayList<>();
                 for (Ast.Expr element : list.elements()) {
@@ -847,7 +952,7 @@ public final class TreeShaker {
                                     field.name(),
                                     rewriteExpression(field.value(), module, locals)));
                 }
-                return new Ast.ObjectExpr(fields);
+                return new Ast.ObjectExpr(fields, object.inferredStruct());
             }
             if (expression instanceof Ast.LambdaExpr lambda) {
                 LinkedHashMap<String, Object> lambdaLocals = new LinkedHashMap<>(locals);
@@ -908,8 +1013,10 @@ public final class TreeShaker {
             if (declaration instanceof Ast.InterfaceDecl iface) {
                 return iface.visibility() == Ast.Visibility.PUBLIC;
             }
-            // Classes and aliases currently have no declaration-level visibility.
-            return declaration instanceof Ast.ClassDecl || declaration instanceof Ast.TypeAliasDecl;
+            if (declaration instanceof Ast.ClassDecl klass) {
+                return klass.visibility() == Ast.Visibility.PUBLIC;
+            }
+            return declaration instanceof Ast.TypeAliasDecl;
         }
 
         private void mark(String id) {
@@ -920,7 +1027,8 @@ public final class TreeShaker {
             for (Ast.ModuleDecl module : input.modules()) {
                 if (!module.name().equals(moduleName)) continue;
                 for (Ast.Decl declaration : module.declarations()) {
-                    boolean exposed = declaration instanceof Ast.ClassDecl
+                    boolean exposed = declaration instanceof Ast.ClassDecl klass
+                                    && klass.visibility() == Ast.Visibility.PUBLIC
                             || declaration instanceof Ast.FunctionDecl fn
                                     && fn.visibility() == Ast.Visibility.PUBLIC
                             || declaration instanceof Ast.FieldDecl field
@@ -970,6 +1078,15 @@ public final class TreeShaker {
                 for (Ast.FieldDecl field : klass.fields()) {
                     scanType(field.type());
                     scanExpression(module, field.initializer(), Set.of("self"));
+                }
+                if (klass.constructor() != null) {
+                    Ast.ConstructorDecl constructor = klass.constructor();
+                    for (Ast.Param parameter : constructor.parameters()) scanType(parameter.type());
+                    for (Ast.Annotation annotation : constructor.annotations()) scanAnnotation(annotation);
+                    LinkedHashSet<String> locals = new LinkedHashSet<>();
+                    locals.add("self");
+                    for (Ast.Param parameter : constructor.parameters()) locals.add(parameter.name());
+                    scanStatements(module, constructor.body(), locals);
                 }
                 for (Ast.MethodDecl method : klass.methods()) {
                     scanType(method.explicitReceiverType());
@@ -1027,6 +1144,8 @@ public final class TreeShaker {
                     }
                 } else if (statement instanceof Ast.ReturnStmt returned) {
                     scanExpression(module, returned.value(), locals);
+                } else if (statement instanceof Ast.YieldStmt yielded) {
+                    scanExpression(module, yielded.value(), locals);
                 } else if (statement instanceof Ast.ExprStmt expression) {
                     scanExpression(module, expression.expression(), locals);
                 } else if (statement instanceof Ast.DeferStmt deferred) {
@@ -1057,6 +1176,17 @@ public final class TreeShaker {
                         scanStatements(module, arm.body(), new LinkedHashSet<>(locals));
                     }
                     scanStatements(module, switched.defaultBody(), new LinkedHashSet<>(locals));
+                } else if (statement instanceof Ast.SelectStmt selected) {
+                    for (Ast.SelectArm arm : selected.arms()) {
+                        scanExpression(module, arm.channel(), locals);
+                        scanExpression(module, arm.value(), locals);
+                        LinkedHashSet<String> armLocals =
+                                new LinkedHashSet<>(locals);
+                        if (arm.bindingName() != null) {
+                            armLocals.add(arm.bindingName());
+                        }
+                        scanStatements(module, arm.body(), armLocals);
+                    }
                 } else if (statement instanceof Ast.TryStmt tried) {
                     scanStatements(module, tried.body(), new LinkedHashSet<>(locals));
                     LinkedHashSet<String> catchLocals = new LinkedHashSet<>(locals);
@@ -1130,6 +1260,8 @@ public final class TreeShaker {
             } else if (expression instanceof Ast.CastExpr cast) {
                 scanExpression(module, cast.value(), locals);
                 scanType(cast.targetType());
+            } else if (expression instanceof Ast.SpreadExpr spread) {
+                scanExpression(module, spread.expression(), locals);
             } else if (expression instanceof Ast.BinaryExpr binary) {
                 scanExpression(module, binary.left(), locals);
                 scanExpression(module, binary.right(), locals);
@@ -1142,6 +1274,8 @@ public final class TreeShaker {
                 scanExpression(module, conditional.condition(), locals);
                 scanExpression(module, conditional.whenTrue(), locals);
                 scanExpression(module, conditional.whenFalse(), locals);
+            } else if (expression instanceof Ast.RuntimeCallExpr runtime) {
+                for (Ast.Expr argument : runtime.arguments()) scanExpression(module, argument, locals);
             } else if (expression instanceof Ast.CallExpr call) {
                 scanExpression(module, call.callee(), locals);
                 for (Ast.TypeRef type : call.typeArguments()) scanType(type);
@@ -1154,6 +1288,12 @@ public final class TreeShaker {
                 for (Ast.Expr argument : created.arguments()) scanExpression(module, argument, locals);
             } else if (expression instanceof Ast.AwaitExpr awaited) {
                 scanExpression(module, awaited.expression(), locals);
+            }
+            else if (expression instanceof Ast.ChannelOpExpr operation) {
+                scanExpression(module, operation.channel(), locals);
+                scanExpression(module, operation.value(), locals);
+            } else if (expression instanceof Ast.DynamicSelectExpr selected) {
+                scanExpression(module, selected.cases(), locals);
             } else if (expression instanceof Ast.ListExpr list) {
                 for (Ast.Expr element : list.elements()) scanExpression(module, element, locals);
             } else if (expression instanceof Ast.TupleExpr tuple) {

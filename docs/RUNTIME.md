@@ -86,7 +86,13 @@ The strict production direction is:
 
 ## Receiver implementation
 
-Method code is stored once per class declaration. Direct calls dispatch to that shared definition with the receiver as an implicit immutable argument. Instance and actor methods are non-reifiable: evaluating `receiver.method` as a callable value is illegal, so the runtime never allocates an implicit bound-method pair. Code that needs a callback writes an explicit lambda that captures the receiver. `static fnc` remains reifiable because it has no receiver to bind.
+Method code is stored once per class declaration. Object instances store state/layout data, not private copies of their methods.
+
+A direct instance call dispatches through the statically known `(INSTANCE, name, arity)` selector and supplies the object as an implicit first argument. It does not create a bound callable.
+
+First-class extraction such as `obj.method` is represented semantically as a compact bound-method pair containing receiver identity plus shared method identity/slot information. The current reference evaluator keeps the receiver and method-name family and selects the closed-world slot from callback arity; AOT may resolve that to a receiver pointer plus code/vtable slot. A non-escaping value may be stack/register allocated or optimized away, so the language does not require a heap allocation merely because method-value syntax was used.
+
+The receiver is fixed when the method value is formed. Invocation never dynamically rebinds `self`.
 
 
 ## Proper tail-call runtime
@@ -155,7 +161,7 @@ Compiler-generated/context-aware `BehaviorFactory` values are capture-free for b
 
 ## Async task runtime
 
-Ordinary `async` callables are separate from actor dispatchers. The reference interpreter owns one context-local async scheduler and returns `CompletionStage`/language `Future<T>` values immediately. Its first backend uses Java virtual threads so blocking host/runtime operations do not consume the bounded private/shared actor worker pools. This is a transitional execution strategy: Oreslang source semantics are future/continuation based, not virtual-thread based.
+Ordinary `async` callables are separate from actor dispatchers. The reference interpreter owns one context-local async scheduler and returns runtime-owned `OresFuture<T>` / language `Future<T>` values immediately. Java `CompletionStage` is host interop only and is normalized one-way into `OresFuture`; it does not define guest continuation scheduling. The current compatibility execution bridge still uses Java virtual threads so blocking host/runtime operations do not consume the bounded private/shared actor worker pools. This is transitional: Oreslang source semantics are future/continuation based, not virtual-thread based.
 
 The design intentionally mirrors the strongest C# async/await practices:
 
@@ -166,17 +172,17 @@ The design intentionally mirrors the strongest C# async/await practices:
 - keep the execution scheduler out of the source-level future contract;
 - separate I/O/task concurrency from explicitly CPU-bound scheduling.
 
-Because the current interpreter has not yet lowered `await` into a resumable state machine, an ordinary async virtual carrier may block while awaiting another future. Actor carriers are different: an incomplete `await` from an actor turn is rejected rather than parking the dispatcher. Adversarial contexts also fail closed for ordinary async execution until continuation lowering can release the strict guest-turn serialization lock at suspension points.
+Actor dispatcher carriers must not park on pending future reads. Pending `OresFuture.get()`, positive-timeout `get(...)`, and `join()` host/runtime bridges are rejected before registering a waiter. Settled reads and zero-timeout polling remain available. Guest `await` uses the compiler continuation path where supported; host blocking bridges cannot substitute for that suspension/resumption protocol.
 
 Async callable arguments/results are detached at the evaluator boundary. This is stricter than C#'s shared managed heap and preserves Oreslang's ownership direction: mutable task state is owned by the task instead of becoming an implicit cross-thread alias. Generic async boundaries remain closed until a Send/task-safe generic contract exists.
 
 ## HungryActor: explicit dedicated CPU carrier
 
-`HungryActor<M>` is the deliberate exception to the ordinary multiplexed actor rule. It is a runtime primitive for sustained CPU-bound or thread-affine work and owns one dedicated **platform thread** from construction until `release()`/termination.
+`HungryActor<M>` is the deliberate exception to the ordinary multiplexed actor rule. It is a runtime primitive for sustained CPU-bound or thread-affine work and owns one dedicated **JNI-attached pthread carrier** from construction until `release()`/termination. It does not create a Java platform thread.
 
 Its invariants are:
 
-- exactly one dedicated platform carrier per live HungryActor;
+- exactly one dedicated native pthread carrier per live HungryActor;
 - bounded nonblocking mailbox admission;
 - messages are frozen before delivery;
 - serial message execution;
@@ -229,3 +235,27 @@ Persistent generated actor state reserves from the same slice. Actor teardown cl
 The logical size metric intentionally does not claim to equal JVM object layout. It exists to enforce Oreslang memory-domain policy while actors remain multiplexed on one JVM. A hardened backend may replace the accounting implementation with arena/region allocation or a Graal/native isolate without changing source semantics.
 
 A private actor's memory owner is its **ActorId**, never its carrier thread. Successive mailbox turns may execute on different private-dispatcher workers. Consequently a future FFM/off-heap backend must not make `Arena.ofConfined()` carrier-thread identity part of Oreslang semantics. It should use a cross-thread-capable region whose access is guarded by the actor owner token, or map the private actor to a true Graal/native isolate when physical heap isolation is required.
+
+## Native runtime boundary
+
+Oreslang's preferred actor carrier backend is now a JNI bridge to a bounded pthread pool on Linux and macOS. The library is built from `src/main/c/oresthread.c`; each pthread attaches to the host VM once and then multiplexes many unrelated Oreslang actor turns. Actor identity remains independent of physical carrier identity.
+
+The backend selector is `-Dores.runtime.carriers=auto|native|java`:
+
+- `auto` prefers the native pthread backend on supported Unix hosts and falls back only when the native library cannot be linked;
+- `native` fails closed if the JNI runtime cannot be loaded or initialized;
+- `java` is an explicit compatibility/debugging backend and must not be treated as the production Oreslang scheduler.
+
+`process.descriptor.actor_carrier_backend` reports the physical backend so tests and supervisors can verify that native execution is actually active.
+
+This does **not** mean the whole runtime is native yet. The current actor mailbox containers, shared-memory synchronization, async virtual-thread bridge, GC timer, and several host-integration data structures still use Java runtime primitives. Those are migration targets behind Oreslang-owned abstractions; Native Image compilation by itself is not considered proof that a primitive is natively implemented. New runtime features should avoid exposing Java concurrency types in language semantics and should prefer the JNI/native substrate where a physical scheduler, clock, thread, or memory primitive is required.
+
+### Strict isolate root admission
+
+The VM prestarts its CONTROL carriers before guest execution. In UNTRUSTED
+contexts, ROOT_TASK turns are queued to the calling thread that owns the isolate
+JNI scope, preserving the existing one-thread sandbox limit. Pending waits leave
+guest execution while the caller waits for queued continuations. Resuming a task
+retains its logical scheduler ownership without admitting another guest thread.
+A rejected context entry settles the owning task exceptionally rather than
+leaving a host waiting on an unresolved Future.

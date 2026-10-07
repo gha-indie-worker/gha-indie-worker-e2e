@@ -116,7 +116,7 @@ This makes local imperative implementation compatible with side-effect freedom w
 pub pure fnc sum(List<int> values): int {
   let int total = 0;
 
-  for (val value of values) {
+  for (const value of values) {
     total += value;
   }
 

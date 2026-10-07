@@ -1,6 +1,7 @@
 package dev.oreslang.runtime;
 
 import dev.oreslang.ast.Ast;
+import dev.oreslang.imports.ImportRules;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -23,14 +24,32 @@ public final class CapabilityChecker {
     private final Set<String> ambiguousAliases = new HashSet<>();
     private final Set<String> ambiguousClasses = new HashSet<>();
     private final Set<String> ambiguousFunctions = new HashSet<>();
+    private final Map<String, String> javaImports = new HashMap<>();
+    private final Set<String> importedRoots = new HashSet<>();
     private final Set<Ast.FunctionDecl> callableStack =
             java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     private final Set<Ast.MethodDecl> methodStack =
             java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
     private final Set<Object> typeExpansionStack =
             java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+    private final PermissionCheckMode permissionCheckMode;
 
-    private CapabilityChecker(Ast.Program program) {
+    private CapabilityChecker(Ast.Program program, PermissionCheckMode permissionCheckMode) {
+        this.permissionCheckMode = permissionCheckMode;
+        for (Ast.ImportDecl imported : program.imports()) {
+            ImportRules.validate(imported);
+            if (imported.wildcard()) {
+                importedRoots.add(imported.namespace());
+            } else {
+                importedRoots.addAll(imported.names());
+            }
+            if (!ImportRules.isJavaPath(imported.path())) continue;
+            String className = ImportRules.javaClassName(imported.path());
+            for (String binding : ImportRules.exposedBindings(imported)) {
+                javaImports.put(binding, className);
+            }
+        }
+
         for (Ast.ModuleDecl module : program.modules()) {
             for (Ast.Decl declaration : module.declarations()) {
                 if (declaration instanceof Ast.TypeAliasDecl alias) {
@@ -45,7 +64,14 @@ public final class CapabilityChecker {
     }
 
     public static void check(Ast.Program program, IsolatePolicy policy) {
-        new CapabilityChecker(program).checkProgram(program, policy);
+        check(program, policy, PermissionCheckMode.COMPILE);
+    }
+
+    public static void check(
+            Ast.Program program,
+            IsolatePolicy policy,
+            PermissionCheckMode permissionCheckMode) {
+        new CapabilityChecker(program, permissionCheckMode).checkProgram(program, policy);
     }
 
     private static <T> void index(
@@ -135,6 +161,13 @@ public final class CapabilityChecker {
     }
 
     private void checkProgram(Ast.Program program, IsolatePolicy policy) {
+        for (Ast.ImportDecl imported : program.imports()) {
+            if (ImportRules.isJavaPath(imported.path())) {
+                require(policy, IsolatePolicy.Capability.JAVA_INTEROP,
+                        "Java host import " + ImportRules.javaClassName(imported.path()));
+            }
+        }
+
         for (Ast.ModuleDecl module : program.modules()) {
             for (Ast.Decl declaration : module.declarations()) {
                 if (declaration instanceof Ast.FunctionDecl fn) {
@@ -179,11 +212,30 @@ public final class CapabilityChecker {
         }
     }
 
-    private static IsolatePolicy actorPolicy(Ast.ActorKind kind, IsolatePolicy parent) {
-        if (kind != Ast.ActorKind.PRIVATE) return parent;
-        return parent.withoutCapabilities(
-                IsolatePolicy.Capability.SHARED_MEMORY,
-                IsolatePolicy.Capability.ACTOR_SHARE_READONLY);
+    private static IsolatePolicy actorPolicy(
+            Ast.ActorKind kind,
+            IsolatePolicy parent) {
+        return switch (kind) {
+            case NONE, SHARED -> parent;
+            case PRIVATE -> parent.withoutCapabilities(
+                    IsolatePolicy.Capability.SHARED_MEMORY,
+                    IsolatePolicy.Capability.ACTOR_SHARE_READONLY,
+                    IsolatePolicy.Capability.JAVA_INTEROP,
+                    IsolatePolicy.Capability.JAVA_SOURCE_INTEROP);
+            case UNTRUSTED -> {
+                IsolatePolicy baseline = IsolatePolicy.untrustedActor();
+                long heap = Math.min(
+                        parent.maxHeapBytes(), baseline.maxHeapBytes());
+                int mailbox = Math.min(
+                        parent.maxMailboxMessages(), baseline.maxMailboxMessages());
+                java.time.Duration wall =
+                        parent.maxWallTime().compareTo(baseline.maxWallTime()) < 0
+                                ? parent.maxWallTime()
+                                : baseline.maxWallTime();
+                yield new IsolatePolicy(
+                        Set.of(), heap, mailbox, wall, true);
+            }
+        };
     }
 
     private void checkCallableTypes(
@@ -199,6 +251,10 @@ public final class CapabilityChecker {
 
         if (type.name().equals("SharedMutex")) {
             require(policy, IsolatePolicy.Capability.SHARED_MEMORY, "SharedMutex<T>");
+        }
+        String javaClass = javaImports.get(type.name());
+        if (javaClass != null) {
+            require(policy, IsolatePolicy.Capability.JAVA_INTEROP, "Java host import " + javaClass);
         }
         for (Ast.TypeRef argument : type.arguments()) checkType(argument, policy);
         if (type.isBorrow()) checkType(type.borrowedTarget(), policy);
@@ -245,18 +301,45 @@ public final class CapabilityChecker {
             }
             else if (stmt instanceof Ast.DestructureStmt s) checkExpr(s.initializer(), policy);
             else if (stmt instanceof Ast.ReturnStmt s && s.value() != null) checkExpr(s.value(), policy);
+            else if (stmt instanceof Ast.YieldStmt s) checkExpr(s.value(), policy);
             else if (stmt instanceof Ast.ExprStmt s) checkExpr(s.expression(), policy);
             else if (stmt instanceof Ast.DeferStmt s) checkExpr(s.expression(), policy);
+            else if (stmt instanceof Ast.BlockStmt s) checkStatements(s.body(), policy);
+            else if (stmt instanceof Ast.LoopStmt s) checkStatements(s.body(), policy);
             else if (stmt instanceof Ast.IfStmt s) {
                 for (Ast.IfBranch b : s.branches()) {
                     checkExpr(b.condition(), policy);
                     checkStatements(b.body(), policy);
                 }
                 checkStatements(s.elseBody(), policy);
+            } else if (stmt instanceof Ast.MatchStmt s) {
+                checkExpr(s.subject(), policy);
+                for (Ast.MatchArm arm : s.arms()) {
+                    if (arm.guard() != null) checkExpr(arm.guard(), policy);
+                    checkStatements(arm.body(), policy);
+                }
+            } else if (stmt instanceof Ast.SwitchStmt s) {
+                checkExpr(s.subject(), policy);
+                for (Ast.SwitchCase arm : s.cases()) {
+                    for (Ast.Expr constant : arm.constants()) {
+                        checkExpr(constant, policy);
+                    }
+                    checkStatements(arm.body(), policy);
+                }
+                checkStatements(s.defaultBody(), policy);
+            } else if (stmt instanceof Ast.SelectStmt s) {
+                for (Ast.SelectArm arm : s.arms()) {
+                    if (arm.channel() != null) checkExpr(arm.channel(), policy);
+                    if (arm.value() != null) checkExpr(arm.value(), policy);
+                    checkStatements(arm.body(), policy);
+                }
             } else if (stmt instanceof Ast.TryStmt s) {
                 checkStatements(s.body(), policy);
                 checkStatements(s.catchBody(), policy);
                 checkStatements(s.finallyBody(), policy);
+            } else if (stmt instanceof Ast.ForOfDestructureStmt s) {
+                checkExpr(s.iterable(), policy);
+                checkStatements(s.body(), policy);
             } else if (stmt instanceof Ast.ForOfStmt s) {
                 checkExpr(s.iterable(), policy);
                 checkStatements(s.body(), policy);
@@ -270,6 +353,25 @@ public final class CapabilityChecker {
     }
 
     private void checkExpr(Ast.Expr expr, IsolatePolicy policy) {
+        if (expr instanceof Ast.NameExpr javaName) {
+            String javaClass = javaImports.get(javaName.name());
+            if (javaClass != null) {
+                require(policy, IsolatePolicy.Capability.JAVA_INTEROP, "Java host import " + javaClass);
+            }
+        }
+
+        if (expr instanceof Ast.NameExpr n
+                && isZeroAuthorityAdversarial(policy)
+                && (isRestrictedFacadeRoot(n.name())
+                        || importedRoots.contains(n.name()))) {
+            throw new SecurityException(
+                    importedRoots.contains(n.name())
+                            ? "untrusted actor cannot extract imported code without explicit effect metadata: "
+                                    + n.name()
+                            : "untrusted actor cannot extract restricted capability facade '"
+                                    + n.name() + "'");
+        }
+
         if (expr instanceof Ast.NameExpr n && n.name().equals("print")) {
             require(policy, IsolatePolicy.Capability.STDOUT, "print");
         } else if (expr instanceof Ast.NameExpr n && n.name().equals("SharedMutex")) {
@@ -281,8 +383,29 @@ public final class CapabilityChecker {
             Ast.FunctionDecl referenced = findFunction(n.name());
             if (referenced != null) checkReferencedFunction(referenced, policy);
         }
+        else if (expr instanceof Ast.RuntimeCallExpr runtime) {
+            if (!Set.of("copy", "take", "borrow", "share", "cooperate").contains(runtime.operation())) {
+                throw new SecurityException(
+                        "runtime intrinsic 'rt " + runtime.operation() + "' is not admitted on this compiler head");
+            }
+            if (runtime.operation().equals("cooperate") && isZeroAuthorityAdversarial(policy)) {
+                throw new SecurityException(
+                        "untrusted actor cannot use rt cooperate until continuation quota state survives scheduler handoffs");
+            }
+            for (Ast.Expr argument : runtime.arguments()) checkExpr(argument, policy);
+        }
         else if (expr instanceof Ast.CallExpr c) {
             String target = memberPath(c.callee());
+            if (isZeroAuthorityAdversarial(policy) && target != null) {
+                String root = target.contains(".")
+                        ? target.substring(0, target.indexOf('.'))
+                        : target;
+                if (importedRoots.contains(root)) {
+                    throw new SecurityException(
+                            "untrusted actor cannot call imported code without explicit effect metadata: "
+                                    + target);
+                }
+            }
             if (target != null) {
                 Ast.FunctionDecl fn = findFunction(target);
                 if (fn != null) checkReferencedFunction(fn, policy);
@@ -305,9 +428,27 @@ public final class CapabilityChecker {
                 if (path.startsWith("process.share_readonly")) require(policy, IsolatePolicy.Capability.ACTOR_SHARE_READONLY, path);
                 if (path.equals("process.gc") || path.startsWith("process.gc.")) require(policy, IsolatePolicy.Capability.GC_CONTROL, path);
                 if (path.equals("SharedMutex") || path.startsWith("SharedMutex.")) require(policy, IsolatePolicy.Capability.SHARED_MEMORY, path);
-                if (path.startsWith("network.")) require(policy, IsolatePolicy.Capability.NETWORK, path);
-                if (path.startsWith("fs.read")) require(policy, IsolatePolicy.Capability.FILESYSTEM_READ, path);
-                if (path.startsWith("fs.write")) require(policy, IsolatePolicy.Capability.FILESYSTEM_WRITE, path);
+                if (path.startsWith("network.") || path.startsWith("net.") || path.startsWith("http.")) {
+                    require(policy, IsolatePolicy.Capability.NETWORK, path);
+                }
+                if (path.startsWith("fs.read")
+                        || path.startsWith("fs.exists")
+                        || path.startsWith("fs.stat")
+                        || path.startsWith("File.read")
+                        || path.startsWith("File.exists")
+                        || path.startsWith("File.stat")) {
+                    require(policy, IsolatePolicy.Capability.FILESYSTEM_READ, path);
+                }
+                if (path.startsWith("fs.write")
+                        || path.startsWith("fs.append")
+                        || path.startsWith("fs.remove")
+                        || path.startsWith("fs.mkdir")
+                        || path.startsWith("File.write")
+                        || path.startsWith("File.append")
+                        || path.startsWith("File.remove")
+                        || path.startsWith("File.mkdir")) {
+                    require(policy, IsolatePolicy.Capability.FILESYSTEM_WRITE, path);
+                }
                 if (path.startsWith("env.")) require(policy, IsolatePolicy.Capability.ENVIRONMENT, path);
                 if (path.startsWith("ffi.")) require(policy, IsolatePolicy.Capability.FFI, path);
                 if (path.startsWith("polyglot.")) require(policy, IsolatePolicy.Capability.POLYGLOT, path);
@@ -315,6 +456,8 @@ public final class CapabilityChecker {
                 if (path.startsWith("process.spawn")) require(policy, IsolatePolicy.Capability.CHILD_PROCESS, path);
             }
             checkExpr(m.receiver(), policy);
+        } else if (expr instanceof Ast.SpreadExpr e) {
+            checkExpr(e.expression(), policy);
         } else if (expr instanceof Ast.BinaryExpr e) { checkExpr(e.left(), policy); checkExpr(e.right(), policy); }
         else if (expr instanceof Ast.UnaryExpr e) checkExpr(e.operand(), policy);
         else if (expr instanceof Ast.AssignExpr e) {
@@ -328,13 +471,36 @@ public final class CapabilityChecker {
             for (Ast.Expr a : e.arguments()) checkExpr(a, policy);
         }
         else if (expr instanceof Ast.AwaitExpr e) checkExpr(e.expression(), policy);
+        else if (expr instanceof Ast.ChannelOpExpr e) {
+            checkExpr(e.channel(), policy);
+            if (e.value() != null) checkExpr(e.value(), policy);
+        }
+        else if (expr instanceof Ast.DynamicSelectExpr e) checkExpr(e.cases(), policy);
         else if (expr instanceof Ast.ListExpr e) for (Ast.Expr a : e.elements()) checkExpr(a, policy);
         else if (expr instanceof Ast.TupleExpr e) for (Ast.Expr a : e.elements()) checkExpr(a, policy);
-        else if (expr instanceof Ast.ObjectExpr e) for (Ast.ObjectField f : e.fields()) checkExpr(f.value(), policy);
+        else if (expr instanceof Ast.ObjectExpr e) {
+            for (Ast.ObjectField f : e.fields()) {
+                if (f.isDynamic()) checkExpr(f.dynamicName(), policy);
+                checkExpr(f.value(), policy);
+            }
+        }
         else if (expr instanceof Ast.LambdaExpr e) {
             if (e.expressionBody() != null) checkExpr(e.expressionBody(), policy);
             if (e.blockBody() != null) checkStatements(e.blockBody(), policy);
         }
+    }
+
+    private static boolean isZeroAuthorityAdversarial(IsolatePolicy policy) {
+        return policy.adversarial() && policy.capabilities().isEmpty();
+    }
+
+    private static boolean isRestrictedFacadeRoot(String name) {
+        return switch (name) {
+            case "stdio", "process", "actor", "network", "ipc", "gpu",
+                    "fs", "env", "ffi", "polyglot", "thread",
+                    "SharedMutex", "print" -> true;
+            default -> false;
+        };
     }
 
     private static String memberPath(Ast.Expr expr) {
@@ -346,7 +512,8 @@ public final class CapabilityChecker {
         return null;
     }
 
-    private static void require(IsolatePolicy policy, IsolatePolicy.Capability capability, String api) {
+    private void require(IsolatePolicy policy, IsolatePolicy.Capability capability, String api) {
+        if (permissionCheckMode.defersToRuntime(capability)) return;
         if (!policy.allows(capability)) {
             throw new SecurityException("Oreslang isolate denies capability " + capability + " required by " + api);
         }

@@ -25,16 +25,41 @@ end
 Imports are explicit about what kind of symbol is entering the compilation unit:
 
 ```ores
+import * as package from "./xyz";
 import module foo from "../xyz";
 import module foo as apiFoo from "../xyz";
-import module {foo, bar} from "../xyz";
+import actor Worker from "../xyz";
 import class Widget as ApiWidget from "../xyz";
 import fnc add as apiAdd from "../xyz";
-import fnc * as funcs from "../xyz";
-import * as package from "./xyz";
+import interface ServiceApi from "../xyz";
+import contract StorageApi from "../xyz";
+import type UserId from "../xyz";
+import types ServiceApi, UserId from "../xyz";
+import types (ServiceApi, UserId) from "../xyz";
+import trait Retryable from "../xyz";
+import struct Point from "../xyz";
 ```
 
-Wildcard imports always require a namespace alias. A single named module/class/function import may use `as` to choose its local binding; the original source name still controls export resolution. `import fnc` specifically imports a **reifiable non-generic, non-actor `fnc` value**. Generic `fnc<T>` declarations require direct-call specialization and therefore are not valid `import fnc` targets until Oreslang gains polymorphic function values. This avoids namespace pollution while supporting Kotlin-style disambiguation. Import paths are part of the AST/compiler contract; filesystem/package resolution is a host build/bundling concern so strict isolates do not gain ambient filesystem access merely by using `import`.
+Comma-separated and parenthesized named selections are equivalent, so
+`import types X, Y, Z from "../foo";` and
+`import types (X, Y, Z) from "../foo";` produce the same import selection.
+The existing brace form remains accepted for compatibility. `types` is the
+union selector for type-like declarations: `trait`, `struct`, `interface`,
+and `type`. On the current v0.6 AST, interface and type-alias declarations are
+available; trait/struct selectors are reserved and fail closed at link
+validation until those declaration kinds land on the current compiler branch.
+
+Wildcard imports always require a namespace alias. A single named import may use
+`as` to choose its local binding; the original source name still controls export
+resolution. `import fnc` specifically imports a **reifiable non-generic,
+non-actor `fnc` value**. Generic `fnc<T>` declarations require direct-call
+specialization and therefore are not valid `import fnc` targets until Oreslang
+gains polymorphic function values. `class` and `actor` are deliberately
+distinct selectors: an actor class does not satisfy an `import class`, and an
+ordinary class does not satisfy an `import actor`. Import paths are part of the
+AST/compiler contract; filesystem/package resolution is a host build/bundling
+concern so strict isolates do not gain ambient filesystem access merely by using
+`import`.
 
 Java host classes use an explicit `java:` URI and the same alias syntax:
 
@@ -79,30 +104,29 @@ specific sequencing relationship *between* two init hooks in the same cycle,
 that relationship should be made explicit in application code rather than
 inferred from the import edges.
 
-## Module interfaces / OCaml-style module signatures
+## Module contracts
 
-Interfaces can describe the structural public shape required of a module. A module opts into checking with `@AdheresTo(...)`:
+Module shape is described by a dedicated `contract`, not by a trait or ordinary type interface. Traits are for structs, classes, actors, and other types; contracts are for modules.
 
 ```ores
-define module contracts
-  define interface MathApi
-    fnc add(int a, int b) => int;
-    String name;
-  end
+define contract MathApi as
+  fnc add(int a, int b) => int;
+  String name;
 end
 
-@AdheresTo(contracts.MathApi)
-define module math
+define module math conforms MathApi as
   pub fnc add(int a, int b): int { return a + b; }
   pub val String name = "math";
 end
 ```
 
-Only exported (`pub`) module members satisfy an adherence contract. `@AdheresTo(A, B)` may name more than one interface.
+Only exported (`pub`) module members satisfy a module contract. Contracts may require exported fields/constants as well as functions. A module may conform to multiple contracts with comma-separated names. The legacy module `@AdheresTo(...)` form is rejected; use `conforms` instead.
+
+A module contract is not a class/struct interface and cannot be implemented by a class or actor.
 
 ## Functions and returns
 
-Functions use `fnc` and are private by default. `pub` exports them. Return statements are always explicit; a non-`void` function must return on every control-flow path.
+Functions use `fnc` and are private by default. `pub` exports them. Named callables and braced lambda bodies use explicit return statements; a non-`void` named callable or braced lambda must return on every control-flow path. Expression-bodied lambdas are the deliberate compact exception: their sole expression is the return value.
 
 Class fields, instance methods, and `static fnc` members are also private by default unless marked `pub`. Private class-member access is scoped to the **declaring class**, not to a particular receiver instance: code declared in class `A` may access an `A` private member on another `A` instance, but subclasses and external callers may not. A lexical lambda created inside an `A` method retains that private-access authority with its lexical environment; an explicit or inherited `nlex` lambda does not. Runtime member dispatch enforces the same rule for dynamically linked/wildcard-imported values whose static type is `Unknown`, so imports cannot bypass private visibility. Public/structural class shapes expose only public members.
 
@@ -164,6 +188,165 @@ fnc named(): {foo: int, bar: string} {
 
 The `type` marker inside `Array<type intOrBoolOrString>` is accepted as an explicit alias marker; `Array<intOrBoolOrString>` is equivalent. A finite tuple type records exact arity and the type of each position even though the interpreter represents the value with a JVM `List`. A record type names required members; extra members remain compatible with the structural type system.
 
+## Collection shapes and named type metadata
+
+Collection syntax deliberately separates three concerns:
+
+- `[...]` describes the element/sequence shape;
+- `<name=value, ...>` carries compile-time type/storage metadata;
+- `(...)` carries runtime construction state such as an initial size or
+  capacity.
+
+The core sequence families are intentionally distinct even when they share a
+runtime representation today:
+
+| Family | Extent | Element model | Core intent |
+| --- | --- | --- | --- |
+| `Tuple[T1, T2, ...]` / bare `[T1, T2, ...]` | compile-time fixed | positional / heterogeneous | product value; arity never grows |
+| `FixedArray[...]` | compile-time fixed | exact indexed sequence | fixed indexed storage |
+| `FixedList[...]` | compile-time fixed | exact sequence | fixed list API/storage |
+| `Array[T]`, `List[T]`, `Vector[T]` | runtime extent | homogeneous or explicit repeating pattern | owning runtime-extent sequence |
+| `Slice[T]` | runtime extent view | homogeneous | non-owning/view-style sequence |
+
+`Tuple`, `FixedArray`, and `FixedList` are distinct static kinds. A
+`FixedArray[int, string]` is therefore not silently assignable to
+`Tuple[int, string]`, even if both are currently list-backed in the
+interpreter. `ArrayList` is not a core Oreslang sequence spelling on current
+main; importing `java.util.ArrayList` remains explicit Java interop and does
+not define Oreslang collection semantics.
+
+For exact finite storage, counted repetition is part of the shape:
+
+```ores
+val xs: FixedArray[3 of int, 3 of string] =
+    [10, 20, 30, "foo", "bar", "baz"];
+```
+
+The type above has six exact positions. `N of T` is a compile-time sequence
+pattern, not a generic value argument.
+
+Runtime-extent collections distinguish arbitrary elements from repeating flat
+patterns:
+
+```ores
+val arbitrary: Vector[int | string | bool] =
+    [5, "foo", true, false, 9];
+
+val patterned: Vector[...(int, string, bool)] =
+    [5, "foo", true, 6, "bar", false];
+```
+
+`Vector[int | string | bool]` allows those element types in any order.
+`Vector[...(int, string, bool)]` requires zero or more complete
+`int, string, bool` groups. Consequently, bare
+`Vector[int, string, bool]` is rejected: a finite sequence shape conflicts
+with the resizable vector contract. Use a `FixedArray`, an explicit `...`
+repeat, a union, or a vector of tuple values depending on intent.
+
+Counted and unbounded patterns compose:
+
+```ores
+val records: Vector[...(3 of int, 2 of string)] =
+    [1, 2, 3, "a", "b",
+     4, 5, 6, "c", "d"];
+```
+
+Compile-time collection policy is named and order-independent:
+
+```ores
+val xs: Vector<
+    growth_policy=GP.Foo,
+    allocator=Arena,
+    align=64,
+    inline_capacity=32,
+    max_capacity=4096
+>[int] = [1, 2, 3];
+```
+
+Named parameters are canonicalized by name, so source ordering is not part of
+type identity. The compiler currently recognizes `growth_policy`,
+`allocator`, `align`, `inline_capacity`, `max_capacity`, `storage`,
+and `rank` for the built-in collection family. Alignment must be a positive
+power of two.
+
+Metadata annotations lower to the exact same compiler representation:
+
+```ores
+@NamedParams<
+    growth_policy=GP.Foo,
+    allocator=Arena,
+    align=64
+>
+val xs: Vector[...(int, string, bool)] = [5, "foo", true];
+```
+
+is equivalent to:
+
+```ores
+val xs: Vector<
+    growth_policy=GP.Foo,
+    allocator=Arena,
+    align=64
+>[...(int, string, bool)] = [5, "foo", true];
+```
+
+Specialized aliases are also accepted:
+
+```ores
+@GrowthPolicy<GP.Foo>
+@Allocator<Arena>
+@Align<64>
+val xs: Vector[...(int, string, bool)] = [5, "foo", true];
+```
+
+Conflicting inline and annotation metadata is an error; there is deliberately
+no precedence rule.
+
+For runtime-extent collections, current `size` and `capacity` are not
+properties of the type. They belong to runtime construction. Fixed-extent
+sequences are different: `size=N` may be used as a compile-time layout
+assertion and must equal the statically expanded arity.
+
+```ores
+// runtime-extent policy: size/capacity are constructor state
+val xs: Vector<growth_policy=GP.Foo>[int] = [1, 2, 3];
+
+// invalid for a resizable vector:
+// Vector<size=3>[int]
+// Vector<capacity=32>[int]
+
+// fixed product/storage policy: size is a checked compile-time assertion
+val pair: Tuple<
+    growth_policy=GP.Fixed,
+    allocator=Arena,
+    align=64,
+    size=2
+>[int, string] = (7, "seven");
+
+val fixed: FixedArray<size=4, align=32>[4 of int] = [1, 2, 3, 4];
+```
+
+`capacity=N` remains runtime state and is not accepted as type metadata.
+`growth_policy` on a tuple/fixed sequence describes backing-storage or
+construction policy only; it never makes the logical arity resizable.
+`inline_capacity` and `max_capacity`, when present on a fixed sequence,
+must be at least its exact arity.
+
+Repeated bracket suffixes provide homogeneous multidimensional shorthand:
+
+```ores
+val matrix: Vector[int][int] =
+    [[1, 2], [3, 4]];
+
+// Explicit rank metadata is equivalent for a homogeneous shape:
+val matrix2: Vector<rank=2>[int] =
+    [[1, 2], [3, 4]];
+```
+
+The compiler canonicalizes both to nested rank-2 collection semantics. This is
+distinct from an exact fixed multidimensional layout, whose extents belong in
+finite sequence shapes.
+
 ## Bindings
 
 Every local binding is declared as exactly one of:
@@ -203,6 +386,63 @@ A bare `_` is a sequence discard pattern: it consumes that array/tuple position 
 
 Sequence destructuring requires a returned tuple or array/list. Finite tuples are checked for exact arity and per-position type. Object destructuring requires a record/map-like value and every requested key must exist. If the returned type is a union, destructuring is allowed only when every union alternative supports the requested pattern; each extracted binding receives the union of the corresponding alternative member types. Function-parameter destructuring is intentionally not part of this syntax yet.
 
+## Assignment, equality, and identity
+
+Assignment remains an expression. `lhs = rhs` mutates `lhs` and evaluates to
+the assigned value, including inside call arguments and control-flow expressions.
+Oreslang does **not** interpret `name = value` inside a call as a named argument.
+
+The canonical comparison operators deliberately separate value equality from identity:
+
+- `a eq b` is canonical value equality.
+- `a neq b` is canonical value inequality.
+- Adjacent `a !eq b` is an equivalent inequality spelling. Whitespace between
+  `!` and `eq` does not form this operator.
+- `a == b` and `a != b` remain accepted compatibility aliases, but canonical
+  Oreslang style prefers `eq` and `neq`.
+- `a is b` is identity: both operands must be identity-bearing reference/handle
+  values with overlapping runtime domains.
+- `!(a eq b)` is ordinary logical negation and is equivalent to value inequality.
+
+`eq`, `neq`, and `is` are reserved operator keywords rather than ordinary
+identifier names. This intentionally prevents visually hostile constructs such
+as `is is foo`. Keyword spellings may still appear after `.` because member
+names occupy a separate syntactic namespace.
+
+Value equality is defined by Oreslang semantics, never arbitrary host/JVM
+`equals()` behavior. Numbers compare numerically across compatible numeric
+representations; structural records/maps, tuples, arrays/lists, `Option`,
+`Result`, and iterator-result values recurse through their contents. Ordinary
+class/actor instances remain identity-equal by default unless a future explicit
+equality protocol is introduced. `switch` constants and literal match patterns
+use the same value-equality operation, so equality cannot change meaning between
+language constructs.
+
+Identity is likewise semantic rather than a promise about backend object boxing.
+Ordinary objects/reference collections use reference identity, while stable
+handles such as actor IDs/references compare the underlying handle identity.
+Scalars and value-semantic aggregates/wrappers are rejected for `is`.
+
+Because plain infix `is` owns identity, nominal expression type tests use an
+explicit `type` marker:
+
+```ores
+if animal is type Dog dog then
+  dog.bark();
+fi
+```
+
+Match-arm type patterns retain the compact prefix form because pattern position
+is unambiguous:
+
+```ores
+match animal
+  is Dog dog -> { dog.bark(); }
+  else -> { return; }
+end
+```
+
+
 ## Classes, receivers, multiple inheritance, and interfaces
 
 Class headers use `as` as the required body delimiter. The canonical form is `define class Name as ... end`; when `extends` or `implements` are present, `as` follows the complete class header.
@@ -228,7 +468,29 @@ find(self Box)(int key): self {
 }
 ```
 
-The receiver variable name is always `self`.
+The receiver variable name is always `self`. Because `self` is also a type, a leading parameter such as `same_as(self other)` is an ordinary parameter typed with the receiver-polymorphic `self` type. The explicit receiver form is distinguished by its second parameter list: `find(self Box)(int key)`.
+
+### Receiver-polymorphic `self` type
+
+In an instance-method type position, `self` is a receiver-polymorphic type, not an alias for the enclosing nominal class. It represents the receiver's concrete subtype and preserves that type information for fluent APIs:
+
+```ores
+define class Fluent as
+  pub same(): self {
+    return self;
+  }
+
+  pub wrong(): self {
+    return new Fluent(); // compile error: the receiver might be a subtype of Fluent
+  }
+end
+```
+
+An inferred alias of the receiver preserves the polymorphic `self` type, so `val me = self; return me;` is valid. A parameter or other value already typed as `self` may also be returned; `self` is a receiver **type**, not a reference-identity predicate. Explicitly widening such a value to the nominal class loses the polymorphic type information and cannot be narrowed back to `self`.
+
+When a `self`-returning method is inherited, the return type rebinds to the actual static receiver type. If `Child extends Base` and `Base.same(): self`, then `child.same()` has type `Child`, which keeps subclass-only fluent chains type-safe. Interfaces and structural method contracts preserve the same receiver-polymorphic slot semantics.
+
+The `self` type is only valid where an instance receiver exists. Top-level/module functions and static class functions cannot declare a `self` type.
 
 A class may list multiple parent classes and multiple interfaces:
 
@@ -237,7 +499,7 @@ define class Combined extends Cacheable, Serializable implements HasId, Named as
 end
 ```
 
-Parent order is significant and is the deterministic v0.2 method-resolution order after child methods: the first declared parent is searched before the next parent. The static checker rejects inheritance cycles and incompatible inherited member shapes. Child **methods** may override inherited methods only with compatible types. Storage fields are not virtual slots: a field name must be unique across the effective inheritance graph, so child fields may not shadow inherited fields and two distinct parent fields may not collide. Reaching the same field declaration twice through a diamond is not a collision.
+Parent order is never used to break a same-method-slot tie. If distinct parents contribute the same method name and caller-visible arity, the child must explicitly declare that slot; argument types, return types, and parent ordering never choose a winner. A true diamond that reaches the same original declaration through the same generic view is not ambiguous. The static checker rejects inheritance cycles and incompatible inherited member shapes. Child **methods** may override inherited methods only with compatible contracts. Storage fields are not virtual slots: a field name must be unique across the effective inheritance graph, so child fields may not shadow inherited fields and two distinct parent fields may not collide. Reaching the same field declaration twice through a diamond is not a collision.
 
 `Object` and `List` are extensible base classes:
 
@@ -289,7 +551,10 @@ val first = values[0];
 
 `arr[...]` is the canonical inline-array spelling. The original bare `[...]` literal remains accepted for source compatibility and destructuring migration.
 
-Tuples preserve per-position static types. Parenthesized tuple literals and list-backed values returned against a finite tuple type both retain the declared positional types:
+Tuples preserve per-position static types. Parenthesized tuple literals and
+list-backed values returned against a finite tuple type both retain the declared
+positional types. Bare finite tuple syntax remains the compact form; the named
+`Tuple<...>[...]` form is used when storage metadata is needed.
 
 ```ores
 val pair = (1, "one");
@@ -300,11 +565,23 @@ fnc result(): [int, bool, string] {
 }
 
 const [num, ok, answer] = result();
+
+val aligned: Tuple<align=64, size=2>[int, string] = (1, "one");
+
+@NamedParams<align=64, size=2>
+val sameShape: [int, string] = (1, "one");
 ```
+
+A tuple is a product value, not a growable array. Its `size` metadata is
+redundant by design but useful as an ABI/layout assertion; a mismatch with the
+declared positional arity is a compile-time error.
 
 ## Structural typing and interfaces
 
-Interfaces are structural contracts. Explicit `implements` asks the compiler to prove conformance and documents intent; structural compatibility does not require nominal ancestry in every context.
+Interfaces define statically checkable contracts, but named class/interface values remain
+**nominal by default**. Structural comparison is entered only through an explicit
+structural boundary, an explicit `implements` proof, or module
+`conforms` conformance.
 
 ```ores
 define interface Named
@@ -316,7 +593,79 @@ define class User implements Named as
 end
 ```
 
-Class interface satisfaction uses public members, including inherited public members.
+Class/interface shape proofs use public members, including inherited public members.
+Private members never satisfy an external structural contract, and actor identity is
+never erased into an ordinary structural object.
+
+## Boolean combinator intrinsics
+
+`bool` and `boolean` are interchangeable spellings of the same primitive
+type. Both work in parameters, return types, bindings, casts, type tests,
+and nested types such as `Array<boolean>` or `Option<boolean>`. They have
+the same Copy ownership semantics. Boolean primitives do not accept type
+arguments; `boolean<int>` and `bool<>` are invalid.
+
+`And`, `Or`, and `Xor` are compiler-provided overload families in the
+built-in `BooleanOps` namespace and are also available as globals, like
+`Some`, `None`, `Ok`, and `Err`.
+No imports or declarations are needed to call `And(...)`, `Or(...)`, or
+`Xor(...)` directly. The qualified `BooleanOps` forms are also built in.
+
+Conceptually, each family has these two arity-selected overloads:
+
+```ores
+define module BooleanOps as
+  pub fnc Or(bool first, bool second, ...bool rest): bool { /* intrinsic */ }
+  pub fnc Or(List<bool> values): bool { /* intrinsic */ }
+
+  pub fnc And(bool first, bool second, ...bool rest): bool { /* intrinsic */ }
+  pub fnc And(List<bool> values): bool { /* intrinsic */ }
+
+  pub fnc Xor(bool first, bool second, ...bool rest): bool { /* intrinsic */ }
+  pub fnc Xor(List<bool> values): bool { /* intrinsic */ }
+end
+```
+
+The overload decision is **name + caller-visible arity only**:
+
+- arity `1` selects the `List<bool>` overload;
+- arity `>= 2` selects the variadic scalar-bool overload;
+- arity `0` is invalid;
+- parameter types do not participate in overload selection.
+
+Therefore both global and qualified forms are equivalent:
+
+```ores
+if And(foo, bar) then
+  // ...
+fi
+
+if Or(foo, bar, And(x, y)) then
+  // ...
+fi
+
+val bool a = BooleanOps.And([foo, bar]);
+val bool b = BooleanOps.Or(foo, bar, x);
+```
+
+For the scalar overload, `And` and `Or` short-circuit left-to-right exactly
+like `&&` and `||`; `Xor` evaluates all scalar operands and returns true
+when an odd number are true. These calls are compiler intrinsics and bypass
+ordinary callable dispatch, so scalar forms can lower to the same boolean
+control-flow IR as the operators.
+
+The one-argument list overload has ordinary eager argument evaluation, then
+reduces the already-created list. Empty lists are valid: `And([])` is
+`true`, `Or([])` is `false`, and `Xor([])` is `false`.
+The intrinsic reads its list without consuming ownership, so the same array
+can be reused in subsequent calls. User-defined functions that shadow these
+names retain their declared parameter ownership rules.
+
+Module/top-level `fnc` and `routine` overload identity is also name + exact
+arity. Same-name/different-arity declarations are valid; same-name/same-arity
+declarations are rejected even when their parameter types differ. An overloaded
+callable family cannot be extracted as an untyped first-class function value;
+a direct call supplies the arity needed to select a slot.
 
 ## Option, Result, and null
 
@@ -374,14 +723,34 @@ Numeric widening is loss-aware; real values can widen toward complex values, but
 
 ## Lambdas
 
-Lambdas are lexical closures by default and use `->`. The canonical block
-form keeps returns explicit:
+Lambdas are lexical closures by default and use `->`. The braced form keeps
+control flow explicit:
 
 ```ores
 val Fnc<int, int> inc = |int x| -> {
   return x + 1;
 };
 ```
+
+A braced lambda never treats its final statement as an implicit return. If its
+result type is non-`void`, every control-flow path must execute an explicit
+`return <value>;`.
+
+For a single returned expression, the full expression-body form omits the braces
+and `return`:
+
+```ores
+val Fnc<int, int> twice = |value| -> value * 2;
+
+val Fnc<int, int> shifted = |value| ->
+  value * 2 + 1;
+```
+
+The containing statement must end with an explicit semicolon. A newline alone
+does not terminate a statement that contains an expression-bodied lambda. Only
+an immediate `{` after `->` starts the block form; any other token begins the
+expression. This keeps prefix expressions unambiguous, including future forms
+such as `struct{...}{...}`.
 
 A normal lambda may capture activation-local bindings from its enclosing
 function or block. Captured mutable state remains part of the closure.
@@ -463,6 +832,58 @@ Oreslang follows the useful parts of the C# Task-based Asynchronous Pattern whil
 The initial interpreter backend uses host-owned virtual threads for ordinary async tasks. That is an implementation detail, not a language promise. The compiler is free to replace it with C#-style continuation/state-machine lowering. Guest source receives no raw thread handle and does not gain `THREAD_CREATE` authority merely by using `async`.
 
 This preserves the central async rule: **I/O/task latency should compose through futures and continuations; CPU-bound work that intentionally monopolizes a carrier must be explicit rather than hidden inside `async`.**
+
+## Generators and async iterators
+
+`generator` is a callable modifier for top-level/module `fnc` and `routine` declarations. It is deliberately not a class-method modifier.
+
+```ores
+generator fnc ids(): int {
+  yield 10;
+  yield 20;
+  return;
+}
+
+async generator routine events(): String {
+  yield await next_event();
+  yield await next_event();
+  return;
+}
+```
+
+The declared source return type is the **yielded element type**. Calling a synchronous generator produces `Iterator<T>`; calling an async generator produces `AsyncIterator<T>` directly, not `Future<Iterator<T>>`. Existing `Generator<T>` and `AsyncGenerator<T>` annotations remain aliases for those public protocol types.
+
+`Iterator.next()` returns `IteratorResult<T>`; `AsyncIterator.next()` returns `Future<IteratorResult<T>>`. Results have readonly `done: bool` and `value: Option<T>` members: yielded values are `Some(value)`, while terminal/closed pulls return `done = true` and `None`. Both protocols expose `close()` to cancel the suspended activation. Async pulls retain serialized activation semantics and cross the Ores-owned Future boundary. Result data may cross ordinary async boundaries when its element type is task-safe; the iterator activation itself cannot.
+
+```ores
+val Iterator<int> iterator = values();
+val IteratorResult<int> result = iterator.next();
+if !result.done; do stdio.stdout.write(result.value.unwrap()); fi
+iterator.close();
+```
+
+`done` remains reserved as a lexical identifier, but is readable in the member namespace (`result.done`). Parameterized runtime `is` checks remain forbidden until generic arguments are reified; the iterator protocol does not weaken that rule.
+
+`async` and `generator` are independent modifiers and may appear in either order. Inside a generator, `yield value` suspends the activation after producing one element. A bare `return;` completes the sequence. Returning a value from a generator is rejected.
+
+Async iteration uses `for await ... of ...`:
+
+```ores
+pub async fnc consume(): void {
+  for await const event of events() do
+    handle(event);
+  done
+  return;
+}
+```
+
+A synchronous `for ... of ...` consumes `Generator<T>` or ordinary synchronous iterables. `for await ... of ...` consumes `AsyncGenerator<T>` or a class whose `[Symbol.asyncIterator]()` method returns an `AsyncGenerator<T>`. It also accepts synchronous generators, arrays, tuples, and `[Symbol.iterator]()` values through a runtime-owned asynchronous adapter: every pull crosses the OresFuture boundary, and closing the loop closes the suspended adapter and its source. An asynchronous iterable still cannot be consumed by a synchronous loop.
+
+Generator activations are affine runtime state. They are not actor messages, shared values, or async-task payloads. `yield` is a suspension boundary: a live `MutexGuard` or borrow may not cross it in the current ownership model. Async iterator pulls are suspension boundaries as well.
+
+Actor callables cannot be generators. An actor mailbox turn may suspend only through the actor scheduler's continuation protocol; a generator activation must not escape a turn. Class methods and static class `fnc` are also non-generator declarations for now. A class can still implement `[Symbol.asyncIterator]()` by returning an async generator created by a top-level/module callable.
+
+The interpreter represents a live generator with one serialized resumable activation. The native/AOT compiler may lower the same contract to an explicit program-counter/state-machine frame. This mirrors the existing rule for `await`: the representation is backend-specific, but suspension/resumption semantics are language-level.
 
 ## Actors
 
@@ -568,7 +989,7 @@ Qualified names such as `x.y` retain their module namespace.
 
 `fnc` and `routine` may both recurse. Recursion and tail-call optimization are not what distinguishes them. Eligible calls in tail position in `fnc`, `routine`, instance methods, `static fnc`, and lambda bodies are lowered as **proper tail calls**: they do not grow the Oreslang/host call stack. This is a runtime guarantee shared by JIT, Native Image AOT, and hybrid execution; it does not depend on the host JIT discovering recursive-call optimization.
 
-A tail call is eligible only when the current activation has no semantic work that must remain live after the call. Active `defer`/catch/finally cleanup and live mutex guards are tail-call barriers; in those cases the call executes normally so cleanup and return validation remain correct. Conditional return arms inherit tail position, so `return cond ? f() : g();` may tail-transfer through the selected arm.
+A tail call is eligible only when the current activation has no semantic work that must remain live after the call. Active `defer`/catch/finally cleanup and live mutex guards are tail-call barriers; in those cases the call executes normally so cleanup and return validation remain correct. `await` is also a scheduler/continuation boundary rather than a direct proper-tail-call hop: async-to-async composition uses `return await other_async();`, while `return other_async();` is rejected because the latter expression has type `Future<T>`, not source return type `T`. Conditional return arms inherit tail position, so `return cond ? f() : g();` may tail-transfer through the selected arm.
 
 The runtime resolves the target and arguments before releasing the caller, then transfers through an iterative trampoline. Every 64 tail transfers it executes a scheduler safepoint so a long recursive chain cannot bypass OresVM scheduling/fairness. Reified Oreslang `fnc`/lambda values are tail-transferable while they remain in the evaluator/code unit that established their static contract; arbitrary host/interop callables complete before the caller is released.
 
@@ -619,6 +1040,35 @@ let Fnc<int, int> fact = |int n| -> {
 };
 ```
 
+Callable types also support a signature-inside-generics spelling:
+
+```ores
+val Fnc<int(int)> doubler = |int value| -> {
+  return value * 2;
+};
+
+val Fnc<String(int, bool)> describe = |int value, bool enabled| -> {
+  return enabled ? "enabled" : "disabled";
+};
+```
+
+The type before the inner parentheses is the result type, and the types inside
+the parentheses are the parameter types. Optional documentation-only parameter
+names are accepted, so `Fnc<String(int value, bool enabled)>` is equivalent.
+
+The existing comma form remains supported for compatibility, with parameter
+types first and the result type last:
+
+```ores
+Fnc<String(int, bool)>   // signature form: returns String
+Fnc<int, bool, String>   // comma form: exactly the same type
+(int, bool) => String    // ordinary function-type form: exactly the same type
+```
+
+`Function<...>` is an alias of `Fnc<...>` and accepts both generic spellings.
+All of these forms normalize to the same callable type; they do not create
+distinct overload, ABI, runtime, or closure representations.
+
 ## Semicolons
 
 Semicolons are strongly recommended. They remain the canonical formatter output.
@@ -633,19 +1083,28 @@ pub routine main(): void {
 
 ## Nominal typing and opt-in structural parameters
 
-Named classes and interfaces are nominal by default. Structural matching at an API boundary is explicit with `@Structural`:
+Named classes and interfaces are nominal by default. The canonical structural-parameter
+spelling is `structural Type name`:
 
 ```ores
 pub interface Brand {
   markerBrand: 'marking/branding'
 }
 
-fnc consume(@Structural Brand value): String {
+fnc consume(structural Brand value): String {
   return value.markerBrand;
 }
 ```
 
-A value does not need to nominally implement `Brand` for that parameter, but its public/static shape must satisfy the interface. Without `@Structural`, the normal nominal implementation/inheritance rules apply.
+A value does not need to nominally implement `Brand` for that parameter, but its
+public shape must satisfy the required contract. Structural compatibility is
+directional width subtyping: extra public members are allowed, while every required
+field/method must exist with a compatible type/signature.
+
+`@Structural Brand value`, `value structural Brand`, and
+`@AllowStructural(value)` remain compatibility spellings. Structural parameters are
+read-only borrowed views: they cannot be `mut`, survive async suspension, cross an
+actor mailbox boundary, or turn an actor reference into an ordinary object.
 
 Interfaces may inherit from other interfaces and support literal-string marker fields:
 
@@ -658,7 +1117,8 @@ pub interface Foo extends Bar {
 }
 ```
 
-Explicit `implements` and module `@AdheresTo(...)` checks remain structural conformance proofs.
+Explicit `implements` and module `conforms` checks remain structural
+conformance proofs.
 
 ## Method overloads
 
@@ -676,7 +1136,17 @@ define class Lookup as
 end
 ```
 
-Two methods with the same name and same arity are a compile-time error even when their parameter types differ. Top-level/module `fnc` and `routine` declarations never overload.
+Overload identity is exactly **name + arity**, where arity counts only caller-supplied arguments; the implicit or explicit `self` receiver is not counted. Two instance methods with the same name and same arity are a compile-time error even when their parameter types, parameter names, generic parameters, async modifier, or return types differ. Arity selects the callable slot; after that selection, every supplied argument must still type-check positionally against that slot's declared parameter types or compilation fails. Parameter and return types validate the selected callable contract, but they never choose between overloads.
+
+Static class functions follow the same arity-only rule in their separate class-level namespace. A static function in a generic class does not implicitly capture the class's generic parameters because a class-level call has no instance generic binding; it must declare any static-function generics itself.
+
+A same-name/same-arity member inherited from one parent is an override slot, not a type-based overload. If distinct parents contribute that same slot, the child must explicitly resolve it. Generic parent/interface arguments are substituted only after the arity slot is selected, and incompatible generic views are rejected rather than used as overload discriminators.
+
+Abstract methods use the same slot identity. Every caller-visible arity of an abstract method is a separate required slot, and a concrete subclass must provide a concrete compatible implementation for each inherited abstract slot. Abstract classes cannot be instantiated.
+
+Special symbol methods such as `[Symbol.iterator]` are not exempt: they use the same name + arity identity, inheritance ambiguity checks, and override-contract rules as ordinary methods.
+
+Top-level/module callables use the same **name + exact arity** overload rule. Same-name/different-arity `fnc` declarations are valid, and same-name/different-arity `routine` declarations are valid. A single name may not mix `fnc` and `routine` declarations, because those kinds have different reifiability/recursion semantics but occupy the same module value namespace.
 
 ## Ternary expressions
 
@@ -771,11 +1241,11 @@ In the typed shorthand, `int i = 0` creates an implicit mutable `let i: int` sco
 and iterator-style loops. The compact `of` form does not require parentheses, and both body styles are valid:
 
 ```ores
-for item of values do
+for const item of values do
   work(item)
 done
 
-for [key, value] of entries do
+for const [key, value] of entries do
   consume(key, value)
 done
 
@@ -784,12 +1254,26 @@ for let [key, value] of mutable_entries {
   consume(key, value);
 }
 
-for (val item of values) {
+for (const item of values) {
   work(item);
 }
 ```
 
-A sequence pattern defaults to `val` bindings. `for let [k, v] ...` or `for const [k, v] ...` applies that binding kind to the pattern, while an explicit kind inside the pattern propagates to subsequent names. `_` discards one tuple/list position without creating a binding.
+Iterator variables are declarations, so every `for ... of ...` header must explicitly use `const` or `let`. Use `const` for the normal read-only iteration case and `let` only when the per-iteration local is rebound. Sequence patterns require the same outer declaration, such as `for const [k, v] of entries`; an explicit `const` or `let` inside the pattern may change the binding kind for subsequent names. `_` discards one tuple/list position without creating a binding.
+
+Bare forms such as `for item of values` are rejected at compile time with `variable used before declared`. `val` is not accepted as a for-of binder; the iterator surface intentionally uses only `const` and `let`.
+
+`const` in a for-of header means that the compiler/runtime initializes a fresh immutable iteration slot on each turn. It does **not** claim that the element value is a compile-time constant; the ordinary compile-time-constant initializer rule for standalone `const` declarations does not apply to this compiler-initialized slot. `let` creates the same per-iteration slot but permits rebinding that local.
+
+Parentheses may fence the entire iterator header when that improves readability or avoids syntactic ambiguity:
+
+```ores
+for (const item of complex_iterable()) do
+  work(item);
+done
+```
+
+Parentheses never make a bare name or typed-looking name into a declaration: `for (item of values)` and `for (int item of values)` are both errors until the binding begins with `const` or `let`. Element types are inferred from the iterable in the current grammar; write `for const item of values`, not `for const int item of values`. Constrain or cast the iterable when a stronger element type is required.
 
 A bare `done` closes a `do` loop body. An invocation such as `done()` inside that body remains an ordinary callable use and does not terminate the loop.
 
@@ -803,6 +1287,36 @@ define class Bag as
 end
 ```
 
+Generator call results participate in the same iterator loop syntax:
+
+```ores
+generator fnc values(): int {
+  yield 1;
+  yield 2;
+  return;
+}
+
+for const value of values() do
+  work(value)
+done
+```
+
+Async iterators use the explicit `for await` form and require an async callable context:
+
+```ores
+async generator fnc values_async(): int {
+  yield 1;
+  yield 2;
+  return;
+}
+
+for await const value of values_async() do
+  await work_async(value)
+done
+```
+
+Classes may expose `[Symbol.asyncIterator](): AsyncGenerator<T>` when they need a custom async-iteration facade.
+
 The compiler/runtime inserts a scheduler safepoint on **every `loop`, conventional `for`, and iterator-loop iteration**. The current runtime hook checks cancellation/interruption and yields execution; it is intentionally centralized so actor supervisor/control-mailbox polling can evolve without changing source syntax. User code does not receive ambient thread-control capability.
 
 This means Oreslang does not require recursion as the only way to loop, while still giving actor/isolate schedulers a compulsory cooperation point inside generated loop execution.
@@ -814,8 +1328,16 @@ In addition to `stdio.print` and `stdio.println`, the stream-shaped form is avai
 ```ores
 stdio.stdout.write(value);
 stdio.stdout.println(value);
+stdio.stdout.log("ORES_TEST|", status, "|", full_name, "|", detail);
+
+val parts = arr["ORES_TEST|", status, "|", full_name, "|", detail];
+stdio.stdout.log(...parts);
+stdio.stdout.logList(parts);
 ```
 
+`stdout.log(...)` stringifies each argument, concatenates the values with no inserted separator, and appends one newline. This makes it a compact replacement for a run of `write(...)` calls followed by `println(...)`. `stdout.logList(sequence)` is exactly the sequence form of the same operation and is equivalent to `stdout.log(...sequence)`.
+
+The `...expression` syntax is an argument-list spread operator. In this initial variadic surface the spread value must be an Array/List/tuple. Oreslang keeps fixed-arity calls statically sound: dynamic spread is rejected for ordinary fixed-arity functions and methods until the language has an explicit variadic callable type.
 
 ## Execution profiles: JIT, AOT, and hybrid
 
@@ -867,53 +1389,75 @@ Each generation receives a monotonically increasing id and SHA-256 source digest
 
 This model does not require `dlopen`, `LoadLibrary`, JNI, or Truffle NFI. A production server may additionally map each context to a Graal polyglot/native isolate. On AOT-only targets the precompiled interpreter executes newly loaded Oreslang source; on JIT-capable targets the same source may warm into optimized machine code.
 
-## Explicit structural calls
+## Structural callable declarations
 
-Structural compatibility is never silently enabled for a nominal parameter. These three spellings are equivalent:
+`structural` is also declaration metadata for a `fnc`, `routine`, instance/actor
+method, `static fnc`, or interface callable signature. The annotation spelling
+`@structural` is exactly equivalent:
 
 ```ores
-pub interface Bar {
-  marker: 'brand'
+structural fnc encode(Message value): Bytes {
+  // ...
 }
 
-pub interface Foo extends Bar {
-  markerBrand: 'marking/branding'
+@structural
+routine persist(Message value): void {
+  // ...
 }
 
-fnc a(@Structural Foo y): void {
-  return;
-}
+define class Codec as
+  structural decode(Bytes value): Message {
+    // ...
+  }
+end
 
-fnc b(y structural Foo): void {
-  return;
-}
+define interface CodecApi
+  structural fnc decode(Bytes value) => Message;
+end
+```
 
-@AllowStructural(y)
-fnc c(y Foo): void {
-  return;
+The parser normalizes the keyword and annotation forms into one compiler-owned
+`structural` callable flag. `@structural` takes no arguments and is removed from
+the ordinary annotation list during normalization; it is not a runtime decorator or
+reflection hook. Writing both `@structural` and the `structural` modifier on the
+same callable is an error.
+
+Declaration-level structural metadata is deliberately separate from parameter-level
+structural matching. For example, this still has a **nominal** `Message` parameter:
+
+```ores
+structural fnc encode(Message value): Bytes {
+  // ...
 }
 ```
 
-All three may accept:
+To make that parameter structural, it must opt in independently:
 
 ```ores
-val branded = obj{
-  marker: "brand",
-  markerBrand: "marking/branding"
-};
-
-a(branded);
-b(branded);
-c(branded);
+structural fnc encode(structural Message value): Bytes {
+  // ...
+}
 ```
 
-Without one of those explicit structural opt-ins, passing that object to a nominal `Foo` parameter is a compile-time error.
+Callable contract comparison preserves parameter/result types, generic arity,
+parameter mutation mode, and async mode. Parameter types are contravariant and
+results are covariant; `mut` authority and async-vs-sync mode must match exactly.
+Consequently an `async fnc ... -> T` is not silently treated as the same callable
+contract as a synchronous `fnc ... -> Future<T>`.
 
-`structural` is a contextual keyword, so existing identifiers named `structural` remain legal elsewhere.
+The structural marker never weakens actor isolation or ownership rules. An actor
+method may carry structural callable metadata, but the actor itself remains a nominal,
+mailbox-mediated identity.
+
+`structural` remains contextual. Ordinary declarations such as a method named
+`structural()` remain legal because the parser consumes the word as a modifier only
+where the following syntax makes that interpretation unambiguous.
 
 ## Receiver identity and method calls
 
 `self` is injected by the compiler/runtime as an immutable receiver binding. It cannot be declared as a local parameter name or reassigned.
+
+Instance method code belongs to the class declaration, not to individual objects. Creating one million `Box` values does not create one million copies of `Box.get`.
 
 Direct method calls do not create per-instance closures:
 
@@ -921,23 +1465,37 @@ Direct method calls do not create per-instance closures:
 box.get();
 ```
 
-The runtime resolves the shared class method definition and passes the receiver as the hidden first argument.
+The compiler/runtime resolves the shared class method slot and passes `box` as a hidden first argument. The hidden receiver is not part of the source-visible arity used for overload selection. Receiver-polymorphic `self` typing does not change this representation: methods remain one shared declaration/slot per class, never one function object per instance.
 
-Instance and actor methods are intentionally **not** first-class values:
-
-```ores
-val Fnc<int> callback = box.get; // compile-time error
-```
-
-When callback behavior is required, the receiver capture must be explicit:
+Methods may also be used as first-class callbacks:
 
 ```ores
-val Fnc<int> callback = || -> {
-  return box.get();
-};
+val Fnc<int> callback = box.get;
+doWork(self.get);
 ```
 
-The lambda has ordinary closure-capture semantics; the method itself remains one shared class definition. Oreslang therefore has no implicit bound-method object and no JavaScript-style dynamic `this` rebinding.
+A method value is a small bound-method/fat-pointer value: receiver identity plus shared method identity/slot information. It never contains a copied method body. Calling `callback()` always uses the receiver captured at extraction time; there is no JavaScript-style dynamic `this` rebinding.
+
+Direct calls allocate no bound-method carrier. First-class extraction logically materializes the receiver+slot pair; an AOT or JIT backend may keep a non-escaping pair in registers/on the stack or eliminate it entirely, while an escaping callback may require a small heap object.
+
+If a method name is overloaded by arity, an expected function type may select the slot:
+
+```ores
+fnc doWork(Fnc<int> callback): int {
+  return callback();
+}
+
+define class Box as
+  pub get(): int { return 1; }
+  pub get(int fallback): int { return fallback; }
+
+  pub run(): int {
+    return doWork(self.get); // selects get/0
+  }
+end
+```
+
+An untyped overloaded extraction such as `val callback = box.get;` is rejected because no arity is available to identify the closed-world method slot. Generic method values remain direct-call-only until Oreslang has an explicit specialization syntax for them.
 
 
 ## Incremental compilation and code units
@@ -1046,13 +1604,12 @@ fnc sink(): ((bool foo) => void) {
 
 Parameter names inside function types are documentation-only; structural function compatibility is determined by parameter/result types.
 
-The canonical lambda syntax is pipe-delimited and block-only:
+The canonical lambda parameter syntax is pipe-delimited. The body may be a
+braced statement block or one returned expression:
 
 ```ores
 fnc find(bool found): F {
-  return || -> {
-    return found ? 5 : 6;
-  };
+  return || -> found ? 5 : 6;
 }
 
 fnc callback(): ((bool foo) => void) {
@@ -1065,9 +1622,12 @@ fnc callback(): ((bool foo) => void) {
 
 Lambda parameters may be inferred from a contextual function type (`|foo|`) or typed explicitly (`|bool foo|`).
 
-There are no expression-body lambdas. Every lambda has braces. When the contextual result type is non-void, every control-flow path must contain an explicit `return <value>;`. Void lambdas may use `return;`.
-
-This means higher-order functions and functors do not introduce a second return convention: named functions, methods, static functions, and anonymous functions all use the same explicit `return` statement semantics.
+Expression-bodied lambdas return exactly their sole expression. Braced lambdas
+retain ordinary statement semantics: there is no implicit last-expression
+return, non-`void` results require explicit `return <value>;` on every path,
+and `void` lambdas may use `return;`. A statement containing an
+expression-bodied lambda must use an explicit trailing semicolon, including when
+the lambda body is laid out across multiple lines.
 
 
 ## Lexical closures

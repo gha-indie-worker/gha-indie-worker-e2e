@@ -9,6 +9,8 @@ The language is intentionally opinionated:
 - static nominal typing by default, with explicit structural compatibility at selected call boundaries;
 - private functions by default (`fnc`), with `pub` for exported functions;
 - class methods omit `fnc` and have an implicit `self` receiver;
+- class construction uses a single explicit `constructor(...)` declaration (never a Java-style class-name constructor); top-level classes/constructors are file-private, while module classes/constructors are private by default and may be `pub`;
+- classes cannot nest inside classes; class bodies contain fields, an optional constructor, methods, and `static fnc` members only;
 - one return value only (tuples/arrays/records are ordinary single values);
 - `val`, `const`, and `let` are the only variable declarations;
 - actor heaps are isolated: mutable values are never shared between actors;
