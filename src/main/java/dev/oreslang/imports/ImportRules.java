@@ -49,6 +49,18 @@ public final class ImportRules {
         return imported.names().stream().map(name -> localName(imported, name)).toList();
     }
 
+    private static boolean isExplicitSelfPath(String path) {
+        if ("@self".equals(path)) return true;
+        String unix = path.replace('\\', '/').trim();
+        boolean sawDot = false;
+        for (String component : unix.split("/+", -1)) {
+            if (component.isEmpty()) continue;
+            if (!component.equals(".")) return false;
+            sawDot = true;
+        }
+        return sawDot;
+    }
+
     public static boolean isTypeOnlyKind(Ast.ImportKind kind) {
         return switch (kind) {
             case ACTOR, CLASS, INTERFACE, CONTRACT, TRAIT, STRUCT, TYPE, TYPES -> true;
@@ -63,6 +75,11 @@ public final class ImportRules {
         }
         if (imported.path().length() > 4096 || imported.path().chars().anyMatch(Character::isISOControl)) {
             throw new IllegalArgumentException("import path contains invalid control characters or is too long");
+        }
+
+        if (!isJavaPath(imported.path()) && isExplicitSelfPath(imported.path())) {
+            throw new IllegalArgumentException(
+                    "source file cannot import itself via '" + imported.path() + "'");
         }
 
         if (imported.wildcard()) {
