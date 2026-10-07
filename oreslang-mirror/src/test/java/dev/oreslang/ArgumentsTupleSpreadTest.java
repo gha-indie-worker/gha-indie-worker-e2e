@@ -126,24 +126,22 @@ final class ArgumentsTupleSpreadTest {
 
     @Test
     void consumingMoveOnlyArgumentsTupleMovesItsUnderlyingParameters() {
-        var typed = TypeChecker.check(Parser.parse("""
-                define class Box as
-                end
-
-                fnc consume(Box box): int {
-                  return 1;
-                }
-
-                fnc bad(Box box): int {
-                  const args = arguments;
-                  const first = consume(...args);
-                  return consume(box);
-                }
-                """));
-
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class,
-                () -> OwnershipChecker.check(typed));
+                () -> TypeChecker.check(Parser.parse("""
+                        define class Box as
+                        end
+
+                        fnc consume(Box box): int {
+                          return 1;
+                        }
+
+                        fnc bad(Box box): int {
+                          const args = arguments;
+                          const first = consume(...args);
+                          return consume(box);
+                        }
+                        """)));
 
         assertTrue(error.getMessage().contains("moved"), error.getMessage());
         assertTrue(error.getMessage().contains("box"), error.getMessage());
