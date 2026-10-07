@@ -36,6 +36,7 @@ jobs:
           test "$(git rev-parse HEAD:oreslang-mirror/src/main)" = "4db8b532c5e9332450bd3aea94e48ccb81126989"
           test "$(git hash-object pom.xml)" = "5911f0a162da2820be499c8b5e98fdceb632afc5"
           test "$(git hash-object src/test/java/dev/oreslang/ArgumentsTupleSpreadTest.java)" = "7376d6fd1a004fb3abc8bb6d80c87d2010266070"
+          test "$(git hash-object scripts/build-native-thread.sh)" = "d7d79b3af7aae08a5277fe63ca6b6047c0da9aa6"
           echo "exact source subtree and test blob verified"
       - name: Install pinned GraalVM 25.3.4.1
         run: |
