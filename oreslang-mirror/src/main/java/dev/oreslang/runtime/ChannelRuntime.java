@@ -371,6 +371,68 @@ public final class ChannelRuntime {
         }
     }
 
+    /**
+     * Optional reusable execution plan for repeated or dynamically assembled
+     * selections.
+     *
+     * <p>A SelectPlan is deliberately a layer over {@link SelectSet}, not a
+     * replacement for it. Existing select lowering may continue constructing
+     * and executing SelectSet directly. Plans only retain immutable case
+     * descriptors plus the SelectSet fairness cursor; every invocation still
+     * creates a fresh SelectRegistration and therefore preserves the existing
+     * atomic arbitration, cancellation, loser-detachment, close, and Future
+     * semantics.</p>
+     *
+     * <p>This split gives the compiler a safe optimization target for static
+     * select sites and gives dynamic select code an explicit reusable value.
+     * It intentionally does not keep live channel waiters armed between
+     * invocations. Persistent waiter reuse is a separate optimization that
+     * would require a stronger generation/winner protocol.</p>
+     */
+    public static final class SelectPlan {
+        private final SelectSet set;
+
+        public SelectPlan(Collection<? extends SelectCase> cases) {
+            this(new SelectSet(cases));
+        }
+
+        private SelectPlan(SelectSet set) {
+            this.set = Objects.requireNonNull(set, "set");
+        }
+
+        public static SelectPlan of(SelectCase... cases) {
+            return new SelectPlan(SelectSet.of(cases));
+        }
+
+        public static SelectPlan from(Iterable<? extends SelectCase> cases) {
+            return new SelectPlan(SelectSet.from(cases));
+        }
+
+        public static SelectPlan fromMap(Map<?, ? extends SelectCase> cases) {
+            return new SelectPlan(SelectSet.fromMap(cases));
+        }
+
+        public List<SelectCase> cases() {
+            return set.cases();
+        }
+
+        public OresFuture<SelectResult> selectAsync() {
+            return set.selectAsync();
+        }
+
+        public OresFuture<SelectResult> selectAsync(SelectPolicy policy) {
+            return set.selectAsync(policy);
+        }
+
+        public Optional<SelectResult> trySelect() {
+            return set.trySelect();
+        }
+
+        public Optional<SelectResult> trySelect(SelectPolicy policy) {
+            return set.trySelect(policy);
+        }
+    }
+
     private static final class CaseRegistration {
         private final SelectRegistration selection;
         private final int index;

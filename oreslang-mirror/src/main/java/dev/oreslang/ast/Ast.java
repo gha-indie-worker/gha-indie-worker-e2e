@@ -152,7 +152,7 @@ public final class Ast {
         }
         public boolean isTupleType() { return name.equals("$tuple$"); }
 
-        public static TypeRef recordType(java.util.Map<String, TypeRef> members) {
+        private static TypeRef recordType(java.util.Map<String, TypeRef> members, boolean readOnly) {
             java.util.ArrayList<TypeRef> fields = new java.util.ArrayList<>(members.size());
             java.util.ArrayList<java.util.Map.Entry<String, TypeRef>> entries = new java.util.ArrayList<>(members.entrySet());
             entries.sort(java.util.Map.Entry.comparingByKey());
@@ -162,9 +162,16 @@ public final class Ast {
                 }
                 fields.add(new TypeRef("$field$" + entry.getKey(), List.of(entry.getValue()), false));
             }
-            return new TypeRef("$record$", List.copyOf(fields), false);
+            return new TypeRef(readOnly ? "$readonly_record$" : "$record$", List.copyOf(fields), false);
         }
-        public boolean isRecordType() { return name.equals("$record$"); }
+        public static TypeRef recordType(java.util.Map<String, TypeRef> members) {
+            return recordType(members, false);
+        }
+        public static TypeRef readonlyRecordType(java.util.Map<String, TypeRef> members) {
+            return recordType(members, true);
+        }
+        public boolean isRecordType() { return name.equals("$record$") || name.equals("$readonly_record$"); }
+        public boolean isReadonlyRecordType() { return name.equals("$readonly_record$"); }
         public java.util.Map<String, TypeRef> recordMembers() {
             if (!isRecordType()) throw new IllegalStateException("not a record type");
             java.util.LinkedHashMap<String, TypeRef> members = new java.util.LinkedHashMap<>();
@@ -335,8 +342,17 @@ public final class Ast {
         }
     }
 
-    public record InterfaceFieldDecl(String name, TypeRef type, BindingKind bindingKind) implements InterfaceMember {
-        public InterfaceFieldDecl(String name, TypeRef type) { this(name, type, BindingKind.VAL); }
+    public record InterfaceFieldDecl(
+            String name,
+            TypeRef type,
+            BindingKind bindingKind,
+            boolean mutableReferent) implements InterfaceMember {
+        public InterfaceFieldDecl(String name, TypeRef type, BindingKind bindingKind) {
+            this(name, type, bindingKind, bindingKind == BindingKind.VAL);
+        }
+        public InterfaceFieldDecl(String name, TypeRef type) {
+            this(name, type, BindingKind.VAL, true);
+        }
     }
 
     public record InterfaceDecl(
@@ -365,8 +381,14 @@ public final class Ast {
             BindingKind bindingKind,
             TypeRef type,
             List<Annotation> annotations,
-            Expr initializer) implements Decl {
+            Expr initializer,
+            boolean mutableReferent) implements Decl {
         public FieldDecl { annotations = List.copyOf(annotations); }
+        public FieldDecl(String name, Visibility visibility, BindingKind bindingKind, TypeRef type,
+                         List<Annotation> annotations, Expr initializer) {
+            this(name, visibility, bindingKind, type, annotations, initializer,
+                    bindingKind == BindingKind.VAL);
+        }
         public FieldDecl(String name, Visibility visibility, BindingKind bindingKind, TypeRef type, Expr initializer) {
             this(name, visibility, bindingKind, type, List.of(), initializer);
         }
@@ -440,10 +462,23 @@ public final class Ast {
             BlockStmt, BreakStmt, ContinueStmt, IfStmt, MatchStmt, SwitchStmt, TryStmt,
             ForOfStmt, ForOfDestructureStmt, ForStmt, LoopStmt, SelectStmt { }
 
-    public record BindingStmt(BindingKind kind, TypeRef declaredType, String name, Expr initializer) implements Stmt { }
-    public record DestructureBinding(BindingKind kind, String name, boolean rest) {
+    /** Binding rebinding and mutable access to the referent are independent capabilities. */
+    public record BindingStmt(BindingKind kind, TypeRef declaredType, String name, Expr initializer,
+                              boolean mutableReferent) implements Stmt {
+        public BindingStmt(BindingKind kind, TypeRef declaredType, String name, Expr initializer) {
+            this(kind, declaredType, name, initializer, kind == BindingKind.VAL);
+        }
+    }
+    public record DestructureBinding(
+            BindingKind kind,
+            String name,
+            boolean rest,
+            boolean mutableReferent) {
+        public DestructureBinding(BindingKind kind, String name, boolean rest) {
+            this(kind, name, rest, kind == BindingKind.VAL);
+        }
         public DestructureBinding(BindingKind kind, String name) {
-            this(kind, name, false);
+            this(kind, name, false, kind == BindingKind.VAL);
         }
 
         public DestructureBinding {
@@ -456,7 +491,7 @@ public final class Ast {
         }
 
         public static DestructureBinding discard() {
-            return new DestructureBinding(BindingKind.VAL, "_", false);
+            return new DestructureBinding(BindingKind.CONST, "_", false, false);
         }
 
         public boolean isDiscard() {
@@ -511,12 +546,32 @@ public final class Ast {
      * They deliberately do not encode JVM Class/instanceof semantics.
      */
     public sealed interface Pattern permits WildcardPattern, LiteralPattern, BindingPattern,
-            TypePattern, ConstructorPattern { }
+            TypePattern, StructuralPattern, TuplePattern, ConstructorPattern { }
 
     public record WildcardPattern() implements Pattern { }
     public record LiteralPattern(Object value) implements Pattern { }
     public record BindingPattern(String name) implements Pattern { }
+
+    /** Nominal/runtime type pattern such as `Dog dog` or legacy `is Dog dog`. */
     public record TypePattern(TypeRef type, String binding) implements Pattern { }
+
+    /**
+     * Structural type pattern. The target is either an inline record shape
+     * (`structural { name: String } value`) or a named interface/contract
+     * whose public shape is matched without requiring nominal implementation.
+     */
+    public record StructuralPattern(TypeRef target, String binding) implements Pattern { }
+
+    /** Fixed-arity recursive tuple pattern. Lists deliberately do not participate. */
+    public record TuplePattern(List<Pattern> elements) implements Pattern {
+        public TuplePattern {
+            elements = List.copyOf(elements);
+            if (elements.size() < 2) {
+                throw new IllegalArgumentException("tuple patterns require at least two elements");
+            }
+        }
+    }
+
     public record ConstructorPattern(String constructor, List<Pattern> arguments) implements Pattern {
         public ConstructorPattern { arguments = List.copyOf(arguments); }
     }
@@ -526,8 +581,9 @@ public final class Ast {
     }
 
     /**
-     * ordered=false is the normal proof-checked form: arm predicates must be disjoint.
-     * ordered=true ("match first") is an explicit priority/first-match escape hatch.
+     * Match arms use source order: the first matching arm wins. The ordered
+     * flag is retained for AST compatibility; canonical source syntax is
+     * always ordered and the parser emits true.
      */
     public record MatchStmt(Expr subject, boolean ordered, List<MatchArm> arms) implements Stmt {
         public MatchStmt { arms = List.copyOf(arms); }
@@ -560,13 +616,20 @@ public final class Ast {
             String bindingName,
             Expr iterable,
             boolean asyncIteration,
-            List<Stmt> body) implements Stmt {
+            List<Stmt> body,
+            boolean mutableReferent) implements Stmt {
         public ForOfStmt {
             body = List.copyOf(body);
             requireForOfBindingKind(bindingKind);
         }
+        public ForOfStmt(BindingKind bindingKind, String bindingName, Expr iterable,
+                         boolean asyncIteration, List<Stmt> body) {
+            this(bindingKind, bindingName, iterable, asyncIteration, body,
+                    bindingKind == BindingKind.VAL);
+        }
         public ForOfStmt(BindingKind bindingKind, String bindingName, Expr iterable, List<Stmt> body) {
-            this(bindingKind, bindingName, iterable, false, body);
+            this(bindingKind, bindingName, iterable, false, body,
+                    bindingKind == BindingKind.VAL);
         }
     }
 
@@ -607,9 +670,7 @@ public final class Ast {
     }
 
     private static void requireForOfBindingKind(BindingKind kind) {
-        if (kind != BindingKind.CONST && kind != BindingKind.LET) {
-            throw new IllegalArgumentException("for-of bindings require const or let");
-        }
+        if (kind == null) throw new IllegalArgumentException("for-of binding kind is required");
     }
 
     public record ForStmt(Stmt initializer, Expr condition, Expr update, List<Stmt> body) implements Stmt {
@@ -630,8 +691,12 @@ public final class Ast {
             Expr value,
             BindingKind bindingKind,
             String bindingName,
-            List<Stmt> body) {
+            List<Stmt> body,
+            boolean mutableReferent) {
         public SelectArm {
+            if (operation == ChannelOperation.DEFAULT && mutableReferent) {
+                throw new IllegalArgumentException("default select arm cannot carry mutable binding");
+            }
             body = List.copyOf(body);
             if (operation == ChannelOperation.DEFAULT) {
                 if (channel != null || value != null || bindingKind != null || bindingName != null) {
@@ -652,6 +717,11 @@ public final class Ast {
                     throw new IllegalArgumentException("write select arm cannot bind a read value");
                 }
             }
+        }
+        public SelectArm(ChannelOperation operation, Expr channel, Expr value,
+                         BindingKind bindingKind, String bindingName, List<Stmt> body) {
+            this(operation, channel, value, bindingKind, bindingName, body,
+                    bindingKind == BindingKind.VAL);
         }
     }
 
@@ -819,23 +889,70 @@ public final class Ast {
         public TupleExpr { elements = List.copyOf(elements); }
     }
 
-    public record ObjectField(String name, Expr dynamicName, Expr value) {
+    /**
+     * One statically named field in an anonymous struct value.
+     *
+     * <p>The field name is part of the compile-time struct shape. Runtime or
+     * computed field names are intentionally not representable in the AST.</p>
+     */
+    public record ObjectField(String name, Expr value) {
         public ObjectField {
-            if ((name == null) == (dynamicName == null)) {
-                throw new IllegalArgumentException("object field must have exactly one static or dynamic key");
+            if (name == null || name.isBlank()) {
+                throw new IllegalArgumentException("struct field name cannot be blank");
             }
+            java.util.Objects.requireNonNull(value, "value");
         }
         public static ObjectField named(String name, Expr value) {
-            return new ObjectField(java.util.Objects.requireNonNull(name, "name"), null, value);
+            return new ObjectField(java.util.Objects.requireNonNull(name, "name"), value);
         }
-        public static ObjectField dynamic(Expr key, Expr value) {
-            return new ObjectField(null, java.util.Objects.requireNonNull(key, "key"), value);
-        }
-        public boolean isDynamic() { return dynamicName != null; }
     }
 
-    public record ObjectExpr(List<ObjectField> fields) implements Expr {
-        public ObjectExpr { fields = List.copyOf(fields); }
+    public enum ObjectKind { INFERRED_STRUCT, EXPLICIT_STRUCT }
+
+    /** A field declaration in the closed shape of an explicit anonymous struct. */
+    public record StructFieldSpec(String name, TypeRef type) {
+        public StructFieldSpec {
+            if (name == null || name.isBlank()) throw new IllegalArgumentException("struct field name cannot be blank");
+            java.util.Objects.requireNonNull(type, "struct field type");
+        }
+    }
+
+    /**
+     * Anonymous struct expression.
+     *
+     * <p>INFERRED_STRUCT is a closed, permanently readonly shape inferred
+     * entirely from its initializer. EXPLICIT_STRUCT carries a separately
+     * declared closed shape so declared fields may be initialized after
+     * construction under an owned mutable binding. Oreslang has no open-ended
+     * dynamic struct/object shape.</p>
+     */
+    public record ObjectExpr(
+            List<ObjectField> fields,
+            ObjectKind kind,
+            List<StructFieldSpec> declaredFields) implements Expr {
+        public ObjectExpr {
+            fields = List.copyOf(fields);
+            declaredFields = List.copyOf(declaredFields);
+            java.util.Objects.requireNonNull(kind, "object kind");
+            if (kind != ObjectKind.EXPLICIT_STRUCT && !declaredFields.isEmpty()) {
+                throw new IllegalArgumentException("only explicit structs may carry a declared field shape");
+            }
+        }
+        public ObjectExpr(List<ObjectField> fields) {
+            this(fields, ObjectKind.INFERRED_STRUCT, List.of());
+        }
+        public ObjectExpr(List<ObjectField> fields, boolean inferredStruct) {
+            this(fields, requireInferredStructKind(inferredStruct), List.of());
+        }
+        private static ObjectKind requireInferredStructKind(boolean inferredStruct) {
+            if (!inferredStruct) {
+                throw new IllegalArgumentException(
+                        "legacy non-struct ObjectExpr has been removed; use an inferred or explicit struct");
+            }
+            return ObjectKind.INFERRED_STRUCT;
+        }
+        public boolean inferredStruct() { return kind == ObjectKind.INFERRED_STRUCT; }
+        public boolean explicitStruct() { return kind == ObjectKind.EXPLICIT_STRUCT; }
     }
 
     public record LambdaExpr(List<Param> parameters, Expr expressionBody, List<Stmt> blockBody, boolean nonLexical) implements Expr {

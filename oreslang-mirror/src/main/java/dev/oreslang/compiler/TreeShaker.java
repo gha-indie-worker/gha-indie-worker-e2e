@@ -226,7 +226,6 @@ public final class TreeShaker {
             }
             if (expression instanceof Ast.ObjectExpr object) {
                 for (Ast.ObjectField field : object.fields()) {
-                    if (field.isDynamic() && containsLambda(field.dynamicName())) return true;
                     if (containsLambda(field.value())) return true;
                 }
             }
@@ -360,15 +359,11 @@ public final class TreeShaker {
             if (expression instanceof Ast.ObjectExpr object) {
                 List<Ast.ObjectField> fields = new ArrayList<>();
                 for (Ast.ObjectField field : object.fields()) {
-                    fields.add(field.isDynamic()
-                            ? Ast.ObjectField.dynamic(
-                                    substitute(field.dynamicName(), substitutions, shadowed),
-                                    substitute(field.value(), substitutions, shadowed))
-                            : Ast.ObjectField.named(
-                                    field.name(),
-                                    substitute(field.value(), substitutions, shadowed)));
+                    fields.add(Ast.ObjectField.named(
+                            field.name(),
+                            substitute(field.value(), substitutions, shadowed)));
                 }
-                return new Ast.ObjectExpr(fields);
+                return new Ast.ObjectExpr(fields, object.kind(), object.declaredFields());
             }
             if (expression instanceof Ast.LambdaExpr lambda) {
                 LinkedHashSet<String> nestedShadowed = new LinkedHashSet<>(shadowed);
@@ -553,7 +548,9 @@ public final class TreeShaker {
                         field.visibility(),
                         field.bindingKind(),
                         field.type(),
-                        initializer);
+                        field.annotations(),
+                        initializer,
+                        field.mutableReferent());
             }
             if (declaration instanceof Ast.ClassDecl klass) {
                 List<Ast.FieldDecl> fields = new ArrayList<>();
@@ -629,7 +626,11 @@ public final class TreeShaker {
                         : evaluate(initializer, module, locals);
                 locals.put(binding.name(), value);
                 return List.of(new Ast.BindingStmt(
-                        binding.kind(), binding.declaredType(), binding.name(), initializer));
+                        binding.kind(),
+                        binding.declaredType(),
+                        binding.name(),
+                        initializer,
+                        binding.mutableReferent()));
             }
             if (statement instanceof Ast.DestructureStmt destructure) {
                 Ast.Expr initializer = rewriteExpression(destructure.initializer(), module, locals);
@@ -742,7 +743,8 @@ public final class TreeShaker {
                             rewriteExpression(arm.value(), module, locals),
                             arm.bindingKind(),
                             arm.bindingName(),
-                            rewriteStatements(arm.body(), module, armLocals)));
+                            rewriteStatements(arm.body(), module, armLocals),
+                            arm.mutableReferent()));
                 }
                 return List.of(new Ast.SelectStmt(
                         selected.mode(),
@@ -779,7 +781,8 @@ public final class TreeShaker {
                         loop.bindingName(),
                         iterable,
                         loop.asyncIteration(),
-                        rewriteStatements(loop.body(), module, bodyLocals)));
+                        rewriteStatements(loop.body(), module, bodyLocals),
+                        loop.mutableReferent()));
             }
             if (statement instanceof Ast.ForStmt loop) {
                 LinkedHashMap<String, Object> loopLocals = new LinkedHashMap<>(locals);
@@ -936,15 +939,11 @@ public final class TreeShaker {
             if (expression instanceof Ast.ObjectExpr object) {
                 List<Ast.ObjectField> fields = new ArrayList<>();
                 for (Ast.ObjectField field : object.fields()) {
-                    fields.add(field.isDynamic()
-                            ? Ast.ObjectField.dynamic(
-                                    rewriteExpression(field.dynamicName(), module, locals),
-                                    rewriteExpression(field.value(), module, locals))
-                            : Ast.ObjectField.named(
-                                    field.name(),
-                                    rewriteExpression(field.value(), module, locals)));
+                    fields.add(Ast.ObjectField.named(
+                            field.name(),
+                            rewriteExpression(field.value(), module, locals)));
                 }
-                return new Ast.ObjectExpr(fields);
+                return new Ast.ObjectExpr(fields, object.kind(), object.declaredFields());
             }
             if (expression instanceof Ast.LambdaExpr lambda) {
                 LinkedHashMap<String, Object> lambdaLocals = new LinkedHashMap<>(locals);
@@ -1291,8 +1290,10 @@ public final class TreeShaker {
             } else if (expression instanceof Ast.TupleExpr tuple) {
                 for (Ast.Expr element : tuple.elements()) scanExpression(module, element, locals);
             } else if (expression instanceof Ast.ObjectExpr object) {
+                for (Ast.StructFieldSpec field : object.declaredFields()) {
+                    scanType(field.type());
+                }
                 for (Ast.ObjectField field : object.fields()) {
-                    if (field.isDynamic()) scanExpression(module, field.dynamicName(), locals);
                     scanExpression(module, field.value(), locals);
                 }
             } else if (expression instanceof Ast.LambdaExpr lambda) {
@@ -1311,6 +1312,10 @@ public final class TreeShaker {
                 locals.put(binding.name(), UNKNOWN);
             } else if (pattern instanceof Ast.TypePattern typed && typed.binding() != null) {
                 locals.put(typed.binding(), UNKNOWN);
+            } else if (pattern instanceof Ast.StructuralPattern structural && structural.binding() != null) {
+                locals.put(structural.binding(), UNKNOWN);
+            } else if (pattern instanceof Ast.TuplePattern tuple) {
+                for (Ast.Pattern nested : tuple.elements()) addPatternLocals(nested, locals);
             } else if (pattern instanceof Ast.ConstructorPattern constructor) {
                 for (Ast.Pattern nested : constructor.arguments()) addPatternLocals(nested, locals);
             }
@@ -1321,6 +1326,10 @@ public final class TreeShaker {
                 locals.add(binding.name());
             } else if (pattern instanceof Ast.TypePattern typed && typed.binding() != null) {
                 locals.add(typed.binding());
+            } else if (pattern instanceof Ast.StructuralPattern structural && structural.binding() != null) {
+                locals.add(structural.binding());
+            } else if (pattern instanceof Ast.TuplePattern tuple) {
+                for (Ast.Pattern nested : tuple.elements()) addPatternLocalNames(nested, locals);
             } else if (pattern instanceof Ast.ConstructorPattern constructor) {
                 for (Ast.Pattern nested : constructor.arguments()) addPatternLocalNames(nested, locals);
             }
@@ -1329,6 +1338,10 @@ public final class TreeShaker {
         private void scanPatternTypes(Ast.Pattern pattern) {
             if (pattern instanceof Ast.TypePattern typed) {
                 scanType(typed.type());
+            } else if (pattern instanceof Ast.StructuralPattern structural) {
+                scanType(structural.target());
+            } else if (pattern instanceof Ast.TuplePattern tuple) {
+                for (Ast.Pattern nested : tuple.elements()) scanPatternTypes(nested);
             } else if (pattern instanceof Ast.ConstructorPattern constructor) {
                 for (Ast.Pattern nested : constructor.arguments()) scanPatternTypes(nested);
             }
