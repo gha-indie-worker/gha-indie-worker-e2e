@@ -16,3 +16,39 @@ jobs:
         with:
           persist-credentials: false
       - run: npm test
+
+
+  oreslang-pr435:
+    if: github.ref == 'refs/heads/ci/oreslang-pr435-arguments-54cf2fe'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: oreslang-mirror
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify exact mirrored compiler objects
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:oreslang-mirror/src/main)" = "4db8b532c5e9332450bd3aea94e48ccb81126989"
+          test "$(git hash-object oreslang-mirror/pom.xml)" = "5911f0a162da2820be499c8b5e98fdceb632afc5"
+          test "$(git hash-object oreslang-mirror/src/test/java/dev/oreslang/ArgumentsTupleSpreadTest.java)" = "7376d6fd1a004fb3abc8bb6d80c87d2010266070"
+          echo "exact source subtree and test blob verified"
+      - name: Install pinned GraalVM 25.3.4.1
+        run: |
+          archive="$RUNNER_TEMP/graalvm.tar.gz"
+          curl --fail --location --retry 3 https://github.com/graalvm/graalvm-ce-builds/releases/download/graal-25.3.4.1/graalvm-community-jdk-25i3-25.0.4.1_linux-x64_bin.tar.gz -o "$archive"
+          echo "b2bc38d0c4141426eb44d0eefa3cc172c96faf92727d703b61541699128b6fc7  $archive" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/graalvm"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/graalvm" --strip-components=1
+          echo "JAVA_HOME=$RUNNER_TEMP/graalvm" >> "$GITHUB_ENV"
+          echo "$RUNNER_TEMP/graalvm/bin" >> "$GITHUB_PATH"
+      - name: GraalVM diagnostics
+        run: |
+          java --version
+          native-image --version
+      - name: Run arguments tuple spread regression suite
+        run: mvn -B -ntp -Dtest=ArgumentsTupleSpreadTest test
