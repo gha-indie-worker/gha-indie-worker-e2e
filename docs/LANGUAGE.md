@@ -142,6 +142,20 @@ silently shared. Actor-reference capabilities are not ordinary mutable object
 graphs. Cross-boundary cyclic serialization, sharing and identity-preserving
 copy are **not yet implemented**; they require a distinct explicit protocol.
 
+The ownership checker resolves local type aliases before deciding whether values
+are `Copy` or move-only and before admitting persistent class or actor fields.
+Thus aliases cannot make recursive structural state implicitly copyable or hide
+nested borrowed references. Moving the receiver into its own projected field,
+such as `node.next = Some(node)`, is rejected rather than manufacturing a
+self-cycle while invalidating the owner. Explicit actor-local reference/weak-
+reference APIs require their own lifetime and GC treatment.
+
+Printing a permitted local object/container graph is a diagnostic operation:
+repeated subgraphs remain readable, recursive edges are displayed as
+`<cycle>`, and formatted depth/size are bounded. This is **not** a general
+serializer, a guarantee of object-graph sendability, or permission to share
+mutable state across actors.
+
 ## Module contracts
 
 Module shape is described by a dedicated `contract`, not by a trait or ordinary type interface. Traits are for structs, classes, actors, and other types; contracts are for modules.

@@ -8197,7 +8197,7 @@ public final class OresEvalRootNode extends RootNode {
             }
             throw new IllegalArgumentException("value is not object-destructurable");
         }
-        private String display(Object value) { return value instanceof Complex c ? c.toString() : String.valueOf(value); }
+        private String display(Object value) { return CycleSafeDisplay.render(value); }
     }
 
     @FunctionalInterface private interface Invokable { Object call(List<Object> arguments); }
@@ -8494,7 +8494,7 @@ public final class OresEvalRootNode extends RootNode {
         @Override public Object get(Object key) { return fields.get(key); }
         @Override public boolean containsKey(Object key) { return fields.containsKey(key); }
         @Override public Iterable<?> sharedStateChildren() { return fields.values(); }
-        @Override public String toString() { return "infer struct" + fields; }
+        @Override public String toString() { return CycleSafeDisplay.render(this); }
     }
 
     private record SourceActorState(
@@ -8522,11 +8522,136 @@ public final class OresEvalRootNode extends RootNode {
             this.fields = fields;
         }
         @Override public Iterable<?> sharedStateChildren(){return fields.values();}
-        @Override public String toString(){
-            LinkedHashMap<String,Object> display = new LinkedHashMap<>();
-            fields.forEach((name, value) ->
-                    display.put(name, value == Evaluator.UNINITIALIZED_FIELD ? "<uninitialized>" : value));
-            return klass.name()+display;
+        @Override public String toString() { return CycleSafeDisplay.render(this); }
+    }
+
+
+    /** Identity-aware bounded diagnostic rendering; not a serializer. */
+    static final class CycleSafeDisplay {
+        private static final int MAX_DEPTH = 64;
+        private static final int MAX_NODES = 8192;
+        private static final int MAX_CHARS = 65536;
+        private static final String TRUNCATED = "<truncated>";
+
+        static String render(Object value) {
+            State state = new State();
+            state.append(value, 0);
+            return state.output.toString();
+        }
+
+        private static final class State {
+            private final StringBuilder output = new StringBuilder();
+            private final IdentityHashMap<Object, Boolean> visiting = new IdentityHashMap<>();
+            private int nodes;
+
+            private void write(String value) {
+                if (output.length() >= MAX_CHARS) return;
+                int available = MAX_CHARS - output.length();
+                if (value.length() > available) {
+                    int prefix = Math.max(0, available - TRUNCATED.length());
+                    output.append(value, 0, prefix);
+                    if (available > prefix) output.append(TRUNCATED, 0, available - prefix);
+                } else {
+                    output.append(value);
+                }
+            }
+
+            private void append(Object value, int depth) {
+                if (output.length() >= MAX_CHARS) return;
+                if (depth > MAX_DEPTH || ++nodes > MAX_NODES) {
+                    write(TRUNCATED);
+                    return;
+                }
+                if (!(value instanceof OresObject
+                        || value instanceof ReadonlyRecordValue
+                        || value instanceof OptionValue
+                        || value instanceof ResultValue
+                        || value instanceof Map<?, ?>
+                        || value instanceof List<?>
+                        || value instanceof Set<?>
+                        || value instanceof Object[])) {
+                    write(value instanceof String str ? str : String.valueOf(value));
+                    return;
+                }
+                if (visiting.put(value, Boolean.TRUE) != null) {
+                    write("<cycle>");
+                    return;
+                }
+                try {
+                    if (value instanceof OresObject object) {
+                        write(object.klass.name());
+                        write("{");
+                        boolean first = true;
+                        for (Map.Entry<String, Object> entry : object.fields.entrySet()) {
+                            if (!first) write(", ");
+                            first = false;
+                            write(entry.getKey());
+                            write("=");
+                            append(entry.getValue() == Evaluator.UNINITIALIZED_FIELD
+                                    ? "<uninitialized>" : entry.getValue(), depth + 1);
+                            if (output.length() >= MAX_CHARS) break;
+                        }
+                        write("}");
+                    } else if (value instanceof ReadonlyRecordValue readonly) {
+                        write("infer struct");
+                        append(readonly.fields, depth + 1);
+                    } else if (value instanceof OptionValue option) {
+                        if (!option.present()) {
+                            write("None");
+                        } else {
+                            write("Some(");
+                            append(option.value(), depth + 1);
+                            write(")");
+                        }
+                    } else if (value instanceof ResultValue result) {
+                        write(result.ok() ? "Ok(" : "Err(");
+                        append(result.value(), depth + 1);
+                        write(")");
+                    } else if (value instanceof Map<?, ?> map) {
+                        write("{");
+                        boolean first = true;
+                        for (Map.Entry<?, ?> entry : map.entrySet()) {
+                            if (!first) write(", ");
+                            first = false;
+                            append(entry.getKey(), depth + 1);
+                            write("=");
+                            append(entry.getValue(), depth + 1);
+                            if (output.length() >= MAX_CHARS) break;
+                        }
+                        write("}");
+                    } else if (value instanceof List<?> list) {
+                        write("[");
+                        boolean first = true;
+                        for (Object element : list) {
+                            if (!first) write(", ");
+                            first = false;
+                            append(element, depth + 1);
+                            if (output.length() >= MAX_CHARS) break;
+                        }
+                        write("]");
+                    } else if (value instanceof Set<?> set) {
+                        write("[");
+                        boolean first = true;
+                        for (Object element : set) {
+                            if (!first) write(", ");
+                            first = false;
+                            append(element, depth + 1);
+                            if (output.length() >= MAX_CHARS) break;
+                        }
+                        write("]");
+                    } else if (value instanceof Object[] array) {
+                        write("[");
+                        for (int i = 0; i < array.length; i++) {
+                            if (i != 0) write(", ");
+                            append(array[i], depth + 1);
+                            if (output.length() >= MAX_CHARS) break;
+                        }
+                        write("]");
+                    }
+                } finally {
+                    visiting.remove(value);
+                }
+            }
         }
     }
 
@@ -8673,11 +8798,11 @@ public final class OresEvalRootNode extends RootNode {
     }
     private record OptionValue(boolean present, Object value) implements OresMutex.SharedState {
         @Override public Iterable<?> sharedStateChildren(){return present ? List.of(value) : List.of();}
-        @Override public String toString(){return present ? "Some(" + value + ")" : "None";}
+        @Override public String toString(){return CycleSafeDisplay.render(this);}
     }
     private record ResultValue(boolean ok, Object value) implements OresMutex.SharedState {
         @Override public Iterable<?> sharedStateChildren(){return List.of(value);}
-        @Override public String toString(){return ok ? "Ok(" + value + ")" : "Err(" + value + ")";}
+        @Override public String toString(){return CycleSafeDisplay.render(this);}
     }
     private record OptionUnwrapError(String reason) {
         @Override public String toString(){return "OptionUnwrapError(" + reason + ")";}
@@ -8762,15 +8887,15 @@ public final class OresEvalRootNode extends RootNode {
     }
 
     private record StdioFacade(OresContext context) {
-        private Object print(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.print");requireOne(args,"stdio.print");context.output().print(String.valueOf(args.getFirst()));context.output().flush();return null;}
-        private Object println(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.println");requireOne(args,"stdio.println");context.output().println(String.valueOf(args.getFirst()));return null;}
+        private Object print(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.print");requireOne(args,"stdio.print");context.output().print(CycleSafeDisplay.render(args.getFirst()));context.output().flush();return null;}
+        private Object println(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.println");requireOne(args,"stdio.println");context.output().println(CycleSafeDisplay.render(args.getFirst()));return null;}
     }
     private record StdoutFacade(OresContext context) {
-        private Object write(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.stdout.write");requireOne(args,"stdio.stdout.write");context.output().print(String.valueOf(args.getFirst()));context.output().flush();return null;}
-        private Object println(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.stdout.println");requireOne(args,"stdio.stdout.println");context.output().println(String.valueOf(args.getFirst()));return null;}
+        private Object write(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.stdout.write");requireOne(args,"stdio.stdout.write");context.output().print(CycleSafeDisplay.render(args.getFirst()));context.output().flush();return null;}
+        private Object println(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.stdout.println");requireOne(args,"stdio.stdout.println");context.output().println(CycleSafeDisplay.render(args.getFirst()));return null;}
         private Object log(List<Object> args){
             context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.stdout.log");
-            for(Object arg:args)context.output().print(String.valueOf(arg));
+            for(Object arg:args)context.output().print(CycleSafeDisplay.render(arg));
             context.output().println();
             context.output().flush();
             return null;

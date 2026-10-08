@@ -173,6 +173,82 @@ final class RecursiveTypeGraphTest {
     }
 
     @Test
+    void borrowedReferencesCannotHideInsideRecursiveOrAliasedClassFields() {
+        for (String type : new String[] {
+                "Option<&Link>",
+                "Nested",
+                "Alias"
+        }) {
+            String program = """
+                    define class Link as
+                        pub let int id = 0;
+                    end
+                    type Alias = &Link;
+                    type Nested = Option<Alias>;
+                    define class Carrier as
+                        pub let %s link = None;
+                    end
+                    """.formatted(type);
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                    () -> dev.oreslang.types.OwnershipChecker.check(Parser.parse(program)), program);
+            assertTrue(error.getMessage().contains("borrowed reference"), error.getMessage());
+        }
+    }
+
+    @Test
+    void ownershipClassifiesAliasesWithoutTurningRecursiveRecordsIntoCopyValues() {
+        assertDoesNotThrow(() -> dev.oreslang.types.OwnershipChecker.check(Parser.parse("""
+                type Flag = bool;
+                fnc consume(Flag flag): void { return; }
+                fnc okay(): void {
+                    val Flag flag = true;
+                    consume(flag);
+                    consume(flag);
+                    return;
+                }
+                """)));
+
+        IllegalArgumentException moved = assertThrows(IllegalArgumentException.class,
+                () -> dev.oreslang.types.OwnershipChecker.check(Parser.parse("""
+                        type Node = struct{value: int, next: Option<Node>};
+                        fnc consume(Node node): void { return; }
+                        fnc bad(Node node): void {
+                            consume(node);
+                            consume(node);
+                            return;
+                        }
+                        """)));
+        assertTrue(moved.getMessage().contains("moved"), moved.getMessage());
+    }
+
+    @Test
+    void rejectsImplicitCyclesCreatedByMovingAnOwnerIntoItsOwnField() {
+        IllegalArgumentException moved = assertThrows(IllegalArgumentException.class,
+                () -> dev.oreslang.types.OwnershipChecker.check(Parser.parse("""
+                        define class Link as
+                            pub let Option<Link> next = None;
+                        end
+                        fnc invalid(): void {
+                            let mut Link node = new Link();
+                            node.next = Some(node);
+                            return;
+                        }
+                        """)));
+        assertTrue(moved.getMessage().contains("moved"), moved.getMessage());
+
+        assertDoesNotThrow(() -> dev.oreslang.types.OwnershipChecker.check(Parser.parse("""
+                define class Link as
+                    pub let int value = 0;
+                end
+                fnc valid(): void {
+                    let mut Link node = new Link();
+                    node.value = 5;
+                    return;
+                }
+                """)));
+    }
+
+    @Test
     void actorTransportRejectsCyclicDataButAcceptsAcyclicSharedSubgraphs() {
         List<Object> self = new ArrayList<>();
         self.add(self);
