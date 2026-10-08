@@ -69,6 +69,11 @@ public final class OwnershipChecker {
 
     private static <T> void index(Map<String,T> map, Set<String> ambiguous, String module, String name, T value) {
         map.put(module + "." + name, value);
+        // Once a short name is ambiguous, a third declaration must not
+        // accidentally restore an unqualified binding.
+        if (ambiguous.contains(name)) {
+            return;
+        }
         T previous = map.putIfAbsent(name, value);
         if (previous != null && previous != value) {
             map.remove(name);
@@ -2941,13 +2946,26 @@ public final class OwnershipChecker {
     }
 
     /** A type alias cannot hide a borrow inside persistent class/actor state. */
+    /** Resolve local aliases first; never treat an ambiguous imported name as an opaque type. */
+    private Ast.TypeAliasDecl ownershipTypeAlias(Ast.TypeRef type) {
+        String localName = currentModule == null
+                ? type.name() : currentModule + "." + type.name();
+        Ast.TypeAliasDecl local = typeAliases.get(localName);
+        if (local != null) {
+            return local;
+        }
+        if (ambiguousTypeAliases.contains(type.name())) {
+            throw error("ambiguous type alias '" + type.name()
+                    + "'; qualify it with its module");
+        }
+        return typeAliases.get(type.name());
+    }
+
     private boolean containsBorrowUnderAliases(
             Ast.TypeRef type, Set<Ast.TypeAliasDecl> visiting) {
         if (type == null) return false;
         if (type.isBorrow()) return true;
-        Ast.TypeAliasDecl alias = typeAliases.get(
-                currentModule == null ? type.name() : currentModule + "." + type.name());
-        if (alias == null) alias = typeAliases.get(type.name());
+        Ast.TypeAliasDecl alias = ownershipTypeAlias(type);
         if (alias != null) {
             if (alias.genericParameters().size() != type.arguments().size()) {
                 return true; // Malformed alias must not bypass ownership validation.
@@ -2976,9 +2994,7 @@ public final class OwnershipChecker {
         if (type.isUnion() || type.isTupleType()) {
             return type.arguments().stream().allMatch(item -> isCopyType(item, visiting));
         }
-        Ast.TypeAliasDecl alias = typeAliases.get(
-                currentModule == null ? type.name() : currentModule + "." + type.name());
-        if (alias == null) alias = typeAliases.get(type.name());
+        Ast.TypeAliasDecl alias = ownershipTypeAlias(type);
         if (alias != null) {
             if (alias.genericParameters().size() != type.arguments().size()) return false;
             if (!visiting.add(alias)) return false; // Recursive ownership is not implicitly Copy.

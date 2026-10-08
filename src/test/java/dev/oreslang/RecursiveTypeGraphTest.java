@@ -249,6 +249,35 @@ final class RecursiveTypeGraphTest {
     }
 
     @Test
+    void ambiguousAliasesAcrossThreeModulesRemainRejectedByOwnershipPass() {
+        String declarations = """
+                define module first
+                    type Shared = &int;
+                end
+                define module second
+                    type Shared = int;
+                end
+                define module third
+                    type Shared = bool;
+                end
+                """;
+
+        IllegalArgumentException fieldError = assertThrows(IllegalArgumentException.class,
+                () -> dev.oreslang.types.OwnershipChecker.check(Parser.parse(declarations + """
+                        define class Carrier as
+                            pub let Shared value = None;
+                        end
+                        """)));
+        assertTrue(fieldError.getMessage().contains("ambiguous type alias"), fieldError.getMessage());
+
+        IllegalArgumentException copyError = assertThrows(IllegalArgumentException.class,
+                () -> dev.oreslang.types.OwnershipChecker.check(Parser.parse(declarations + """
+                        fnc use(Shared value): void { return; }
+                        """)));
+        assertTrue(copyError.getMessage().contains("ambiguous type alias"), copyError.getMessage());
+    }
+
+    @Test
     void actorTransportRejectsCyclicDataButAcceptsAcyclicSharedSubgraphs() {
         List<Object> self = new ArrayList<>();
         self.add(self);

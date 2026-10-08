@@ -1,4 +1,4 @@
-name: PR459 hardened recursive graph tests
+name: PR459 exact a3d0e5b recursive hardening suite
 on:
   push:
     branches:
@@ -17,9 +17,9 @@ jobs:
       - name: Verify exact source tree
         run: |
           set -eu
-          git checkout --detach f45062e2b7592dd83e2976a7c435558e5e9a372c
+          git checkout --detach 65cb3fcdc7d99f740f3c94746cb8ca7fb6962ec5
           actual="$(git rev-parse 'HEAD^{tree}')"
-          test "$actual" = "564aad88fdc070bd6138b000c42ea0ddd174f92b"
+          test "$actual" = "485b94c8a304f76d6aad4ef7465c633e2086291e"
       - name: Set up GraalVM
         uses: graalvm/setup-graalvm@v1
         with:
