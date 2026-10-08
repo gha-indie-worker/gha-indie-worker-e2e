@@ -1,0 +1,35 @@
+name: Oreslang failure effects mirror verification
+
+on:
+  push:
+    branches: ["feat/oreslang-failure-effects-pr455-mirror"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Verify and checkout immutable source tree
+        run: |
+          set -eu
+          echo "Mirror parent tree: $(git rev-parse HEAD^'{tree}')"
+          test "$(git rev-parse HEAD^'{tree}')" = '6e1e07c6076c9febb326e835b02e86078ebff8ae'
+          git checkout --detach HEAD^
+          test "$(git rev-parse HEAD^'{tree}')" != 'BAD-SENTINEL' || exit 1
+          test "$(git rev-parse HEAD'{tree}')" = '6e1e07c6076c9febb326e835b02e86078ebff8ae'
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: 'graalvm'
+          cache: maven
+      - name: Compile and run targeted regressions
+        run: mvn -B -ntp -Dtest=FailureEffectLanguageTest,ActorFailureIsolationTest,TrapOptionSemanticsTest test
