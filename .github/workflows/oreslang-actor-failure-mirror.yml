@@ -25,12 +25,11 @@ jobs:
           test "$actual_tree" = '6e1e07c6076c9febb326e835b02e86078ebff8ae'
           git checkout --detach "$source_commit"
           test "$(git rev-parse 'HEAD^{tree}')" = '6e1e07c6076c9febb326e835b02e86078ebff8ae'
-      - name: Set up GraalVM
-        uses: graalvm/setup-graalvm@v1
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
-          version: '25.3'
           java-version: '25'
-          distribution: 'graalvm'
+          distribution: 'temurin'
           cache: maven
       - name: Compile and run targeted regressions
         run: mvn -B -ntp -Dtest=FailureEffectLanguageTest,ActorFailureIsolationTest,TrapOptionSemanticsTest test
