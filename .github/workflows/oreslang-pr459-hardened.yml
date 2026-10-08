@@ -1,0 +1,31 @@
+name: PR459 hardened recursive graph tests
+on:
+  push:
+    branches:
+      - test/oreslang-pr459-hardened-20261008
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact source tree
+        run: |
+          set -eu
+          git checkout --detach f45062e2b7592dd83e2976a7c435558e5e9a372c
+          actual="$(git rev-parse 'HEAD^{tree}')"
+          test "$actual" = "564aad88fdc070bd6138b000c42ea0ddd174f92b"
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: 'graalvm'
+          cache: maven
+      - name: Run recursive ownership and diagnostic tests
+        run: mvn -B -ntp -Dtest=RecursiveTypeGraphTest,CycleSafeDisplayTest,OwnershipAndClosureTest,BooleanTypeAliasTest,StaticStructAotTest,OptionResultSemanticsTest,ActorTransportHardeningTest,StructuralTypingHardeningTest test
