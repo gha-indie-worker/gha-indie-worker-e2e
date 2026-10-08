@@ -15,11 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Verify and checkout immutable source tree
         run: |
           set -eu
-          source_commit="$(git rev-parse HEAD^)"
+          source_commit="fd548ce0b45861a2f275d5c93dd1326d6d0f8ede"
           actual_tree="$(git rev-parse "${source_commit}^{tree}")"
           echo "Mirror source tree: $actual_tree"
           test "$actual_tree" = '6e1e07c6076c9febb326e835b02e86078ebff8ae'
