@@ -16,7 +16,6 @@ import dev.oreslang.runtime.NativeIo;
 import dev.oreslang.runtime.NativeHttp;
 import dev.oreslang.runtime.OresMutex;
 import dev.oreslang.runtime.ActorRuntime;
-import dev.oreslang.runtime.OresFailure;
 import dev.oreslang.runtime.AsyncRuntime;
 import dev.oreslang.runtime.OresFuture;
 import dev.oreslang.runtime.ChannelRuntime;
@@ -4363,11 +4362,11 @@ public final class OresEvalRootNode extends RootNode {
             }
             try {
                 return new OptionValue(true, callFunctionBodyUnchecked(fn, args));
-            } catch (OresFailure.Raise | OresFailure.Panic fatal) {
-                throw fatal;
+            } catch (OresPanic panic) {
+                throw panic;
             } catch (java.util.concurrent.CancellationException cancelled) {
                 throw cancelled;
-            } catch (OresFailure.Throw ordinaryFailure) {
+            } catch (RuntimeException ordinaryFailure) {
                 // trap is deliberately lossy: ordinary guest/runtime failure
                 // becomes None. Panic and scheduler cancellation remain distinct
                 // non-trappable control channels.
@@ -4561,25 +4560,6 @@ public final class OresEvalRootNode extends RootNode {
                         env,
                         inheritedTailBarrier || !deferred.isEmpty() || env.hasLiveMutexGuards());
             }
-            if (stmt instanceof Ast.FailureStmt failed) {
-                Object value = eval(failed.value(), env);
-                switch (failed.kind()) {
-                    case THROW -> throw new OresFailure.Throw(value);
-                    case RAISE -> throw new OresFailure.Raise(value);
-                    case PANIC -> throw new OresFailure.Panic(value);
-                }
-                throw new AssertionError(failed.kind());
-            }
-            if (stmt instanceof Ast.RecoverStmt recovered) {
-                try {
-                    executeBlock(recovered.body(), env, true);
-                } catch (OresFailure.Raise raised) {
-                    Env recovery = new Env(env);
-                    recovery.define(recovered.errorName(), raised.value(), Ast.BindingKind.VAL);
-                    executeBlock(recovered.handler(), recovery, true);
-                }
-                return;
-            }
             if (stmt instanceof Ast.YieldStmt yielded) {
                 if (env.hasLiveMutexGuards()) {
                     throw new IllegalStateException("cannot yield while holding a live MutexGuard");
@@ -4735,10 +4715,10 @@ public final class OresEvalRootNode extends RootNode {
                 try { executeBlock(tried.body(), env, true); }
                 catch (TailCallSignal signal) { throw signal; }
                 catch (ReturnSignal | BreakSignal | ContinueSignal signal) { throw signal; }
-                catch (OresFailure.Raise | OresFailure.Panic fatal) { throw fatal; }
-                catch (OresFailure.Throw failure) {
+                catch (OresPanic panic) { throw panic; }
+                catch (RuntimeException failure) {
                     Env catchEnv = new Env(env);
-                    catchEnv.define(tried.errorName(), failure.value(), Ast.BindingKind.VAL);
+                    catchEnv.define(tried.errorName(), failure, Ast.BindingKind.VAL);
                     executeBlock(tried.catchBody(), catchEnv, true);
                 } finally { executeBlock(tried.finallyBody(), env, true); }
                 return;
@@ -6619,7 +6599,7 @@ public final class OresEvalRootNode extends RootNode {
                 case "is_none" -> (Invokable) args -> { requireZero(args, "Option.is_none"); return !option.present(); };
                 case "unwrap" -> (Invokable) args -> {
                     requireZero(args, "Option.unwrap");
-                    if (!option.present()) throw new OresFailure.Panic("called Option::unwrap() on a None value");
+                    if (!option.present()) throw new OresPanic("called Option::unwrap() on a None value");
                     return option.value();
                 };
                 case "unwrap_safe" -> (Invokable) args -> {
@@ -6630,7 +6610,7 @@ public final class OresEvalRootNode extends RootNode {
                 };
                 case "expect" -> (Invokable) args -> {
                     String message = requireStringArg(args, "Option.expect");
-                    if (!option.present()) throw new OresFailure.Panic(message);
+                    if (!option.present()) throw new OresPanic(message);
                     return option.value();
                 };
                 case "unwrap_or" -> (Invokable) args -> {
@@ -6648,7 +6628,7 @@ public final class OresEvalRootNode extends RootNode {
                 case "unwrap" -> (Invokable) args -> {
                     requireZero(args, "Result.unwrap");
                     if (!result.ok()) {
-                        throw new OresFailure.Panic("called Result::unwrap() on an Err value: " + display(result.value()));
+                        throw new OresPanic("called Result::unwrap() on an Err value: " + display(result.value()));
                     }
                     return result.value();
                 };
@@ -6658,7 +6638,7 @@ public final class OresEvalRootNode extends RootNode {
                 };
                 case "expect" -> (Invokable) args -> {
                     String message = requireStringArg(args, "Result.expect");
-                    if (!result.ok()) throw new OresFailure.Panic(message + ": " + display(result.value()));
+                    if (!result.ok()) throw new OresPanic(message + ": " + display(result.value()));
                     return result.value();
                 };
                 case "unwrap_or" -> (Invokable) args -> {
@@ -8702,8 +8682,11 @@ public final class OresEvalRootNode extends RootNode {
     private record OptionUnwrapError(String reason) {
         @Override public String toString(){return "OptionUnwrapError(" + reason + ")";}
     }
-    private static final class OresCastError extends OresFailure.Throw {
-        private OresCastError(String message) { super(message); }
+    private static final class OresPanic extends RuntimeException {
+        private OresPanic(String message) { super(message, null, true, false); }
+    }
+    private static final class OresCastError extends RuntimeException {
+        private OresCastError(String message) { super(message, null, false, false); }
     }
     private static List<Object> immutableIoStrings(List<Object> args) {
         // Only immutable host values may cross into an I/O worker.
