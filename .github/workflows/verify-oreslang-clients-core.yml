@@ -1,0 +1,35 @@
+name: verify public Oreslang client header proposal
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/verify-oreslang-clients-core.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-fail-closed-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact public proposal tree (no secrets)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ORESoftware/ores-clients-core
+          ref: 85ee2dcb28dab49f96b9af8ad866e6abfac072d1
+          persist-credentials: false
+      - name: Verify exact proposal revision
+        run: |
+          test "$(git rev-parse HEAD)" = "85ee2dcb28dab49f96b9af8ad866e6abfac072d1"
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          components: rustfmt, clippy
+      - name: Rust format
+        run: cargo fmt --all -- --check
+      - name: Lint all targets
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Execute all Rust tests including negative Oreslang admission cases
+        run: cargo test --all-targets --all-features
