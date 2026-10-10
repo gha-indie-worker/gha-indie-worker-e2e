@@ -207,7 +207,60 @@ final class ActorCoreLifecycleSignalTest {
                           }
                         end
                         """));
-        assertTrue(rejected.getMessage().contains("cannot await self.get_done_signal"));
+        assertTrue(rejected.getMessage().contains("cannot call self.get_done_signal"));
+    }
+
+    @Test
+    void indirectSelfCompletionIsRejectedEvenIfAwaitOccursLater() {
+        IllegalArgumentException rejected = assertThrows(
+                IllegalArgumentException.class,
+                () -> OresCompiler.parseAndTypeCheck("""
+                        define actor Worker as
+                          receive(ActorMail<String> mail): void {
+                            val pending = self.get_done_signal();
+                            rt cooperate;
+                            val result = await pending;
+                            self.end();
+                            return;
+                          }
+                        end
+                        """));
+        assertTrue(rejected.getMessage().contains("cannot call self.get_done_signal"));
+    }
+
+    @Test
+    void inheritedSignalsCannotBeMistypedAsOptionOfFuture() {
+        assertThrows(IllegalArgumentException.class,
+                () -> OresCompiler.parseAndTypeCheck("""
+                        define actor Worker as
+                          receive(ActorMail<String> mail): void {
+                            self.end();
+                            return;
+                          }
+                        end
+
+                        pub async routine main(): void {
+                          val worker = spawn Worker();
+                          val Option<Future<bool>> wrong = worker.get_ready_signal();
+                          return;
+                        }
+                        """));
+    }
+
+    @Test
+    void ordinaryClassesCannotInvokeActorLifecycleSignals() {
+        assertThrows(IllegalArgumentException.class,
+                () -> OresCompiler.parseAndTypeCheck("""
+                        define class Regular as
+                          pub let int state = 0;
+                        end
+
+                        pub routine main(): void {
+                          val object = new Regular();
+                          object.get_ready_signal();
+                          return;
+                        }
+                        """));
     }
 
     @Test

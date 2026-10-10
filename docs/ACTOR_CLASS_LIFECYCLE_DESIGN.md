@@ -258,10 +258,16 @@ Cancellation, security violations, panic, and fatal failures propagate as
 non-trappable Future failures. `await` strips only the `Future`.
 
 Actor `self.get_ready_signal()` is available after initialization; await from
-`receive` can safely observe already completed readiness. An actor should
-**not await `self.get_done_signal()`** because its own done Future cannot
-settle until the actor has exited its last turn and finalized. The method
-exists on the base for uniform introspection, not for awaiting self shutdown.
+`receive` can safely observe already completed readiness. The compiler and
+runtime **reject `self.get_done_signal()` from an active actor turn**, even
+when the Future would be stored or awaited indirectly: an actor cannot
+observe its own finalization while it is still executing. An owning
+supervisor observes completion through `ActorRef.get_done_signal()` instead.
+
+Actor self identity is a runtime-owned, non-guest field checked against the
+admitted actor execution lane before any hidden self method can run. Merely
+holding an `OresObject` of an actor class never confers its lifecycle
+authority. A copied actor self is rejected at async ownership boundaries.
 
 These are **synthetic sealed methods**, not a publicly constructible
 `ActorBase` class. The compiler recognizes the builtins, while the runtime

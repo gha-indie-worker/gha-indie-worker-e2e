@@ -442,7 +442,8 @@ public final class OresEvalRootNode extends RootNode {
             for (Ast.FieldDecl field : classFields) {
                 fields.put(field.name(), UNINITIALIZED_FIELD);
             }
-            OresObject object = new OresObject(this, klass, fields);
+            OresObject object = new OresObject(
+                    this, klass, fields, actorContext.self().id());
 
             // Field initializers are actor-local state construction. They run
             // only after ActorRuntime has installed this actor's execution
@@ -3968,9 +3969,22 @@ public final class OresEvalRootNode extends RootNode {
                 throw new IllegalArgumentException(
                         "self." + name + " expects no arguments");
             }
+            if (name.equals("get_done_signal")) {
+                // Returning a self-owned completion Future is a deadlock even
+                // when awaiting is delayed, aliased, or performed in another
+                // continuation of this actor.
+                throw new IllegalStateException(
+                        "self.get_done_signal() is forbidden: an actor cannot observe its own finalization from an active turn");
+            }
+            ActorRuntime.ActorRef<?> selfRef =
+                    object.owner.context.actors().currentActorSelfRef();
+            if (object.actorOwnerId == null
+                    || !object.actorOwnerId.equals(selfRef.id())) {
+                throw new SecurityException(
+                        "hidden actor-core lifecycle call requires the owning actor's self object");
+            }
             return object.owner.invokableInvocation(
-                    ignored -> object.owner.actorLifecycleSignalFuture(
-                            object.owner.context.actors().currentActorSelfRef(), name),
+                    ignored -> object.owner.actorLifecycleSignalFuture(selfRef, name),
                     List.of());
         }
 
@@ -4401,6 +4415,10 @@ public final class OresEvalRootNode extends RootNode {
                     LinkedHashMap<String, Object> fields = new LinkedHashMap<>();
                     for (Map.Entry<String, Object> entry : object.fields.entrySet()) {
                         fields.put(entry.getKey(), detachAsyncValue(entry.getValue(), visiting));
+                    }
+                    if (object.actorOwnerId != null) {
+                        throw new SecurityException(
+                                "actor-owned self instances cannot be copied across async task boundaries");
                     }
                     return new OresObject(object.owner, object.klass, fields);
                 }
@@ -8670,10 +8688,20 @@ public final class OresEvalRootNode extends RootNode {
         private final Evaluator owner;
         private final Ast.ClassDecl klass;
         private final Map<String,Object> fields;
+        // Non-guest-accessible source actor ownership identity. Ordinary class
+        // objects intentionally have no actor owner.
+        private final ActorRuntime.ActorId actorOwnerId;
+
         private OresObject(Evaluator owner, Ast.ClassDecl klass, Map<String,Object> fields) {
+            this(owner, klass, fields, null);
+        }
+
+        private OresObject(Evaluator owner, Ast.ClassDecl klass, Map<String,Object> fields,
+                ActorRuntime.ActorId actorOwnerId) {
             this.owner = owner;
             this.klass = klass;
             this.fields = fields;
+            this.actorOwnerId = actorOwnerId;
         }
         @Override public Iterable<?> sharedStateChildren(){return fields.values();}
         @Override public String toString(){

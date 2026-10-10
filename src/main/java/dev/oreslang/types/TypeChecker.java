@@ -2209,6 +2209,10 @@ public final class TypeChecker {
                         throw new IllegalArgumentException(
                                 "self." + member.member() + "() is a zero-argument inherited actor-core method");
                     }
+                    if (member.member().equals("get_done_signal")) {
+                        throw new IllegalArgumentException(
+                                "actor cannot call self.get_done_signal(): its own completion cannot settle before finalization; observe through an ActorRef in a supervisor");
+                    }
                     return inheritedActorSignalResult();
                 }
                 if (actorSelf && (member.member().equals("on_start")
@@ -2586,6 +2590,23 @@ public final class TypeChecker {
                     }
                     Ast.ClassDecl klass = findClass(named.name());
                     if (klass != null) {
+                        // The synthetic actor base applies to the receiver's
+                        // nominal actor type, not only the literal spelling
+                        // "self". Aliases to self still receive the same type
+                        // and are checked against actor identity at runtime.
+                        if (klass.actorKind() != Ast.ActorKind.NONE
+                                && isInheritedActorSignal(member.member())) {
+                            if (call.typeArgumentsPresent() || !call.arguments().isEmpty()) {
+                                throw new IllegalArgumentException(
+                                        "actor-core " + member.member() + "() takes no arguments or type arguments");
+                            }
+                            if (member.member().equals("get_done_signal")
+                                    && currentActorKind != Ast.ActorKind.NONE) {
+                                throw new IllegalArgumentException(
+                                        "actor cannot call self.get_done_signal(): observe completion through an ActorRef in a supervisor");
+                            }
+                            return inheritedActorSignalResult();
+                        }
                         int methodArity = fixedCallArity(
                                 call.arguments(), env, generics, self,
                                 "method " + named.name() + "." + member.member());
