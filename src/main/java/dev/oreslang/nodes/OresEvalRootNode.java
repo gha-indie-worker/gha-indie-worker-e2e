@@ -1244,7 +1244,14 @@ public final class OresEvalRootNode extends RootNode {
                                 && failure.getCause() != null) {
                             failure = OresFuture.unwrap(failure.getCause());
                         }
-                        if (failure instanceof RuntimeException
+                        boolean ordinaryLifecycleFailure =
+                                failure instanceof ActorRuntime.ActorTerminatedException
+                                // A genuine actor failure is recorded by ActorRuntime
+                                // before it settles ready/done. This identity
+                                // check excludes unrelated scheduler/bridge faults.
+                                || actorRef.failure().orElse(null) == failure;
+                        if (ordinaryLifecycleFailure
+                                && failure instanceof RuntimeException
                                 && !(failure instanceof java.util.concurrent.CancellationException)
                                 && !(failure instanceof SecurityException)
                                 && !(failure instanceof OresPanic)) {

@@ -880,6 +880,24 @@ public final class TypeChecker {
         // child to declare an explicit local override/hide for that slot.
         effectiveCallableTargets(klass, new LinkedHashSet<>());
 
+        // The synthetic actor base is sealed across the *entire* inheritance
+        // graph, not just methods/fields declared directly on this actor.
+        // Otherwise static dispatch and runtime actor-core dispatch disagree.
+        if (klass.actorKind() != Ast.ActorKind.NONE) {
+            for (String name : List.of("get_ready_signal", "get_done_signal")) {
+                if (effectiveFieldNames.contains(name)) {
+                    throw new IllegalArgumentException(
+                            "actor field '" + klass.name() + "." + name
+                                    + "' shadows a sealed hidden actor-core lifecycle method");
+                }
+                if (effectiveInstanceMethodNames.contains(name)) {
+                    throw new IllegalArgumentException(
+                            "actor method '" + klass.name() + "." + name
+                                    + "' cannot override a sealed hidden actor-core lifecycle method");
+                }
+            }
+        }
+
         for (Ast.FieldDecl field : klass.fields()) {
             if (klass.actorKind() != Ast.ActorKind.NONE && isInheritedActorSignal(field.name())) {
                 throw new IllegalArgumentException(
@@ -3109,6 +3127,15 @@ public final class TypeChecker {
             return nominal;
         }
         if (expr instanceof Ast.AwaitExpr awaited) {
+            if (currentActorKind != Ast.ActorKind.NONE
+                    && awaited.expression() instanceof Ast.CallExpr call
+                    && call.callee() instanceof Ast.MemberExpr member
+                    && member.receiver() instanceof Ast.NameExpr name
+                    && name.name().equals("self")
+                    && member.member().equals("get_done_signal")) {
+                throw new IllegalArgumentException(
+                        "actor cannot await self.get_done_signal(): own done settles only after the actor finalizes");
+            }
             Type awaitedType = typeOf(awaited.expression(), env, generics, self);
             if (awaitedType instanceof Named named
                     && named.name().equals("Future")

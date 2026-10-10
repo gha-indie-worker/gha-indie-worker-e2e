@@ -194,6 +194,92 @@ final class ActorCoreLifecycleSignalTest {
                         """));
     }
 
+    @Test
+    void directSelfDoneAwaitIsRejectedBeforeItCanDeadlockTheActor() {
+        IllegalArgumentException rejected = assertThrows(
+                IllegalArgumentException.class,
+                () -> OresCompiler.parseAndTypeCheck("""
+                        define actor Worker as
+                          receive(ActorMail<String> mail): void {
+                            val result = await self.get_done_signal();
+                            self.end();
+                            return;
+                          }
+                        end
+                        """));
+        assertTrue(rejected.getMessage().contains("cannot await self.get_done_signal"));
+    }
+
+    @Test
+    void subclassesCannotInheritShadowMethodsFromActorParents() {
+        IllegalArgumentException rejected = assertThrows(
+                IllegalArgumentException.class,
+                () -> OresCompiler.parseAndTypeCheck("""
+                        define actor Parent as
+                          get_ready_signal(): bool {
+                            return true;
+                          }
+
+                          receive(ActorMail<int> mail): void {
+                            self.end();
+                            return;
+                          }
+                        end
+
+                        define actor Child extends Parent as
+                        end
+                        """));
+        assertTrue(rejected.getMessage().contains("sealed hidden actor-core"));
+    }
+
+    @Test
+    void panicFromReceiveIsNotConvertedToNoneByDoneSignal() throws Exception {
+        String program = """
+                define actor Worker as
+                  receive(ActorMail<String> mail): void {
+                    val Option<int> missing = None;
+                    missing.unwrap();
+                    return;
+                  }
+                end
+
+                pub async routine main(): void {
+                  val worker = spawn Worker();
+                  await worker.get_ready_signal();
+                  worker.send("panic");
+                  val Option<bool> done = await worker.get_done_signal();
+                  stdio.stdout.write(done.is_none());
+                  return;
+                }
+                """;
+        assertDoesNotThrow(() -> OresCompiler.parseAndTypeCheck(program));
+        assertThrows(PolyglotException.class, () -> run(program),
+                "panic must stay exceptional rather than becoming Option.None");
+    }
+
+    @Test
+    void cancellationIsNotConvertedToNoneByReadySignal() throws Exception {
+        String program = """
+                define actor Worker as
+                  receive(ActorMail<String> mail): void {
+                    self.end();
+                    return;
+                  }
+                end
+
+                pub async routine main(): void {
+                  val worker = spawn Worker();
+                  worker.cancel();
+                  val Option<bool> ready = await worker.get_ready_signal();
+                  stdio.stdout.write(ready.is_none());
+                  return;
+                }
+                """;
+        assertDoesNotThrow(() -> OresCompiler.parseAndTypeCheck(program));
+        assertThrows(PolyglotException.class, () -> run(program),
+                "actor cancellation must remain cancellation rather than Option.None");
+    }
+
     private static String run(String sourceText) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         Source source = Source.newBuilder(OresLanguage.ID, sourceText, "actor-core-signals.ores")
