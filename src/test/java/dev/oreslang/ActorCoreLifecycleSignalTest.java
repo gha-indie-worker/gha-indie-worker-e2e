@@ -74,6 +74,33 @@ final class ActorCoreLifecycleSignalTest {
     }
 
     @Test
+    void existingReadyAndDonePropertiesRemainCompatibleWithNewSignals() throws Exception {
+        String program = """
+                define actor Worker as
+                  receive(ActorMail<String> mail): void {
+                    self.end();
+                    return;
+                  }
+                end
+
+                pub async routine main(): void {
+                  val worker = spawn Worker();
+                  await worker.ready;
+                  val Option<bool> ready = await worker.get_ready_signal();
+                  worker.send("finish");
+                  await worker.done;
+                  val Option<bool> done = await worker.get_done_signal();
+                  stdio.stdout.write(ready.unwrap());
+                  stdio.stdout.write(":");
+                  stdio.stdout.write(done.unwrap());
+                  return;
+                }
+                """;
+        assertDoesNotThrow(() -> OresCompiler.parseAndTypeCheck(program));
+        assertEquals("true:true", run(program));
+    }
+
+    @Test
     void normalStartupFailureMapsToNoneWithoutFakingSuccessfulReadinessOrDone() throws Exception {
         String program = """
                 define actor Worker as

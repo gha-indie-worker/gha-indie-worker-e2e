@@ -13,6 +13,27 @@ import static org.junit.jupiter.api.Assertions.*;
 final class ActorReadinessLifecycleTest {
 
     @Test
+    void hiddenSelfLifecycleCapabilityIsAvailableOnlyOnOwningActorTurn() throws Exception {
+        try (ActorRuntime runtime = new ActorRuntime()) {
+            assertThrows(IllegalStateException.class, runtime::currentActorSelfRef);
+            java.util.concurrent.atomic.AtomicReference<ActorRuntime.ActorRef<?>> observed =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+
+            ActorRuntime.ActorRef<String> ref = runtime.spawnPrivate(() -> (message, context) -> {
+                observed.set(context.runtime().currentActorSelfRef());
+                context.runtime().stop(context.self());
+            });
+
+            ref.ready().get(5, TimeUnit.SECONDS);
+            ref.send("finish");
+            ref.done().get(5, TimeUnit.SECONDS);
+            assertSame(ref, observed.get(),
+                    "the admitted actor lane must resolve exactly its own runtime-owned ActorRef");
+            assertThrows(IllegalStateException.class, runtime::currentActorSelfRef);
+        }
+    }
+
+    @Test
     void readyInitializesActorWithoutAnInitialMailboxMessage() throws Exception {
         try (ActorRuntime runtime = new ActorRuntime()) {
             AtomicInteger created = new AtomicInteger();
