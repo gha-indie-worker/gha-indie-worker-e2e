@@ -117,16 +117,143 @@ final class TrapOptionSemanticsTest {
     }
 
     @Test
-    void unsupportedSuspendingTrapFormsFailClosed() {
-        IllegalArgumentException async = assertThrows(
-                IllegalArgumentException.class,
-                () -> Parser.parse("""
-                        async trap fnc later(): int {
-                          return 1;
-                        }
-                        """));
-        assertTrue(async.getMessage().contains("async trap"));
+    void asyncTrapTypesFutureOfOptionAndPreservesNestedOption() {
+        assertDoesNotThrow(() -> OresCompiler.parseAndTypeCheck("""
+                async fnc ready(): int {
+                  return 9;
+                }
 
+                async trap fnc once(): int {
+                  return await ready();
+                }
+
+                trap async fnc maybe(): Option<int> {
+                  return Some(await ready());
+                }
+
+                async trap fnc nothing(): void {
+                  val value = await ready();
+                  return;
+                }
+
+                fnc use(): void {
+                  val Future<Option<int>> pending = once();
+                  val Option<int> result = await pending;
+                  val Future<Option<Option<int>>> nested = maybe();
+                  val Option<Option<int>> value = await nested;
+                  val Option<void> finished = await nothing();
+                  return;
+                }
+                """));
+    }
+
+    @Test
+    void asyncTrapSuccessFailureAndNestedOptionExecuteAcrossAwait() throws Exception {
+        String program = """
+                define class Animal as
+                end
+
+                define class Dog extends Animal as
+                end
+
+                define class Cat extends Animal as
+                end
+
+                async fnc ready(): int {
+                  return 9;
+                }
+
+                async trap fnc success(): int {
+                  return await ready();
+                }
+
+                async trap fnc fails_after_await(): Dog {
+                  val n = await ready();
+                  return new Cat() as Dog;
+                }
+
+                async trap fnc fails_before_await(): Dog {
+                  return new Cat() as Dog;
+                }
+
+                async trap fnc nested(bool present): Option<int> {
+                  val n = await ready();
+                  if present; then
+                    return Some(n);
+                  fi
+                  return None;
+                }
+
+                async trap fnc done(): void {
+                  val n = await ready();
+                  return;
+                }
+
+                pub fnc main(): void {
+                  val Option<int> good = await success();
+                  val Option<Dog> bad_after = await fails_after_await();
+                  val Option<Dog> bad_before = await fails_before_await();
+                  val Option<Option<int>> nested_yes = await nested(true);
+                  val Option<Option<int>> nested_no = await nested(false);
+                  val Option<void> finished = await done();
+                  stdio.stdout.write(good.unwrap());
+                  stdio.stdout.write(":");
+                  stdio.stdout.write(bad_after.is_none());
+                  stdio.stdout.write(":");
+                  stdio.stdout.write(bad_before.is_none());
+                  stdio.stdout.write(":");
+                  stdio.stdout.write(nested_yes.unwrap().unwrap());
+                  stdio.stdout.write(":");
+                  stdio.stdout.write(nested_no.unwrap().is_none());
+                  stdio.stdout.write(":");
+                  stdio.stdout.write(finished.is_some());
+                  return;
+                }
+                """;
+        assertDoesNotThrow(() -> OresCompiler.parseAndTypeCheck(program));
+        assertEquals("9:true:true:9:true:true", run(program));
+    }
+
+    @Test
+    void asyncTrapCannotSwallowPanicAfterAwait() throws Exception {
+        String program = """
+                async fnc ready(): int {
+                  return 1;
+                }
+
+                async trap fnc panics(): int {
+                  val n = await ready();
+                  val Option<int> absent = None;
+                  return absent.unwrap();
+                }
+
+                pub fnc main(): void {
+                  val Option<int> ignored = await panics();
+                  stdio.stdout.write("unreachable");
+                  return;
+                }
+                """;
+        assertDoesNotThrow(() -> OresCompiler.parseAndTypeCheck(program));
+        PolyglotException thrown = assertThrows(PolyglotException.class, () -> run(program));
+        assertTrue(thrown.getMessage().contains("Option::unwrap"));
+    }
+
+    @Test
+    void asyncTrapMustNotBeMistypedAsOptionOfFuture() {
+        assertThrows(IllegalArgumentException.class, () -> OresCompiler.parseAndTypeCheck("""
+                async trap fnc ready(): int {
+                  return 1;
+                }
+
+                fnc bad(): void {
+                  val Option<Future<int>> wrong = ready();
+                  return;
+                }
+                """));
+    }
+
+    @Test
+    void trapGeneratorsAndActorCallablesStillFailClosed() {
         IllegalArgumentException generator = assertThrows(
                 IllegalArgumentException.class,
                 () -> Parser.parse("""
@@ -136,6 +263,15 @@ final class TrapOptionSemanticsTest {
                         }
                         """));
         assertTrue(generator.getMessage().contains("trap generator"));
+
+        IllegalArgumentException actor = assertThrows(
+                IllegalArgumentException.class,
+                () -> Parser.parse("""
+                        trap actor fnc value(): int {
+                          return 7;
+                        }
+                        """));
+        assertTrue(actor.getMessage().contains("trap actor"));
     }
 
     private static String run(String program) throws Exception {

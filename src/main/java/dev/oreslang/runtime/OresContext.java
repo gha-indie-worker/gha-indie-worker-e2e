@@ -71,6 +71,7 @@ public final class OresContext implements AutoCloseable {
     }
 
     public OresContext(OresLanguage language, TruffleLanguage.Env env) {
+        long contextPerf = CorePerf.start();
         this.language = language;
         this.env = env;
         this.input = new BufferedReader(new InputStreamReader(env.in()));
@@ -86,12 +87,14 @@ public final class OresContext implements AutoCloseable {
         // admission while runtime CONTROL carriers remain prestarted.
         this.isolatedRootTurns = isolatePolicy.adversarial()
                 ? new ArrayBlockingQueue<>(65_536) : null;
+        long controlPerf = CorePerf.start();
         OresVM vm = OresVM.create(this::executeRootTurn,
                 isolatedRootTurns == null ? null : turn -> {
                     if (!isolatedRootTurns.offer(turn)) {
                         throw new RejectedExecutionException("isolated root turn queue is full");
                     }
                 });
+        CorePerf.end(CorePerf.VM_CONTROL_STARTUP, controlPerf);
         if (!vm.started()) {
             vm.close();
             throw new IllegalStateException(
@@ -125,6 +128,7 @@ public final class OresContext implements AutoCloseable {
             try { vm.close(); } catch (RuntimeException cleanup) { failure.addSuppressed(cleanup); }
             throw failure;
         }
+        CorePerf.end(CorePerf.CONTEXT_STARTUP, contextPerf);
     }
 
     public static OresContext get(Node node) {

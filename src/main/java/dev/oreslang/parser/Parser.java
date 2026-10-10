@@ -408,9 +408,6 @@ public final class Parser {
             Ast.ActorKind actorKind) {
         if (modifiers.isStatic) throw error(previous(), "'static fnc' is only valid inside a class");
         if (modifiers.isAbstract) throw error(previous(), "top-level/module callables cannot be abstract");
-        if (modifiers.trapped && modifiers.async) {
-            throw error(previous(), "async trap fnc/routine is not enabled until trap spans every await suspension");
-        }
         if (modifiers.trapped && modifiers.generator) {
             throw error(previous(), "trap generator fnc/routine is not enabled until trap spans generator suspension");
         }
@@ -1293,11 +1290,21 @@ public final class Parser {
             return Ast.TypeRef.tupleType(elements);
         }
 
-        if (match(STRUCT)) {
-            consume(LBRACE, "expected '{' after struct in type position");
-            return parseRecordTypeAfterOpen();
+        if (match(LBRACE)) {
+            java.util.LinkedHashMap<String, Ast.TypeRef> members = new java.util.LinkedHashMap<>();
+            if (!check(RBRACE)) {
+                do {
+                    String field = consumeStaticObjectKeyName("expected record type field name");
+                    consume(COLON, "expected ':' after record type field name");
+                    Ast.TypeRef fieldType = parseTypeRef();
+                    if (members.putIfAbsent(field, fieldType) != null) {
+                        throw error(previous(), "duplicate record type field '" + field + "'");
+                    }
+                } while (match(COMMA));
+            }
+            consume(RBRACE, "expected '}' after record type");
+            return Ast.TypeRef.recordType(members);
         }
-        if (match(LBRACE)) return parseRecordTypeAfterOpen();
 
         if (match(TYPEOF)) {
             if (isLegacyFnSpelling()) {
@@ -1364,22 +1371,6 @@ public final class Parser {
             consume(RBRACKET, "expected ']' after sequence type shape");
         }
         return new Ast.TypeRef(name, args, infer);
-    }
-
-    private Ast.TypeRef parseRecordTypeAfterOpen() {
-        java.util.LinkedHashMap<String, Ast.TypeRef> members = new java.util.LinkedHashMap<>();
-        if (!check(RBRACE)) {
-            do {
-                String field = consumeStaticObjectKeyName("expected record type field name");
-                consume(COLON, "expected ':' after record type field name");
-                Ast.TypeRef fieldType = parseTypeRef();
-                if (members.putIfAbsent(field, fieldType) != null) {
-                    throw error(previous(), "duplicate record type field '" + field + "'");
-                }
-            } while (match(COMMA));
-        }
-        consume(RBRACE, "expected '}' after record type");
-        return Ast.TypeRef.recordType(members);
     }
 
     private Ast.TypeRef parseMetaValue() {

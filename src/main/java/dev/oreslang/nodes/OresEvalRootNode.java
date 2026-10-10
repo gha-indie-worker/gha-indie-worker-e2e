@@ -885,6 +885,9 @@ public final class OresEvalRootNode extends RootNode {
                     awaitingContinuation = null;
                     nextStep = null;
                     initialBlockEnv = null;
+                    if (trapped() && isTrappableFailure(failure)) {
+                        return OresScheduler.done(new OptionValue(false, null));
+                    }
                     throw dev.oreslang.runtime.SourceBoundaryTrace.record(failure, codeUnitId,
                             function != null ? function.name() : method != null ? method.name() : "<block>",
                             resume.initial() ? "source task" : "resumed source task");
@@ -998,6 +1001,10 @@ public final class OresEvalRootNode extends RootNode {
                 nextStep = OresScheduler.done(value);
             }
 
+            private boolean trapped() {
+                return function != null && function.trapped();
+            }
+
             private void finishSourceFlow(
                     SourceTask task,
                     SourceFlow flow) {
@@ -1022,7 +1029,13 @@ public final class OresEvalRootNode extends RootNode {
                 switch (flow.kind()) {
                     case NORMAL -> done(shapeSourceReturn(null, null));
                     case RETURN -> done(shapeSourceReturn(flow.value(), null));
-                    case THROW -> throw sourceFailure(flow.failure());
+                    case THROW -> {
+                        if (trapped() && isTrappableFailure(flow.failure())) {
+                            done(new OptionValue(false, null));
+                        } else {
+                            throw sourceFailure(flow.failure());
+                        }
+                    }
                     case BREAK, CONTINUE ->
                             throw new IllegalStateException(
                                     "loop control crossed a source function boundary");
@@ -1038,8 +1051,18 @@ public final class OresEvalRootNode extends RootNode {
                         function != null
                                 ? "function " + function.name()
                                 : "method " + method.name();
-                return shapeReturnedValue(returnType, value, label);
+                Object shaped = shapeReturnedValue(returnType, value, label);
+                return trapped() ? new OptionValue(true, shaped) : shaped;
             }
+        }
+
+        /** Only guest-level recoverable failures may be reduced to a lossy None. */
+        private boolean isTrappableFailure(Throwable failure) {
+            Throwable unwrapped = OresFuture.unwrap(failure);
+            return unwrapped instanceof OresCastError
+                    || unwrapped instanceof IllegalArgumentException
+                    || unwrapped instanceof ArithmeticException
+                    || unwrapped instanceof IndexOutOfBoundsException;
         }
 
         private RuntimeException sourceFailure(Throwable failure) {
@@ -4362,14 +4385,10 @@ public final class OresEvalRootNode extends RootNode {
             }
             try {
                 return new OptionValue(true, callFunctionBodyUnchecked(fn, args));
-            } catch (OresPanic panic) {
-                throw panic;
-            } catch (java.util.concurrent.CancellationException cancelled) {
-                throw cancelled;
             } catch (RuntimeException ordinaryFailure) {
-                // trap is deliberately lossy: ordinary guest/runtime failure
-                // becomes None. Panic and scheduler cancellation remain distinct
-                // non-trappable control channels.
+                if (!isTrappableFailure(ordinaryFailure)) throw ordinaryFailure;
+                // Recoverable guest errors become None. Panic, cancellation,
+                // security, scheduler and unexpected native failures escape.
                 return new OptionValue(false, null);
             }
         }
@@ -5910,6 +5929,36 @@ public final class OresEvalRootNode extends RootNode {
 
         private Object member(Object receiver, String name, Env env) {
             if (receiver instanceof String text) {
+                if (name.equals("split_literal")) {
+                    return (Invokable) args -> {
+                        requireOne(args, "string.split_literal");
+                        String delimiter = requireString(args.getFirst(), "string.split_literal delimiter");
+                        if (delimiter.isEmpty()) throw new IllegalArgumentException("split_literal delimiter cannot be empty");
+                        return new java.util.ArrayList<>(java.util.Arrays.asList(text.split(java.util.regex.Pattern.quote(delimiter), -1)));
+                    };
+                }
+                if (name.equals("trim")) {
+                    return (Invokable) args -> { requireZero(args, "string.trim"); return text.trim(); };
+                }
+                if (name.equals("is_identifier") || name.equals("is_route_segment")) {
+                    return (Invokable) args -> {
+                        requireZero(args, "string." + name);
+                        return name.equals("is_identifier")
+                            ? text.matches("[A-Za-z_][A-Za-z0-9_]*")
+                            : text.matches("(?:[A-Za-z0-9_-]+|\\[[A-Za-z_][A-Za-z0-9_]*\\])");
+                    };
+                }
+                if (name.equals("starts_with") || name.equals("ends_with") || name.equals("contains_literal")) {
+                    return (Invokable) args -> {
+                        requireOne(args, "string." + name);
+                        String needle = requireString(args.getFirst(), "string." + name + " needle");
+                        return switch (name) {
+                            case "starts_with" -> text.startsWith(needle);
+                            case "ends_with" -> text.endsWith(needle);
+                            default -> text.contains(needle);
+                        };
+                    };
+                }
                 if (!name.equals("replace_literal")) {
                     throw new IllegalArgumentException("unknown string member " + name);
                 }
@@ -5969,6 +6018,7 @@ public final class OresEvalRootNode extends RootNode {
                                 "fs.read_text_async", () -> fs.readText(values));
                     };
                     case "write_text" -> (Invokable) fs::writeText;
+                    case "write_text_atomic" -> (Invokable) fs::writeTextAtomic;
                     case "write_text_async" -> (Invokable) args -> {
                         List<Object> values = immutableIoStrings(args);
                         return context.nativeIo().submit(context, dev.oreslang.runtime.RuntimePermissions.Permission.WRITE,
@@ -5980,6 +6030,9 @@ public final class OresEvalRootNode extends RootNode {
                         return context.nativeIo().submit(context, dev.oreslang.runtime.RuntimePermissions.Permission.WRITE,
                                 "fs.append_text_async", () -> fs.appendText(values));
                     };
+                    case "list_dir" -> (Invokable) fs::listDir;
+                    case "is_dir" -> (Invokable) fs::isDir;
+                    case "is_symlink" -> (Invokable) fs::isSymlink;
                     case "exists" -> (Invokable) fs::exists;
                     case "exists_async" -> (Invokable) args -> {
                         List<Object> values = immutableIoStrings(args);
@@ -7978,7 +8031,12 @@ public final class OresEvalRootNode extends RootNode {
         }
 
         private int compare(Object left, Object right) {
-            if (left instanceof Number a && right instanceof Number b) return Double.compare(a.doubleValue(), b.doubleValue());
+            if (left instanceof Number a && right instanceof Number b) {
+                if (isIntegral(a) && isIntegral(b)) {
+                    return Long.compare(a.longValue(), b.longValue());
+                }
+                return Double.compare(a.doubleValue(), b.doubleValue());
+            }
             if (left instanceof String a && right instanceof String b) return a.compareTo(b);
             throw new IllegalArgumentException("values are not comparable");
         }
@@ -8197,7 +8255,7 @@ public final class OresEvalRootNode extends RootNode {
             }
             throw new IllegalArgumentException("value is not object-destructurable");
         }
-        private String display(Object value) { return CycleSafeDisplay.render(value); }
+        private String display(Object value) { return value instanceof Complex c ? c.toString() : String.valueOf(value); }
     }
 
     @FunctionalInterface private interface Invokable { Object call(List<Object> arguments); }
@@ -8494,7 +8552,7 @@ public final class OresEvalRootNode extends RootNode {
         @Override public Object get(Object key) { return fields.get(key); }
         @Override public boolean containsKey(Object key) { return fields.containsKey(key); }
         @Override public Iterable<?> sharedStateChildren() { return fields.values(); }
-        @Override public String toString() { return CycleSafeDisplay.render(this); }
+        @Override public String toString() { return "infer struct" + fields; }
     }
 
     private record SourceActorState(
@@ -8522,136 +8580,11 @@ public final class OresEvalRootNode extends RootNode {
             this.fields = fields;
         }
         @Override public Iterable<?> sharedStateChildren(){return fields.values();}
-        @Override public String toString() { return CycleSafeDisplay.render(this); }
-    }
-
-
-    /** Identity-aware bounded diagnostic rendering; not a serializer. */
-    static final class CycleSafeDisplay {
-        private static final int MAX_DEPTH = 64;
-        private static final int MAX_NODES = 8192;
-        private static final int MAX_CHARS = 65536;
-        private static final String TRUNCATED = "<truncated>";
-
-        static String render(Object value) {
-            State state = new State();
-            state.append(value, 0);
-            return state.output.toString();
-        }
-
-        private static final class State {
-            private final StringBuilder output = new StringBuilder();
-            private final IdentityHashMap<Object, Boolean> visiting = new IdentityHashMap<>();
-            private int nodes;
-
-            private void write(String value) {
-                if (output.length() >= MAX_CHARS) return;
-                int available = MAX_CHARS - output.length();
-                if (value.length() > available) {
-                    int prefix = Math.max(0, available - TRUNCATED.length());
-                    output.append(value, 0, prefix);
-                    if (available > prefix) output.append(TRUNCATED, 0, available - prefix);
-                } else {
-                    output.append(value);
-                }
-            }
-
-            private void append(Object value, int depth) {
-                if (output.length() >= MAX_CHARS) return;
-                if (depth > MAX_DEPTH || ++nodes > MAX_NODES) {
-                    write(TRUNCATED);
-                    return;
-                }
-                if (!(value instanceof OresObject
-                        || value instanceof ReadonlyRecordValue
-                        || value instanceof OptionValue
-                        || value instanceof ResultValue
-                        || value instanceof Map<?, ?>
-                        || value instanceof List<?>
-                        || value instanceof Set<?>
-                        || value instanceof Object[])) {
-                    write(value instanceof String str ? str : String.valueOf(value));
-                    return;
-                }
-                if (visiting.put(value, Boolean.TRUE) != null) {
-                    write("<cycle>");
-                    return;
-                }
-                try {
-                    if (value instanceof OresObject object) {
-                        write(object.klass.name());
-                        write("{");
-                        boolean first = true;
-                        for (Map.Entry<String, Object> entry : object.fields.entrySet()) {
-                            if (!first) write(", ");
-                            first = false;
-                            write(entry.getKey());
-                            write("=");
-                            append(entry.getValue() == Evaluator.UNINITIALIZED_FIELD
-                                    ? "<uninitialized>" : entry.getValue(), depth + 1);
-                            if (output.length() >= MAX_CHARS) break;
-                        }
-                        write("}");
-                    } else if (value instanceof ReadonlyRecordValue readonly) {
-                        write("infer struct");
-                        append(readonly.fields, depth + 1);
-                    } else if (value instanceof OptionValue option) {
-                        if (!option.present()) {
-                            write("None");
-                        } else {
-                            write("Some(");
-                            append(option.value(), depth + 1);
-                            write(")");
-                        }
-                    } else if (value instanceof ResultValue result) {
-                        write(result.ok() ? "Ok(" : "Err(");
-                        append(result.value(), depth + 1);
-                        write(")");
-                    } else if (value instanceof Map<?, ?> map) {
-                        write("{");
-                        boolean first = true;
-                        for (Map.Entry<?, ?> entry : map.entrySet()) {
-                            if (!first) write(", ");
-                            first = false;
-                            append(entry.getKey(), depth + 1);
-                            write("=");
-                            append(entry.getValue(), depth + 1);
-                            if (output.length() >= MAX_CHARS) break;
-                        }
-                        write("}");
-                    } else if (value instanceof List<?> list) {
-                        write("[");
-                        boolean first = true;
-                        for (Object element : list) {
-                            if (!first) write(", ");
-                            first = false;
-                            append(element, depth + 1);
-                            if (output.length() >= MAX_CHARS) break;
-                        }
-                        write("]");
-                    } else if (value instanceof Set<?> set) {
-                        write("[");
-                        boolean first = true;
-                        for (Object element : set) {
-                            if (!first) write(", ");
-                            first = false;
-                            append(element, depth + 1);
-                            if (output.length() >= MAX_CHARS) break;
-                        }
-                        write("]");
-                    } else if (value instanceof Object[] array) {
-                        write("[");
-                        for (int i = 0; i < array.length; i++) {
-                            if (i != 0) write(", ");
-                            append(array[i], depth + 1);
-                            if (output.length() >= MAX_CHARS) break;
-                        }
-                        write("]");
-                    }
-                } finally {
-                    visiting.remove(value);
-                }
-            }
+        @Override public String toString(){
+            LinkedHashMap<String,Object> display = new LinkedHashMap<>();
+            fields.forEach((name, value) ->
+                    display.put(name, value == Evaluator.UNINITIALIZED_FIELD ? "<uninitialized>" : value));
+            return klass.name()+display;
         }
     }
 
@@ -8798,11 +8731,11 @@ public final class OresEvalRootNode extends RootNode {
     }
     private record OptionValue(boolean present, Object value) implements OresMutex.SharedState {
         @Override public Iterable<?> sharedStateChildren(){return present ? List.of(value) : List.of();}
-        @Override public String toString(){return CycleSafeDisplay.render(this);}
+        @Override public String toString(){return present ? "Some(" + value + ")" : "None";}
     }
     private record ResultValue(boolean ok, Object value) implements OresMutex.SharedState {
         @Override public Iterable<?> sharedStateChildren(){return List.of(value);}
-        @Override public String toString(){return CycleSafeDisplay.render(this);}
+        @Override public String toString(){return ok ? "Ok(" + value + ")" : "Err(" + value + ")";}
     }
     private record OptionUnwrapError(String reason) {
         @Override public String toString(){return "OptionUnwrapError(" + reason + ")";}
@@ -8830,6 +8763,14 @@ public final class OresEvalRootNode extends RootNode {
                     requireString(args.get(1), "fs.write_text value"));
             return null;
         }
+        private Object writeTextAtomic(List<Object> args) {
+            requireTwo(args, "fs.write_text_atomic");
+            NativeIo.writeTextAtomic(
+                    context,
+                    requireString(args.get(0), "fs.write_text_atomic path"),
+                    requireString(args.get(1), "fs.write_text_atomic value"));
+            return null;
+        }
         private Object appendText(List<Object> args) {
             requireTwo(args, "fs.append_text");
             NativeIo.appendText(
@@ -8840,6 +8781,15 @@ public final class OresEvalRootNode extends RootNode {
         }
         private Object exists(List<Object> args) {
             return NativeIo.exists(context, requireStringArg(args, "fs.exists"));
+        }
+        private Object listDir(List<Object> args) {
+            return NativeIo.listDir(context, requireStringArg(args, "fs.list_dir"));
+        }
+        private Object isDir(List<Object> args) {
+            return NativeIo.isDir(context, requireStringArg(args, "fs.is_dir"));
+        }
+        private Object isSymlink(List<Object> args) {
+            return NativeIo.isSymlink(context, requireStringArg(args, "fs.is_symlink"));
         }
         private Object remove(List<Object> args) {
             NativeIo.remove(context, requireStringArg(args, "fs.remove"));
@@ -8887,15 +8837,40 @@ public final class OresEvalRootNode extends RootNode {
     }
 
     private record StdioFacade(OresContext context) {
-        private Object print(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.print");requireOne(args,"stdio.print");context.output().print(CycleSafeDisplay.render(args.getFirst()));context.output().flush();return null;}
-        private Object println(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.println");requireOne(args,"stdio.println");context.output().println(CycleSafeDisplay.render(args.getFirst()));return null;}
+        private Object print(List<Object> args) {
+            return emitStdout(context, args, "stdio.print", false);
+        }
+        private Object println(List<Object> args) {
+            return emitStdout(context, args, "stdio.println", true);
+        }
+    }
+    private static Object emitStdout(OresContext context, List<Object> args, String operation, boolean newline) {
+        context.requireCapability(IsolatePolicy.Capability.STDOUT, operation);
+        requireOne(args, operation);
+        String value = String.valueOf(args.getFirst());
+        long started = dev.oreslang.runtime.CorePerf.start();
+        try {
+            if (newline) {
+                context.output().println(value);
+            } else {
+                context.output().print(value);
+                context.output().flush();
+            }
+        } finally {
+            dev.oreslang.runtime.CorePerf.end(dev.oreslang.runtime.CorePerf.STDIO_WRITE, started);
+        }
+        return null;
     }
     private record StdoutFacade(OresContext context) {
-        private Object write(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.stdout.write");requireOne(args,"stdio.stdout.write");context.output().print(CycleSafeDisplay.render(args.getFirst()));context.output().flush();return null;}
-        private Object println(List<Object> args){context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.stdout.println");requireOne(args,"stdio.stdout.println");context.output().println(CycleSafeDisplay.render(args.getFirst()));return null;}
+        private Object write(List<Object> args) {
+            return emitStdout(context, args, "stdio.stdout.write", false);
+        }
+        private Object println(List<Object> args) {
+            return emitStdout(context, args, "stdio.stdout.println", true);
+        }
         private Object log(List<Object> args){
             context.requireCapability(IsolatePolicy.Capability.STDOUT,"stdio.stdout.log");
-            for(Object arg:args)context.output().print(CycleSafeDisplay.render(arg));
+            for(Object arg:args)context.output().print(String.valueOf(arg));
             context.output().println();
             context.output().flush();
             return null;

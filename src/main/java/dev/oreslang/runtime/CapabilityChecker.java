@@ -446,6 +446,9 @@ public final class CapabilityChecker {
                 }
                 if (path.startsWith("fs.read")
                         || path.startsWith("fs.exists")
+                        || path.startsWith("fs.list_dir")
+                        || path.startsWith("fs.is_dir")
+                        || path.startsWith("fs.is_symlink")
                         || path.startsWith("fs.stat")
                         || path.startsWith("File.read")
                         || path.startsWith("File.exists")

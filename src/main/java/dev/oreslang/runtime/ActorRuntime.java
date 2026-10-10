@@ -415,6 +415,7 @@ public final class ActorRuntime implements AutoCloseable {
             DispatcherConfig dispatcherConfig,
             TurnExecutor turnExecutor,
             ControlDispatcher controlDispatcher) {
+        long poolsPerf = CorePerf.start();
         this.policyCeiling = Objects.requireNonNull(policyCeiling);
         this.dispatcherConfig = Objects.requireNonNull(dispatcherConfig);
         this.turnExecutor = Objects.requireNonNull(turnExecutor);
@@ -437,6 +438,14 @@ public final class ActorRuntime implements AutoCloseable {
         this.privateDispatcher = privatePool;
         this.sharedDispatcher = sharedPool;
         this.untrustedDispatcher = untrustedPool;
+        CorePerf.end(CorePerf.ACTOR_POOLS_STARTUP, poolsPerf);
+        if (CoreDebug.enabled()) {
+            CoreDebug.event(CoreDebug.ACTOR_POOLS_CREATED, dispatcherConfig.privateParallelism());
+        }
+        if (poolsPerf != 0L) {
+            CorePerf.actorBackend(carrierBackend() == CarrierBackend.NATIVE_PTHREAD,
+                    dispatcherConfig.privateParallelism(), dispatcherConfig.sharedParallelism());
+        }
     }
 
     public IsolatePolicy policyCeiling() { return policyCeiling; }
@@ -3882,11 +3891,16 @@ public final class ActorRuntime implements AutoCloseable {
     }
 
     private void releaseSharedRuntimeBytes(long bytes) {
+        if (bytes < 0) throw new IllegalArgumentException("shared memory release cannot be negative");
         if (bytes == 0 || closed.get()) return;
-        long remaining = sharedMemoryBytes.addAndGet(-bytes);
-        if (remaining < 0) {
-            sharedMemoryBytes.set(0);
-            throw new IllegalStateException("shared actor memory accounting underflow");
+        synchronized (memoryBudgetLock) {
+            long current = sharedMemoryBytes.get();
+            if (bytes > current) {
+                throw new IllegalStateException(
+                        "shared actor memory accounting underflow: release=" + bytes
+                                + " sharedUsed=" + current);
+            }
+            sharedMemoryBytes.set(current - bytes);
         }
     }
 
@@ -6061,8 +6075,13 @@ public final class ActorRuntime implements AutoCloseable {
             if (bytes == 0) return;
             synchronized (lifecycleLock) {
                 long current = sharedMailboxBytes.get();
-                long next = Math.max(0L, current - bytes);
-                sharedMailboxBytes.set(next);
+                if (bytes > current) {
+                    throw new IllegalStateException(
+                            "shared actor mailbox memory accounting underflow for "
+                                    + ref.id()
+                                    + ": release=" + bytes + " used=" + current);
+                }
+                sharedMailboxBytes.set(current - bytes);
                 releaseSharedRuntimeBytes(bytes);
             }
         }
