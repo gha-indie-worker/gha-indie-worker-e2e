@@ -340,3 +340,24 @@ cancel -> runtime cancellation channel, never None
 
 That distinction is semantic and must not be erased by parsing, optimization,
 interop, actor transport, or backend lowering.
+
+
+## Current bootstrap implementation status
+
+The compiler/runtime implementation currently accepts `trap fnc`, `trap routine`,
+`async trap fnc`, and `async trap routine` at top level or in modules.
+Async calls have the call type `Future<Option<T>>`, and source-task completion
+produces `Some(T)` or `None` after the full awaited continuation finishes.
+
+The Java/Truffle bootstrap still lacks a dedicated source-language ordinary
+`throw` effect. Until it exists, the trapped recoverable runtime failures
+are explicitly limited to checked-cast errors, illegal argument errors,
+arithmetic errors, and bounds errors. This must not grow into blanket
+`RuntimeException` or `Throwable` swallowing. Panic, cancellation,
+VM/scheduler/security faults, and other nonrecoverable errors bypass the trap.
+
+Class and actor instance methods, actor callable forms, generator traps,
+and full interface/override effect contracts are still blocked pending
+effect-aware metadata and mailbox continuation semantics. In particular,
+an actor method that suspends at `readch` needs a precise Future/Option
+call contract before the example can be accepted end to end.

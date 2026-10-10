@@ -529,6 +529,7 @@ public final class TreeShaker {
                         function.generator(),
                         function.structural(),
                         function.nonLexical(),
+                        function.trapped(),
                         function.actorKind(),
                         function.genericParameters(),
                         function.parameters(),

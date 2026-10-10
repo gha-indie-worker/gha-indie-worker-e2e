@@ -315,4 +315,30 @@ final class TreeShakerTest {
         assertTrue(read.mutableReferent());
     }
 
+    @Test
+    void treeShakingPreservesAsyncTrapEffect() {
+        TreeShaker.Result result = OresCompiler.compileForBuild("""
+                pub async trap fnc ready(): int {
+                  return 7;
+                }
+
+                pub fnc main(): void {
+                  val Option<int> value = await ready();
+                  stdio.stdout.write(value.is_some());
+                  return;
+                }
+                """, BuildOptions.library(Map.of()));
+
+        Ast.FunctionDecl ready = result.program().modules().stream()
+                .flatMap(module -> module.declarations().stream())
+                .filter(Ast.FunctionDecl.class::isInstance)
+                .map(Ast.FunctionDecl.class::cast)
+                .filter(function -> function.name().equals("ready"))
+                .findFirst().orElseThrow();
+
+        assertTrue(ready.async(), "async must survive optimizer rewriting");
+        assertTrue(ready.trapped(), "trap must survive optimizer rewriting");
+    }
+
+
 }
