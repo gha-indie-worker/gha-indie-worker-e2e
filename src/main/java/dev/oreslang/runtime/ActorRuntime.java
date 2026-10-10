@@ -1250,6 +1250,21 @@ public final class ActorRuntime implements AutoCloseable {
         }
     }
 
+    /**
+     * The hidden actor-core lifecycle base resolves self from the admitted
+     * execution lane, never from user-controlled fields or a captured ActorRef.
+     * This capability is valid only while executing this runtime's actor code.
+     */
+    public ActorRef<?> currentActorSelfRef() {
+        requireCallerRuntimeAffinity("read current actor lifecycle");
+        ActorCell<?> cell = currentActor.get();
+        if (cell == null) {
+            throw new IllegalStateException(
+                    "inherited actor lifecycle methods require an admitted actor turn");
+        }
+        return cell.ref;
+    }
+
     public ContinuationTarget captureCurrentContinuationTarget() {
         ActorCell<?> cell = currentActor.get();
         if (cell == null) {

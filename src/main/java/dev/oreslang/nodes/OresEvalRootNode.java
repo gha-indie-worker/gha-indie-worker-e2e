@@ -1205,6 +1205,58 @@ public final class OresEvalRootNode extends RootNode {
             });
         }
 
+        /**
+         * Hidden, sealed actor-core methods. The underlying readiness/done
+         * Futures remain owned by ActorRuntime. Only ordinary lifecycle
+         * failures become None; cancellation, panic, security and fatal
+         * failures retain their exceptional control channel.
+         *
+         * The mapping executes on an Ores scheduler turn, never as an inline
+         * CompletableFuture callback on a lifecycle completion carrier.
+         */
+        private OresFuture<Object> actorLifecycleSignalFuture(
+                ActorRuntime.ActorRef<?> actorRef,
+                String method) {
+            OresFuture<?> lifecycle = switch (method) {
+                case "get_ready_signal" -> actorRef.ready();
+                case "get_done_signal" -> actorRef.done();
+                default -> throw new IllegalArgumentException(
+                        "unknown hidden actor-core lifecycle method " + method);
+            };
+            return startFutureChainTask(new OresScheduler.Task<>() {
+                private boolean waiting;
+
+                @Override
+                public OresScheduler.Step<Object> resume(OresScheduler.Resume resume) {
+                    if (!waiting) {
+                        if (!resume.initial()) {
+                            throw new IllegalStateException(
+                                    "actor lifecycle signal started without initial scheduler turn");
+                        }
+                        waiting = true;
+                        return OresScheduler.await(lifecycle);
+                    }
+                    if (resume.failure() != null) {
+                        Throwable failure = OresFuture.unwrap(resume.failure());
+                        // An ActorTerminatedException can wrap a stronger
+                        // cancellation/fatal cause; never lose that distinction.
+                        if (failure instanceof ActorRuntime.ActorTerminatedException
+                                && failure.getCause() != null) {
+                            failure = OresFuture.unwrap(failure.getCause());
+                        }
+                        if (failure instanceof RuntimeException
+                                && !(failure instanceof java.util.concurrent.CancellationException)
+                                && !(failure instanceof SecurityException)
+                                && !(failure instanceof OresPanic)) {
+                            return OresScheduler.done(new OptionValue(false, null));
+                        }
+                        throw sourceFailure(failure);
+                    }
+                    return OresScheduler.done(new OptionValue(true, Boolean.TRUE));
+                }
+            });
+        }
+
         private OresFuture<Object> wrapFutureSome(OresFuture<?> source) {
             Objects.requireNonNull(source, "source");
             return startFutureChainTask(new OresScheduler.Task<>() {
@@ -3897,6 +3949,24 @@ public final class OresEvalRootNode extends RootNode {
             };
         }
 
+        private Invocation inheritedActorSignalInvocation(
+                OresObject object, String name, List<Object> args) {
+            if (object.klass.actorKind() == Ast.ActorKind.NONE
+                    || (!name.equals("get_ready_signal")
+                        && !name.equals("get_done_signal"))) {
+                throw new IllegalStateException(
+                        "non-actor reached hidden actor-core lifecycle invocation");
+            }
+            if (!args.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "self." + name + " expects no arguments");
+            }
+            return object.owner.invokableInvocation(
+                    ignored -> object.owner.actorLifecycleSignalFuture(
+                            object.owner.context.actors().currentActorSelfRef(), name),
+                    List.of());
+        }
+
         private Invocation prepareInvocationEvaluated(
                 Ast.CallExpr call,
                 Object receiver,
@@ -3906,6 +3976,11 @@ public final class OresEvalRootNode extends RootNode {
                     (Ast.MemberExpr) call.callee();
 
             if (receiver instanceof OresObject object) {
+                if (object.klass.actorKind() != Ast.ActorKind.NONE
+                        && (member.member().equals("get_ready_signal")
+                            || member.member().equals("get_done_signal"))) {
+                    return object.owner.inheritedActorSignalInvocation(object, member.member(), args);
+                }
                 if (object.klass.actorKind() != Ast.ActorKind.NONE
                         && member.member().equals("end")) {
                     if (!args.isEmpty()) {
@@ -5222,6 +5297,11 @@ public final class OresEvalRootNode extends RootNode {
 
                 if (receiver instanceof OresObject object) {
                     if (object.klass.actorKind() != Ast.ActorKind.NONE
+                            && (methodCall.member().equals("get_ready_signal")
+                                || methodCall.member().equals("get_done_signal"))) {
+                        return object.owner.inheritedActorSignalInvocation(object, methodCall.member(), args);
+                    }
+                    if (object.klass.actorKind() != Ast.ActorKind.NONE
                             && methodCall.member().equals("end")) {
                         if (!args.isEmpty()) {
                             throw new IllegalArgumentException(
@@ -6322,6 +6402,10 @@ public final class OresEvalRootNode extends RootNode {
                 return switch (name) {
                     case "ready" -> actorRef.ready();
                     case "done" -> actorRef.done();
+                    case "get_ready_signal", "get_done_signal" -> (Invokable) args -> {
+                        requireZero(args, "ActorRef." + name);
+                        return actorLifecycleSignalFuture(actorRef, name);
+                    };
                     case "outputs" -> actorRef.outputs();
                     case "id" -> actorRef.id();
                     case "kind" -> actorRef.kind();
@@ -6501,6 +6585,11 @@ public final class OresEvalRootNode extends RootNode {
                                         + "' is read before constructor initialization");
                     }
                     return value;
+                }
+                if (object.klass.actorKind() != Ast.ActorKind.NONE
+                        && (name.equals("get_ready_signal") || name.equals("get_done_signal"))) {
+                    throw new IllegalArgumentException(
+                            "hidden actor-core method '" + name + "' is direct-call-only");
                 }
                 if (object.owner.hasInstanceMethodNamed(object.klass, name, new LinkedHashSet<>())) {
                     return new BoundMethod(object, name, env == null ? null : env.accessClass());
