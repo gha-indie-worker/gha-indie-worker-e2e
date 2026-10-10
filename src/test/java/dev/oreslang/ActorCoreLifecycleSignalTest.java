@@ -256,6 +256,24 @@ final class ActorCoreLifecycleSignalTest {
     }
 
     @Test
+    void selfAliasCannotBypassCompletionDeadlockGuard() {
+        IllegalArgumentException rejected = assertThrows(
+                IllegalArgumentException.class,
+                () -> OresCompiler.parseAndTypeCheck("""
+                        define actor Worker as
+                          receive(ActorMail<String> mail): void {
+                            val me = self;
+                            val pending = me.get_done_signal();
+                            val result = await pending;
+                            self.end();
+                            return;
+                          }
+                        end
+                        """));
+        assertTrue(rejected.getMessage().contains("cannot call self.get_done_signal"));
+    }
+
+    @Test
     void inheritedSignalsCannotBeMistypedAsOptionOfFuture() {
         assertThrows(IllegalArgumentException.class,
                 () -> OresCompiler.parseAndTypeCheck("""
