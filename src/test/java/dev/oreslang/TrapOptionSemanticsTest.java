@@ -167,13 +167,13 @@ final class TrapOptionSemanticsTest {
                   return await ready();
                 }
 
-                async trap fnc fails_after_await(): Dog {
+                async trap fnc fails_after_await(Animal animal): Dog {
                   val n = await ready();
-                  return new Cat() as Dog;
+                  return animal as Dog;
                 }
 
-                async trap fnc fails_before_await(): Dog {
-                  return new Cat() as Dog;
+                async trap fnc fails_before_await(Animal animal): Dog {
+                  return animal as Dog;
                 }
 
                 async trap fnc nested(bool present): Option<int> {
@@ -191,8 +191,8 @@ final class TrapOptionSemanticsTest {
 
                 pub fnc main(): void {
                   val Option<int> good = await success();
-                  val Option<Dog> bad_after = await fails_after_await();
-                  val Option<Dog> bad_before = await fails_before_await();
+                  val Option<Dog> bad_after = await fails_after_await(new Cat());
+                  val Option<Dog> bad_before = await fails_before_await(new Cat());
                   val Option<Option<int>> nested_yes = await nested(true);
                   val Option<Option<int>> nested_no = await nested(false);
                   val Option<void> finished = await done();
