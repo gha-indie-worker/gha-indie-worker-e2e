@@ -1,0 +1,110 @@
+name: Source-free two-phase cancellation oracle
+on:
+  push:
+    branches:
+      - audit/source-free-task-cancel-20261018
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  two-phase-cancellation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Execute independent directed cancellation invariant model
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=commonjs <<'NODE'
+          const assert = require('node:assert/strict');
+          // Independently authored abstract model; NO private Oreslang files.
+          let checks = 0;
+          const eq = (a,b) => { assert.deepEqual(a,b); checks++; };
+          const check = a => { assert.ok(a); checks++; };
+          let wave = null;
+          class Source {
+            constructor() {
+              this.cancelled = false; this.children = new Set();
+              this.subscribers = new Set(); this.publications = 0;
+            }
+            observe(callback) {
+              if (this.cancelled && this.publications) { callback(); return () => {}; }
+              this.subscribers.add(callback);
+              return () => this.subscribers.delete(callback);
+            }
+            child() {
+              const next = new Source();
+              if (this.cancelled) request(next);
+              else this.children.add(next);
+              return next;
+            }
+            cancel() { return request(this); }
+            publish() {
+              this.publications++;
+              const callbacks = [...this.subscribers];
+              this.subscribers.clear();
+              for (const cb of callbacks) {
+                try { cb(); } catch (error) { /* independent host callback */ }
+              }
+            }
+          }
+          function request(source) {
+            if (source.cancelled) return false;
+            if (!wave) {
+              wave = {pending: [], notifications: []};
+              claim(source);
+              try {
+                while (wave.pending.length || wave.notifications.length) {
+                  while (wave.pending.length) {
+                    const current = wave.pending.shift();
+                    for (const child of current.children) claim(child);
+                    current.children.clear();
+                    wave.notifications.push(current);
+                  }
+                  if (wave.notifications.length) wave.notifications.shift().publish();
+                }
+              } finally { wave = null; }
+            } else claim(source);
+            return true;
+          }
+          function claim(source) {
+            if (source.cancelled) return false;
+            source.cancelled = true;
+            wave.pending.push(source);
+            return true;
+          }
+          // A blocked observer is represented by an observer that asserts
+          // both siblings already have revoked authority before entering.
+          const root = new Source(), left = root.child(), right = root.child();
+          let noticed = 0;
+          left.observe(() => { check(right.cancelled); noticed++; });
+          right.observe(() => { check(left.cancelled); noticed++; });
+          check(root.cancel());
+          eq(noticed, 2);
+          eq(left.publications, 1); eq(right.publications, 1);
+          // Observer failure must not suppress sibling delivery.
+          const p = new Source(), a = p.child(), b = p.child();
+          a.observe(() => { throw Error('host observer threw'); });
+          let delivered = 0;
+          a.observe(() => delivered++); b.observe(() => delivered++);
+          p.cancel(); eq(delivered, 2);
+          // Deep graph must not recurse; all terminal notifications are once.
+          const chain = [new Source()];
+          for (let i = 0; i < 8192; i++) chain.push(chain.at(-1).child());
+          chain[0].cancel();
+          for (const item of chain) { check(item.cancelled); eq(item.publications,1); }
+          // Randomized DAG and registration-order permutations.
+          for (let trial=0; trial<10000; trial++) {
+            const parent = new Source();
+            const first = parent.child(), second = parent.child();
+            const third = (trial & 1) ? first.child() : second.child();
+            first.observe(() => check(second.cancelled && third.cancelled));
+            if (trial % 3 === 0) first.observe(() => { throw Error('listener'); });
+            second.observe(() => check(first.cancelled && third.cancelled));
+            check(parent.cancel());
+            eq(parent.publications,1); eq(first.publications,1);
+            eq(second.publications,1); eq(third.publications,1);
+          }
+          console.log('SOURCE_FREE_TWO_PHASE_PASS checks='+checks+
+            ' depth=8192 trials=10000 source_export=false');
+          NODE
