@@ -123,3 +123,69 @@ jobs:
                             'private_source_present': False,
                             'compiler_executed': False, 'guest_executed': False}))
           PY
+
+  synthetic-runner-startup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run independent Bash startup and Git override tests (no checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          
+          checks = 0
+          bash = ['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c']
+          with tempfile.TemporaryDirectory(prefix='independent-shell-policy-') as td:
+              root = Path(td)
+              hook = root / 'sourceme'
+              out = root / 'hook-executed'
+              hook.write_text('printf "executed\n" >> "$TRACE_FILE"\n')
+              basic = {'PATH': os.defpath, 'TRACE_FILE': str(out),
+                       'BASH_ENV': str(hook)}
+              exposed = subprocess.run(bash + ['printf "legitimate-step\n"'],
+                                       env=basic, text=True, capture_output=True)
+              assert exposed.returncode == 0 and out.read_text().strip() == 'executed'
+              checks += 1
+              out.unlink()
+              clean_env = dict(basic, BASH_ENV='')
+              isolated = subprocess.run(bash + ['printf "legitimate-step\n"'],
+                                        env=clean_env, text=True, capture_output=True)
+              assert isolated.returncode == 0 and not out.exists()
+              checks += 1
+          
+              independent_guard = '''set -euo pipefail
+          for name in "${!GIT_@}"; do
+            if [[ -n "${!name}" ]]; then
+              printf 'deny %s\n' "$name" >&2
+              exit 13
+            fi
+          done
+          printf 'clean\n'
+          '''
+              def policy(extra):
+                  env = {'PATH': os.defpath}
+                  env.update(extra)
+                  return subprocess.run(bash + [independent_guard],
+                                        env=env, capture_output=True, text=True)
+              good = policy({})
+              assert good.returncode == 0 and good.stdout.strip() == 'clean'
+              checks += 1
+              for key in ('GIT_CONFIG_GLOBAL', 'GIT_OBJECT_DIRECTORY',
+                          'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_TRACE2_EVENT',
+                          'GIT_SSH_COMMAND'):
+                  denied = policy({key: 'synthetic_canary'})
+                  assert denied.returncode == 13 and key in denied.stderr
+                  checks += 1
+          
+          print(json.dumps({'kind': 'SOURCE_FREE_BASH_STARTUP_AND_GIT_OVERRIDE_MODEL',
+                            'cases': checks, 'status': 'PASS',
+                            'private_source_present': False,
+                            'compiler_executed': False, 'guest_executed': False},
+                           sort_keys=True))
+          PY
