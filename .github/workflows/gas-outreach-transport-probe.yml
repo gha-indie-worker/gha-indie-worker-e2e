@@ -1,0 +1,30 @@
+name: Source-free GAS email transport probe
+on:
+  push:
+    branches:
+      - ci/gas-outreach-transport-probe-20261018
+    paths:
+      - .github/workflows/gas-outreach-transport-probe.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-gas-post-route:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe published GAS doPost without a credential or sending an email
+        shell: bash
+        env:
+          GAS_URL: https://script.google.com/macros/s/AKfycbzJ2nMcgjolRpglkAwfw1JPpt5P8FJutWoAUBiQiTL4_HIaPj3HFzqJqb8iEsrnTuXmRg/exec
+        run: |
+          set -euo pipefail
+          payload='{"action":"validate","id":"source-free-probe","to":"nobody@example.invalid","subject":"Transport probe","body":"No email should ever send."}'
+          # Intentionally NO apiKey, NO real lead data, NO tokens, NO calls requesting send.
+          response="$(curl --silent --show-error --location --max-time 30             --header 'Content-Type: text/plain; charset=utf-8'             --data "$payload" "$GAS_URL")"
+          if printf '%s' "$response" | grep -q 'unauthorized'; then
+            echo 'PASS: public runner reached GAS Version 2 doPost and invalid auth was rejected.'
+          else
+            echo 'GAS endpoint reachable but did not return expected unauthorized response; content withheld.'
+            exit 1
+          fi
