@@ -235,3 +235,18 @@ jobs:
                             'private_source_present':False, 'compiler_executed':False,
                             'guest_executed':False}, sort_keys=True))
           PY
+
+  synthetic-python-custom-shell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify isolated Python custom shell syntax without checkout
+        shell: python -I {0}
+        run: |
+          import json,sys
+          if sys.flags.isolated != 1 or sys.flags.ignore_environment != 1:
+              raise SystemExit('GitHub did not run an isolated Python interpreter')
+          print(json.dumps({'kind':'SOURCE_FREE_GITHUB_PYTHON_I_SHELL_CHECK',
+                            'status':'PASS', 'isolated':True, 'private_source_present':False,
+                            'compiler_executed':False, 'guest_executed':False},
+                           sort_keys=True))
