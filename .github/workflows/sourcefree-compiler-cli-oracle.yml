@@ -189,3 +189,49 @@ jobs:
                             'compiler_executed': False, 'guest_executed': False},
                            sort_keys=True))
           PY
+
+  synthetic-python-shell-env:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Independently exercise Bash-function admission using isolated Python (no checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          
+          # Independently authored model; no checkout and no Oreslang source.
+          gate = '''
+          import os,sys
+          bad = [name for name,value in os.environ.items()
+                 if value and (name.startswith("BASH_FUNC_") or
+                               name in {"SHELLOPTS","BASHOPTS"})]
+          if bad:
+              print("REJECT " + ",".join(sorted(bad)), file=sys.stderr)
+              raise SystemExit(41)
+          '''
+          base = {'PATH': os.defpath, 'LC_ALL': 'C'}
+          cases = [(None, None, 0),
+                   ('BASH_FUNC_git%%', '() { echo injected; }', 41),
+                   ('BASH_FUNC_test%%', '() { echo injected; }', 41),
+                   ('BASH_FUNC_builtin%%', '() { echo injected; }', 41),
+                   ('BASHOPTS', 'extdebug', 41),
+                   ('SHELLOPTS', 'xtrace', 41)]
+          for name, value, expected in cases:
+              env = dict(base)
+              if name: env[name] = value
+              run = subprocess.run([sys.executable, '-I', '-c', gate],
+                                   env=env, text=True, capture_output=True, timeout=10)
+              if run.returncode != expected:
+                  raise SystemExit('oracle mismatch ' + str(name) + ': ' + run.stderr)
+              if name and name not in run.stderr:
+                  raise SystemExit('missing rejection evidence: ' + name)
+          print(json.dumps({'kind':'INDEPENDENT_SOURCE_FREE_PYTHON_SHELL_ENV_MODEL',
+                            'cases': len(cases), 'status':'PASS',
+                            'private_source_present':False, 'compiler_executed':False,
+                            'guest_executed':False}, sort_keys=True))
+          PY
