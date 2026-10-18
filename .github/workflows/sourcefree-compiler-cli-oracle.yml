@@ -1,0 +1,125 @@
+name: Source-free optimized CLI gate model (no Oreslang source)
+on:
+  push:
+    branches:
+      - ci/sourcefree-optimizer-admission-20261018
+  pull_request:
+    paths:
+      - '.github/workflows/sourcefree-compiler-cli-oracle.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-optimized-cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run standalone eight-case synthetic CLI gate model (no checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+          import unittest
+          
+          # Independently authored synthetic policy: there are no Oreslang files.
+          GATE = r'''
+          import os, pathlib, re, subprocess, tempfile
+          home = pathlib.Path(os.environ.get('JAVA_HOME', ''))
+          root = pathlib.Path(os.environ['SYNTHETIC_WORKSPACE'])
+          positive = root / 'positive.synthetic'
+          launcher = root / 'launcher.sh'
+          if not home.is_absolute() or not (home / 'bin/java').is_file():
+              raise SystemExit('JDK unavailable')
+          if not positive.is_file() or positive.is_symlink():
+              raise SystemExit('unsafe positive fixture')
+          env = {'PATH': str(home / 'bin') + os.pathsep + os.defpath,
+                 'LC_ALL': 'C', 'LANG': 'C', 'TZ': 'UTC'}
+          good = subprocess.run([str(launcher), '--check', str(positive)],
+                                cwd=root, env=env, capture_output=True, timeout=10)
+          if good.returncode != 0 or good.stdout:
+              raise SystemExit('positive check failed')
+          with tempfile.TemporaryDirectory() as temp:
+              malformed = pathlib.Path(temp) / 'parse-negative.synthetic'
+              malformed.write_text('invalid fixture')
+              bad = subprocess.run([str(launcher), '--check', str(malformed)],
+                                   cwd=root, env=env, capture_output=True, timeout=10)
+              pat = rb'^' + re.escape(os.fsencode(malformed)) + rb':[1-9][0-9]*:[1-9][0-9]*: error: '
+              if bad.returncode != 1 or bad.stdout or not re.search(pat, bad.stderr, re.M):
+                  raise SystemExit('negative check failed')
+          '''
+          
+          class SourceFreePolicyTests(unittest.TestCase):
+              def setUp(self):
+                  self.temp = tempfile.TemporaryDirectory()
+                  self.addCleanup(self.temp.cleanup)
+                  self.root = Path(self.temp.name)
+                  self.java = self.root / 'jdk/bin/java'
+                  self.java.parent.mkdir(parents=True)
+                  self.java.write_text('synthetic; not executed')
+                  (self.root / 'positive.synthetic').write_text('synthetic')
+                  self.launcher = self.root / 'launcher.sh'
+          
+              def exercise(self, positive_cmd='exit 0', negative_cmd=None, success=False):
+                  negative_cmd = negative_cmd or "printf '%s:1:1: error: invalid\\n' \"$2\" >&2; exit 1"
+                  script = ('#!/bin/sh\ncase "$2" in\n'
+                            ' *parse-negative.synthetic) ' + negative_cmd + ';;\n'
+                            ' *) ' + positive_cmd + ';;\n'
+                            'esac\n')
+                  self.launcher.write_text(script)
+                  self.launcher.chmod(0o700)
+                  env = {'PATH': os.defpath, 'JAVA_HOME': str(self.java.parent.parent),
+                         'SYNTHETIC_WORKSPACE': str(self.root),
+                         'PYTHONOPTIMIZE': '2', 'SECRET_CANARY': 'not-forwarded'}
+                  result = subprocess.run([sys.executable, '-O', '-I', '-c', GATE],
+                                          cwd=self.root, env=env, text=True,
+                                          capture_output=True, timeout=20)
+                  self.assertEqual(result.returncode == 0, success, result.stderr)
+                  return result
+          
+              def test_valid_synthetic_protocol(self):
+                  self.exercise(success=True)
+          
+              def test_positive_failure(self):
+                  self.assertIn('positive check failed', self.exercise(positive_cmd='exit 1').stderr)
+          
+              def test_negative_false_success(self):
+                  self.assertIn('negative check failed', self.exercise(negative_cmd='exit 0').stderr)
+          
+              def test_negative_stdout_contamination(self):
+                  self.assertIn('negative check failed', self.exercise(negative_cmd='echo noisy; exit 1').stderr)
+          
+              def test_negative_missing_position(self):
+                  self.assertIn('negative check failed', self.exercise(negative_cmd="echo generic >&2; exit 1").stderr)
+          
+              def test_missing_java_runtime(self):
+                  self.java.unlink()
+                  self.assertIn('JDK unavailable', self.exercise().stderr)
+          
+              def test_symlinked_input(self):
+                  (self.root / 'positive.synthetic').unlink()
+                  other = self.root / 'other.synthetic'
+                  other.write_text('synthetic')
+                  (self.root / 'positive.synthetic').symlink_to(other)
+                  self.assertIn('unsafe positive fixture', self.exercise().stderr)
+          
+              def test_production_gate_contains_no_python_assert(self):
+                  self.assertFalse(any(isinstance(node, ast.Assert)
+                      for node in ast.walk(ast.parse(GATE))))
+          
+          suite = unittest.defaultTestLoader.loadTestsFromTestCase(SourceFreePolicyTests)
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if not result.wasSuccessful():
+              sys.exit(1)
+          print(json.dumps({'kind': 'PUBLIC_SOURCE_FREE_OPTIMIZED_CLI_MODEL',
+                            'cases': result.testsRun, 'status': 'PASS',
+                            'private_source_present': False,
+                            'compiler_executed': False, 'guest_executed': False}))
+          PY
