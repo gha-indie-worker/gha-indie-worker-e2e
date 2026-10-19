@@ -458,6 +458,55 @@ public final class HotUpgradeInvariantOracle {
         }
     }
 
+    private static final class RuntimeCloseModel {
+        private final Cell cell = new Cell();
+        private boolean closed;
+        private boolean dispatchersShutdown;
+
+        Receipt tracked() {
+            return cell.admitTracked();
+        }
+
+        void close(boolean injectActorTeardownOome) {
+            // The runtime actor snapshot is prepared before this publication.
+            closed = true;
+            cell.terminate(
+                    Disposition.RUNTIME_CLOSED,
+                    injectActorTeardownOome);
+            // Independent retryable shutdown authority: this is intentionally
+            // not keyed to "first close".
+            if (!dispatchersShutdown) {
+                dispatchersShutdown = true;
+            }
+        }
+    }
+
+    private static void runtimeCloseRetryAfterActorTeardownFailure() {
+        RuntimeCloseModel runtime = new RuntimeCloseModel();
+        Receipt receipt = runtime.tracked();
+        try {
+            runtime.close(true);
+            throw new AssertionError("first close should inject OOME");
+        } catch (OutOfMemoryError expected) {
+            check(runtime.closed,
+                    "global close publication should remain fail-closed");
+            check(!runtime.dispatchersShutdown,
+                    "failed actor teardown cannot consume dispatcher shutdown");
+            check(receipt.disposition == null,
+                    "failed actor teardown cannot classify exact receipt");
+        }
+
+        runtime.close(false);
+        check(runtime.dispatchersShutdown,
+                "retry must eventually publish dispatcher shutdown");
+        check(receipt.disposition == Disposition.RUNTIME_CLOSED,
+                "retry must settle outstanding exact receipt as runtime closed");
+
+        runtime.close(false);
+        check(runtime.dispatchersShutdown,
+                "completed close remains idempotent");
+    }
+
     public static void main(String[] args) throws Exception {
         preAdmissionOwnershipFailure();
         cancellationIsNotPhysicalExit();
@@ -466,9 +515,11 @@ public final class HotUpgradeInvariantOracle {
         teardownSnapshotFailurePrecedesStopPublication();
         terminalDispositionSweep();
         completionVersusTerminationRaces();
+        runtimeCloseRetryAfterActorTeardownFailure();
         System.out.println("PASS source-free hot-upgrade oracle");
         System.out.println("route_race_rounds=2000");
         System.out.println("terminal_race_rounds=10000");
+        System.out.println("runtime_close_retry=pass");
         System.out.println("public_drain_slots=1024");
         System.out.println("private_source_bytes=0");
     }
