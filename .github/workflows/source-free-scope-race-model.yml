@@ -1,0 +1,85 @@
+name: Source-free scope cancellation race model
+on:
+  push:
+    branches:
+      - audit/source-free-task-cancel-20261018
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scope-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Exercise independent cancellation and physical-retirement oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          // Abstract ownership model, independently written.
+          // Does not fetch, mirror, or execute any private language source.
+          let checks = 0;
+          function yes(value) { assert.ok(value); checks++; }
+          class Task {
+            constructor(){this.cancelled=false;this.exited=false;this.exitError=null;}
+            revoke(){this.cancelled=true;}
+            observeExit(){if (!this.exited) return 'pending'; return this.exitError ?? 'success';}
+            retire(problem=null){this.exited=true;this.exitError=problem;}
+          }
+          class Scope {
+            constructor(){this.cancelled=false;this.children=[];this.tasks=[];}
+            child(){const c=new Scope();this.children.push(c);return c;}
+            task(){const t=new Task();this.tasks.push(t);return t;}
+            cancel(){
+              const won=!this.cancelled;
+              const queue=[this];
+              while(queue.length){
+                const next=queue.pop();
+                next.cancelled=true;
+                queue.push(...next.children);
+                for(const t of next.tasks) t.revoke();
+              }
+              return won;
+            }
+            joined(){
+              const queue=[this];
+              while(queue.length){
+                const next=queue.pop();
+                queue.push(...next.children);
+                for(const t of next.tasks) if(t.observeExit()==='pending') return false;
+              }
+              return true;
+            }
+          }
+          const root=new Scope();let cursor=root;const tasks=[];
+          for(let i=0;i<4096;i++){
+            cursor=cursor.child();
+            if(i%32===0)tasks.push(cursor.task());
+            if(i%2===0)cursor.cancelled=true; // Partial competing claims.
+          }
+          yes(root.cancel());
+          yes(cursor.cancelled);
+          for(const t of tasks){yes(t.cancelled);yes(t.observeExit()==='pending');t.retire();}
+          yes(root.joined());
+          yes(!root.cancel());
+          // Every artificial interleaving where a descendant is claimed
+          // ahead of its own traversal must still be swept by parent close.
+          for(let seed=0;seed<10000;seed++){
+            const a=new Scope(),b=a.child(),c=b.child(),d=c.child();
+            const left=b.task(),right=d.task();
+            if(seed&1)b.cancelled=true;
+            if(seed&2)c.cancelled=true;
+            if(seed&4)d.cancelled=true;
+            yes(a.cancel());
+            yes(left.cancelled&&right.cancelled);
+            const bad=new Error('failed code image release');
+            yes(!a.joined());
+            left.retire();
+            right.retire((seed&8)?bad:null);
+            yes(a.joined());
+            yes(right.observeExit()==='success'||right.observeExit()===bad);
+          }
+          console.log('SOURCE_FREE_SCOPE_CLAIM_RACE_PASS checks='+checks+
+            ' depth=4096 scenarios=10000 source_export=false');
+          NODE
