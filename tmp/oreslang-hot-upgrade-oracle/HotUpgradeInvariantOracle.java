@@ -678,6 +678,122 @@ public final class HotUpgradeInvariantOracle {
                 "completed close remains idempotent");
     }
 
+    private static final class CandidateOwnerModel {
+        private static final class Owner {
+            boolean physicalAdmitted;
+            boolean physicalFinalized;
+            boolean pinReleased;
+        }
+
+        private Owner owner;
+        private int generationPins;
+
+        void begin(boolean injectOwnerOome) {
+            generationPins++;
+            if (injectOwnerOome) {
+                generationPins--;
+                throw new OutOfMemoryError("candidate owner reservation");
+            }
+            owner = new Owner();
+        }
+
+        void admitPhysical() {
+            check(owner != null, "physical candidate admitted without owner");
+            check(!owner.physicalAdmitted, "candidate admitted twice");
+            owner.physicalAdmitted = true;
+        }
+
+        void failBeforePhysical() {
+            check(owner != null, "missing pre-reserved owner");
+            check(!owner.physicalAdmitted,
+                    "pre-physical cleanup saw an admitted candidate");
+            owner = null;
+            generationPins--;
+        }
+
+        void failAfterPhysicalUnknownFinalization() {
+            check(owner != null && owner.physicalAdmitted,
+                    "unknown physical candidate lost owner");
+            // Deliberately keep the owner and pin. No allocation occurs here.
+        }
+
+        void markPhysicalFinalizedAndReap() {
+            check(owner != null && owner.physicalAdmitted,
+                    "cannot finalize unowned candidate");
+            owner.physicalFinalized = true;
+            check(!owner.pinReleased, "candidate pin released twice");
+            owner.pinReleased = true;
+            generationPins--;
+            owner = null;
+        }
+
+        int pins() { return generationPins; }
+        boolean hasOwner() { return owner != null; }
+    }
+
+    private static void preReservedCandidateRetirementOwnership() throws Exception {
+        for (int round = 0; round < 20_000; ++round) {
+            CandidateOwnerModel preAdmission = new CandidateOwnerModel();
+            try {
+                preAdmission.begin(true);
+                throw new AssertionError("owner OOME was not injected");
+            } catch (OutOfMemoryError expected) {
+                check(preAdmission.pins() == 0,
+                        "pre-admission owner failure leaked generation pin");
+                check(!preAdmission.hasOwner(),
+                        "pre-admission owner failure published an owner");
+            }
+
+            CandidateOwnerModel admitted = new CandidateOwnerModel();
+            admitted.begin(false);
+            check(admitted.pins() == 1 && admitted.hasOwner(),
+                    "candidate pin/owner not reserved together");
+            admitted.admitPhysical();
+            admitted.failAfterPhysicalUnknownFinalization();
+            check(admitted.pins() == 1 && admitted.hasOwner(),
+                    "ambiguous physical cleanup lost candidate owner");
+            admitted.markPhysicalFinalizedAndReap();
+            check(admitted.pins() == 0 && !admitted.hasOwner(),
+                    "reap did not release candidate owner exactly once");
+
+            CandidateOwnerModel noPhysical = new CandidateOwnerModel();
+            noPhysical.begin(false);
+            noPhysical.failBeforePhysical();
+            check(noPhysical.pins() == 0 && !noPhysical.hasOwner(),
+                    "unspawned candidate did not release cleanly");
+        }
+
+        // Race finalization observation against a supervisor poll: the owner is
+        // never absent while an admitted candidate still holds the pin.
+        for (int round = 0; round < 2_000; ++round) {
+            CandidateOwnerModel model = new CandidateOwnerModel();
+            model.begin(false);
+            model.admitPhysical();
+            CountDownLatch go = new CountDownLatch(1);
+            AtomicInteger failures = new AtomicInteger();
+            Thread observer = Thread.ofPlatform().start(() -> {
+                try {
+                    go.await();
+                    for (int i = 0; i < 32; ++i) {
+                        int pins = model.pins();
+                        boolean owner = model.hasOwner();
+                        if (pins > 0 && !owner) failures.incrementAndGet();
+                        Thread.onSpinWait();
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    failures.incrementAndGet();
+                }
+            });
+            go.countDown();
+            model.failAfterPhysicalUnknownFinalization();
+            observer.join();
+            check(failures.get() == 0,
+                    "observer saw pinned candidate without retry owner");
+            model.markPhysicalFinalizedAndReap();
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         preAdmissionOwnershipFailure();
         cancellationIsNotPhysicalExit();
