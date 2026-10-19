@@ -1,6 +1,12 @@
 name: Oreslang hot-upgrade source-free oracle
 
 on:
+  push:
+    branches:
+      - 'tmp/oreslang-hot-upgrade-oracle-20261019'
+    paths:
+      - 'tmp/oreslang-hot-upgrade-oracle/**'
+      - '.github/workflows/oreslang-hot-upgrade-oracle.yml'
   pull_request:
     paths:
       - 'tmp/oreslang-hot-upgrade-oracle/**'
