@@ -682,6 +682,7 @@ public final class HotUpgradeInvariantOracle {
         private static final class Owner {
             boolean physicalAdmitted;
             boolean physicalFinalized;
+            boolean retirementEligible;
             boolean pinReleased;
         }
 
@@ -714,17 +715,33 @@ public final class HotUpgradeInvariantOracle {
         void failAfterPhysicalUnknownFinalization() {
             check(owner != null && owner.physicalAdmitted,
                     "unknown physical candidate lost owner");
-            // Deliberately keep the owner and pin. No allocation occurs here.
+            // Publication has now been abandoned; only the pre-reserved
+            // retirement owner may release the pin from here onward.
+            owner.retirementEligible = true;
         }
 
-        void markPhysicalFinalizedAndReap() {
+        void markPhysicalFinalized() {
             check(owner != null && owner.physicalAdmitted,
                     "cannot finalize unowned candidate");
             owner.physicalFinalized = true;
+        }
+
+        boolean tryReap() {
+            if (owner == null
+                    || !owner.retirementEligible
+                    || !owner.physicalFinalized) {
+                return false;
+            }
             check(!owner.pinReleased, "candidate pin released twice");
             owner.pinReleased = true;
             generationPins--;
             owner = null;
+            return true;
+        }
+
+        void markPhysicalFinalizedAndReap() {
+            markPhysicalFinalized();
+            check(tryReap(), "eligible finalized candidate was not reaped");
         }
 
         int pins() { return generationPins; }
@@ -749,10 +766,21 @@ public final class HotUpgradeInvariantOracle {
             check(admitted.pins() == 1 && admitted.hasOwner(),
                     "candidate pin/owner not reserved together");
             admitted.admitPhysical();
+
+            // A candidate may physically terminate while its originating
+            // upgrade still has publication authority. Host observations and
+            // opportunistic reapers must not consume that staging lease.
+            admitted.markPhysicalFinalized();
+            check(!admitted.tryReap(),
+                    "staging candidate was reaped before publication abandoned");
+            check(admitted.pins() == 1 && admitted.hasOwner(),
+                    "staging reaper lost candidate owner/pin");
+
             admitted.failAfterPhysicalUnknownFinalization();
             check(admitted.pins() == 1 && admitted.hasOwner(),
                     "ambiguous physical cleanup lost candidate owner");
-            admitted.markPhysicalFinalizedAndReap();
+            check(admitted.tryReap(),
+                    "eligible finalized candidate did not reap");
             check(admitted.pins() == 0 && !admitted.hasOwner(),
                     "reap did not release candidate owner exactly once");
 
@@ -786,11 +814,15 @@ public final class HotUpgradeInvariantOracle {
                 }
             });
             go.countDown();
+            model.markPhysicalFinalized();
+            check(!model.tryReap(),
+                    "concurrent staging candidate reaped before abandonment");
             model.failAfterPhysicalUnknownFinalization();
             observer.join();
             check(failures.get() == 0,
                     "observer saw pinned candidate without retry owner");
-            model.markPhysicalFinalizedAndReap();
+            check(model.tryReap(),
+                    "eligible concurrent candidate did not reap");
         }
     }
 
@@ -812,6 +844,7 @@ public final class HotUpgradeInvariantOracle {
         System.out.println("runtime_close_retry=pass");
         System.out.println("candidate_owner_rounds=20000");
         System.out.println("candidate_owner_races=2000");
+        System.out.println("candidate_staging_reap_gate=pass");
         System.out.println("exact_envelope_rollback=pass");
         System.out.println("send_vs_requeue_races=10000");
         System.out.println("public_drain_slots=1024");
