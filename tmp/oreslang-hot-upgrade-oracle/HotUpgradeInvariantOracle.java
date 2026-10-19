@@ -132,13 +132,37 @@ public final class HotUpgradeInvariantOracle {
         }
     }
 
+    private enum Disposition {
+        PROCESSED,
+        STOPPED,
+        CANCELLED,
+        FORCE_CANCELLED,
+        RUNTIME_CLOSED,
+        FAILED
+    }
+
     private static final class Receipt {
         final long sequence;
+        Disposition disposition;
         boolean done;
         boolean failed;
 
         Receipt(long sequence) {
             this.sequence = sequence;
+        }
+
+        void processed() {
+            check(disposition == null, "receipt disposition double-set");
+            disposition = Disposition.PROCESSED;
+            done = true;
+        }
+
+        void fail(Disposition terminal) {
+            check(terminal != Disposition.PROCESSED,
+                    "failure path cannot claim processed");
+            check(disposition == null, "receipt disposition double-set");
+            disposition = terminal;
+            failed = true;
         }
     }
 
@@ -203,11 +227,13 @@ public final class HotUpgradeInvariantOracle {
                 receipt = exact.remove(sequence);
                 processed = sequence;
             }
-            if (receipt != null) receipt.done = true;
+            if (receipt != null) receipt.processed();
             for (int i = 0; i < count; ++i) completed[i].done = true;
         }
 
-        void terminate(boolean injectSnapshotOome) {
+        void terminate(Disposition disposition, boolean injectSnapshotOome) {
+            check(disposition != Disposition.PROCESSED,
+                    "teardown cannot classify mail as processed");
             final List<Drain> drainSnapshot;
             final List<Receipt> receiptSnapshot;
             synchronized (lock) {
@@ -222,7 +248,7 @@ public final class HotUpgradeInvariantOracle {
                 publicDrains.clear();
                 exact.clear();
             }
-            for (Receipt receipt : receiptSnapshot) receipt.failed = true;
+            for (Receipt receipt : receiptSnapshot) receipt.fail(disposition);
             for (Drain drain : drainSnapshot) drain.done = true;
         }
 
@@ -232,6 +258,7 @@ public final class HotUpgradeInvariantOracle {
             }
         }
     }
+
 
     private static void preAdmissionOwnershipFailure() {
         AtomicInteger pins = new AtomicInteger();
@@ -331,13 +358,15 @@ public final class HotUpgradeInvariantOracle {
         check(!second.done, "prefix drains forged exact second-message completion");
         cell.process(1L);
         check(second.done && !second.failed, "exact receipt did not settle");
+        check(second.disposition == Disposition.PROCESSED,
+                "exact processed receipt lacks PROCESSED disposition");
     }
 
     private static void teardownSnapshotFailurePrecedesStopPublication() {
         Cell cell = new Cell();
         Receipt receipt = cell.admitTracked();
         try {
-            cell.terminate(true);
+            cell.terminate(Disposition.RUNTIME_CLOSED, true);
             throw new AssertionError("teardown OOME should escape");
         } catch (OutOfMemoryError expected) {
             check(!cell.stopped(),
@@ -346,10 +375,87 @@ public final class HotUpgradeInvariantOracle {
                     "failed snapshot consumed exact receipt");
         }
 
-        cell.terminate(false);
+        cell.terminate(Disposition.RUNTIME_CLOSED, false);
         check(cell.stopped(), "successful retry did not stop cell");
         check(receipt.failed && !receipt.done,
                 "successful teardown did not fail outstanding receipt");
+        check(receipt.disposition == Disposition.RUNTIME_CLOSED,
+                "successful teardown lost runtime-close disposition");
+    }
+
+    private static void terminalDispositionSweep() {
+        for (Disposition disposition : List.of(
+                Disposition.STOPPED,
+                Disposition.CANCELLED,
+                Disposition.FORCE_CANCELLED,
+                Disposition.RUNTIME_CLOSED,
+                Disposition.FAILED)) {
+            Cell cell = new Cell();
+            Receipt receipt = cell.admitTracked();
+            cell.terminate(disposition, false);
+            check(receipt.failed && !receipt.done,
+                    "terminal failure did not fail receipt: " + disposition);
+            check(receipt.disposition == disposition,
+                    "terminal disposition mismatch: " + disposition);
+        }
+
+        Cell success = new Cell();
+        Receipt processed = success.admitTracked();
+        success.process(processed.sequence);
+        check(processed.done && !processed.failed,
+                "processed receipt did not succeed");
+        check(processed.disposition == Disposition.PROCESSED,
+                "processed disposition mismatch");
+    }
+
+    private static void completionVersusTerminationRaces() throws Exception {
+        for (Disposition terminal : List.of(
+                Disposition.STOPPED,
+                Disposition.CANCELLED,
+                Disposition.FORCE_CANCELLED,
+                Disposition.RUNTIME_CLOSED,
+                Disposition.FAILED)) {
+            for (int round = 0; round < 2_000; ++round) {
+                Cell cell = new Cell();
+                Receipt receipt = cell.admitTracked();
+                CountDownLatch go = new CountDownLatch(1);
+                AtomicInteger unexpected = new AtomicInteger();
+
+                Thread complete = Thread.ofPlatform().start(() -> {
+                    try {
+                        go.await();
+                        try {
+                            cell.process(receipt.sequence);
+                        } catch (AssertionError lostRace) {
+                            // Termination may have removed exact ownership first.
+                        }
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        unexpected.incrementAndGet();
+                    }
+                });
+                Thread terminate = Thread.ofPlatform().start(() -> {
+                    try {
+                        go.await();
+                        cell.terminate(terminal, false);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        unexpected.incrementAndGet();
+                    }
+                });
+
+                go.countDown();
+                complete.join();
+                terminate.join();
+                check(unexpected.get() == 0, "race thread interrupted");
+                check(receipt.disposition == Disposition.PROCESSED
+                                || receipt.disposition == terminal,
+                        "race produced impossible disposition "
+                                + receipt.disposition + " vs " + terminal);
+                check(receipt.done != receipt.failed,
+                        "receipt must settle exactly one success/failure state");
+            }
+        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -358,8 +464,11 @@ public final class HotUpgradeInvariantOracle {
         staleEpochAdmissionRace();
         publicDrainQuotaCannotStarveExactReceipt();
         teardownSnapshotFailurePrecedesStopPublication();
+        terminalDispositionSweep();
+        completionVersusTerminationRaces();
         System.out.println("PASS source-free hot-upgrade oracle");
-        System.out.println("race_rounds=2000");
+        System.out.println("route_race_rounds=2000");
+        System.out.println("terminal_race_rounds=10000");
         System.out.println("public_drain_slots=1024");
         System.out.println("private_source_bytes=0");
     }
