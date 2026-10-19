@@ -826,6 +826,171 @@ public final class HotUpgradeInvariantOracle {
         }
     }
 
+    private enum TxnPhase {
+        NONE, PREPARING, STAGING, PUBLISHED, RETIRING,
+        RETIREMENT_PENDING, COMPLETE, ABANDONED
+    }
+
+    private static final class SupervisorTxnModel {
+        long routeEpoch = 1L;
+        long mailboxEpoch = 1L;
+        boolean activeTxn;
+        boolean proxyFrozen;
+        boolean candidateOwner;
+        boolean candidatePin;
+        boolean candidatePhysical;
+        boolean candidateRetirementEligible;
+        boolean oldRouteRetirementOwner;
+        boolean candidatePublishedToRoute;
+        TxnPhase phase = TxnPhase.NONE;
+
+        void begin() {
+            check(!activeTxn, "duplicate supervisor transaction");
+            check(!proxyFrozen, "stale proxy freeze before transaction");
+            candidatePin = true;
+            candidateOwner = true;
+            activeTxn = true;
+            phase = TxnPhase.PREPARING;
+            proxyFrozen = true;
+            phase = TxnPhase.STAGING;
+            checkInvariant();
+        }
+
+        void admitCandidatePhysical() {
+            check(activeTxn && phase == TxnPhase.STAGING,
+                    "candidate physical admission outside staging");
+            check(candidateOwner && candidatePin,
+                    "candidate physical admitted without pin owner");
+            candidatePhysical = true;
+            checkInvariant();
+        }
+
+        void rollback(boolean leaseDebitFails) {
+            check(activeTxn && !candidatePublishedToRoute,
+                    "rollback after publication");
+            proxyFrozen = false;
+            activeTxn = false;
+            phase = TxnPhase.ABANDONED;
+            if (candidatePhysical) {
+                candidateRetirementEligible = true;
+            } else if (leaseDebitFails) {
+                candidateRetirementEligible = true;
+            } else {
+                candidatePin = false;
+                candidateOwner = false;
+            }
+            checkInvariant();
+        }
+
+        void publish() {
+            check(activeTxn && phase == TxnPhase.STAGING,
+                    "publication outside staging");
+            check(proxyFrozen, "publication without proxy freeze");
+            check(candidateOwner && candidatePin && candidatePhysical,
+                    "publication without candidate owner");
+            oldRouteRetirementOwner = true;
+            mailboxEpoch++;
+            routeEpoch++;
+            candidatePublishedToRoute = true;
+            proxyFrozen = false;
+            phase = TxnPhase.PUBLISHED;
+            checkInvariant();
+        }
+
+        void beginRetiring() {
+            check(activeTxn && phase == TxnPhase.PUBLISHED,
+                    "retirement outside publication");
+            phase = TxnPhase.RETIRING;
+            checkInvariant();
+        }
+
+        void finishPublished(boolean oldFinalized) {
+            check(activeTxn && phase == TxnPhase.RETIRING,
+                    "finish outside retirement");
+            activeTxn = false;
+            if (oldFinalized) {
+                oldRouteRetirementOwner = false;
+                phase = TxnPhase.COMPLETE;
+            } else {
+                phase = TxnPhase.RETIREMENT_PENDING;
+            }
+            checkInvariant();
+        }
+
+        boolean reapCandidate() {
+            if (!candidateOwner || candidatePublishedToRoute) return false;
+            if (!candidateRetirementEligible) return false;
+            candidatePin = false;
+            candidateOwner = false;
+            candidateRetirementEligible = false;
+            return true;
+        }
+
+        void checkInvariant() {
+            check(routeEpoch == mailboxEpoch,
+                    "route/mailbox publication torn");
+            if (activeTxn && phase == TxnPhase.STAGING) {
+                check(proxyFrozen, "staging transaction lost freeze");
+                check(candidateOwner && candidatePin,
+                        "staging transaction lost candidate ownership");
+            }
+            if (candidatePin && !candidatePublishedToRoute) {
+                check(candidateOwner,
+                        "unpinned owner invariant: candidate pin has no owner");
+            }
+            if (candidatePublishedToRoute) {
+                check(candidatePin,
+                        "published route lost candidate generation pin");
+            }
+            if (oldRouteRetirementOwner) {
+                check(routeEpoch > 1L,
+                        "old route retirement exists before publication");
+            }
+        }
+    }
+
+    private static void unifiedSupervisorTransactionProtocol() {
+        for (int round = 0; round < 20_000; ++round) {
+            SupervisorTxnModel rollback = new SupervisorTxnModel();
+            rollback.begin();
+            rollback.admitCandidatePhysical();
+            check(!rollback.reapCandidate(),
+                    "staging candidate was reaped before rollback");
+            rollback.rollback(false);
+            check(rollback.routeEpoch == 1L
+                            && rollback.mailboxEpoch == 1L,
+                    "rollback changed publication epoch");
+            check(!rollback.proxyFrozen && !rollback.activeTxn,
+                    "rollback leaked transaction freeze");
+            check(rollback.reapCandidate(),
+                    "abandoned physical candidate was not reapable");
+
+            SupervisorTxnModel debitFailure = new SupervisorTxnModel();
+            debitFailure.begin();
+            debitFailure.rollback(true);
+            check(debitFailure.candidateOwner
+                            && debitFailure.candidatePin
+                            && debitFailure.candidateRetirementEligible,
+                    "failed pre-spawn debit lost retry owner");
+            check(debitFailure.reapCandidate(),
+                    "repaired pre-spawn debit was not reapable");
+
+            SupervisorTxnModel success = new SupervisorTxnModel();
+            success.begin();
+            success.admitCandidatePhysical();
+            success.publish();
+            check(success.routeEpoch == 2L
+                            && success.mailboxEpoch == 2L,
+                    "publication did not advance epochs together");
+            success.beginRetiring();
+            success.finishPublished((round & 1) == 0);
+            check(!success.activeTxn && !success.proxyFrozen,
+                    "published transaction did not release supervisor authority");
+            check(!success.reapCandidate(),
+                    "published candidate bookkeeping double-released route pin");
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         preAdmissionOwnershipFailure();
         cancellationIsNotPhysicalExit();
@@ -836,6 +1001,7 @@ public final class HotUpgradeInvariantOracle {
         completionVersusTerminationRaces();
         runtimeCloseRetryAfterActorTeardownFailure();
         preReservedCandidateRetirementOwnership();
+        unifiedSupervisorTransactionProtocol();
         exactEnvelopeRollbackAuthority();
         physicalSendVersusUnsentRollbackRaces();
         System.out.println("PASS source-free hot-upgrade oracle");
@@ -845,6 +1011,8 @@ public final class HotUpgradeInvariantOracle {
         System.out.println("candidate_owner_rounds=20000");
         System.out.println("candidate_owner_races=2000");
         System.out.println("candidate_staging_reap_gate=pass");
+        System.out.println("supervisor_txn_rounds=20000");
+        System.out.println("supervisor_txn_atomic_epochs=pass");
         System.out.println("exact_envelope_rollback=pass");
         System.out.println("send_vs_requeue_races=10000");
         System.out.println("public_drain_slots=1024");
