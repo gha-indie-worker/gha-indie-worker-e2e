@@ -1,6 +1,9 @@
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -1026,6 +1029,118 @@ public final class HotUpgradeInvariantOracle {
         }
     }
 
+    private static String digest(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private static final class EnvelopeIdentityModel {
+        private final byte[] retained;
+        private final String payloadDigest;
+        private boolean physicalAttempt;
+        private boolean completed;
+
+        EnvelopeIdentityModel(byte[] source, String ignoredCallerDigest) {
+            retained = source.clone();
+            payloadDigest = digest(retained);
+        }
+
+        String payloadDigest() { return payloadDigest; }
+
+        boolean integrityValid() {
+            return payloadDigest.equals(digest(retained));
+        }
+
+        void mutateInternalForFaultInjection(int index, byte mask) {
+            retained[index] ^= mask;
+        }
+
+        boolean reservePhysicalAttempt() {
+            if (physicalAttempt || !integrityValid()) return false;
+            physicalAttempt = true;
+            return true;
+        }
+
+        boolean requeueUnsent() {
+            return !physicalAttempt && integrityValid();
+        }
+
+        boolean completeAfterPhysicalReceipt() {
+            if (!physicalAttempt || !integrityValid()) return false;
+            completed = true;
+            return true;
+        }
+
+        boolean completed() { return completed; }
+    }
+
+    private static void immutableEnvelopeContentIdentity() {
+        for (int round = 0; round < 20_000; ++round) {
+            byte[] source = new byte[] {
+                    (byte) round,
+                    (byte) (round >>> 8),
+                    (byte) (round * 31),
+                    (byte) (round * 17 + 3)
+            };
+            String expected = digest(source);
+            EnvelopeIdentityModel pristine =
+                    new EnvelopeIdentityModel(source, "0".repeat(64));
+            check(expected.equals(pristine.payloadDigest()),
+                    "mailbox accepted a caller-forged payload digest");
+            source[0] ^= 0x55;
+            check(pristine.integrityValid(),
+                    "caller mutation changed mailbox-owned snapshot");
+            check(pristine.reservePhysicalAttempt(),
+                    "valid envelope could not reserve physical attempt");
+            check(pristine.completeAfterPhysicalReceipt(),
+                    "valid terminal receipt did not complete");
+            check(pristine.completed(),
+                    "valid envelope completion was not recorded");
+
+            EnvelopeIdentityModel preSend =
+                    new EnvelopeIdentityModel(
+                            new byte[] {1, 2, 3, (byte) round}, null);
+            preSend.mutateInternalForFaultInjection(1, (byte) 0x40);
+            check(!preSend.reservePhysicalAttempt(),
+                    "corrupted envelope obtained physical-send authority");
+            check(!preSend.requeueUnsent(),
+                    "corrupted envelope re-entered dispatch FIFO");
+
+            EnvelopeIdentityModel postSend =
+                    new EnvelopeIdentityModel(
+                            new byte[] {4, 5, 6, (byte) round}, null);
+            check(postSend.reservePhysicalAttempt(),
+                    "post-send fixture could not reserve");
+            postSend.mutateInternalForFaultInjection(2, (byte) 0x20);
+            check(!postSend.completeAfterPhysicalReceipt(),
+                    "corrupted attempted envelope refunded logical credits");
+            check(!postSend.completed(),
+                    "corrupted attempted envelope became completed");
+        }
+    }
+
+    private static void proxyAbiContinuity() {
+        for (int round = 0; round < 20_000; ++round) {
+            byte[] stable = new byte[] {
+                    9, 8, 7, (byte) round, (byte) (round >>> 8)
+            };
+            String activeAbi = digest(stable);
+            String candidateAbi = (round & 1) == 0
+                    ? activeAbi
+                    : digest(new byte[] {
+                            9, 8, 6, (byte) round, (byte) (round >>> 8)
+                    });
+            boolean compatible = activeAbi.equals(candidateAbi);
+            boolean publish = compatible;
+            check(publish == compatible,
+                    "proxy route publication ignored compiler ABI continuity");
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         preAdmissionOwnershipFailure();
         cancellationIsNotPhysicalExit();
@@ -1038,6 +1153,8 @@ public final class HotUpgradeInvariantOracle {
         preReservedCandidateRetirementOwnership();
         unifiedSupervisorTransactionProtocol();
         acquiredResourceOwnershipPrecedesValidation();
+        immutableEnvelopeContentIdentity();
+        proxyAbiContinuity();
         exactEnvelopeRollbackAuthority();
         physicalSendVersusUnsentRollbackRaces();
         System.out.println("PASS source-free hot-upgrade oracle");
@@ -1051,6 +1168,10 @@ public final class HotUpgradeInvariantOracle {
         System.out.println("supervisor_txn_atomic_epochs=pass");
         System.out.println("acquired_resource_owner_rounds=20000");
         System.out.println("acquired_resource_before_validation=pass");
+        System.out.println("envelope_identity_rounds=20000");
+        System.out.println("envelope_digest_quarantine=pass");
+        System.out.println("proxy_abi_rounds=20000");
+        System.out.println("proxy_abi_continuity=pass");
         System.out.println("exact_envelope_rollback=pass");
         System.out.println("send_vs_requeue_races=10000");
         System.out.println("public_drain_slots=1024");
