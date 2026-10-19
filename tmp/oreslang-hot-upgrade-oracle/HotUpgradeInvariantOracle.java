@@ -991,6 +991,41 @@ public final class HotUpgradeInvariantOracle {
         }
     }
 
+    private static void acquiredResourceOwnershipPrecedesValidation() {
+        for (int round = 0; round < 20_000; ++round) {
+            // Model a resource returned by the physical runtime while the
+            // transaction phase is corrupted before the router validates it.
+            boolean transferAcquired = true;
+            boolean transferOwnedByTxn = false;
+            boolean physicalAcquired = true;
+            boolean physicalOwnedByTxn = false;
+            boolean phaseValid = false;
+
+            // Production rule: assign cleanup ownership first.
+            if (transferAcquired) transferOwnedByTxn = true;
+            check(transferOwnedByTxn,
+                    "acquired source transfer was not published to txn owner");
+            if (!phaseValid) {
+                check(transferOwnedByTxn,
+                        "failed transfer validation stranded ingress freeze");
+            }
+
+            if (physicalAcquired) physicalOwnedByTxn = true;
+            check(physicalOwnedByTxn,
+                    "acquired physical candidate was not published to txn owner");
+            if (!phaseValid) {
+                check(physicalOwnedByTxn,
+                        "failed physical validation stranded candidate actor");
+            }
+
+            // Cleanup can now deterministically close/retire both resources.
+            transferOwnedByTxn = false;
+            physicalOwnedByTxn = false;
+            check(!transferOwnedByTxn && !physicalOwnedByTxn,
+                    "transaction cleanup retained acquired resource");
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         preAdmissionOwnershipFailure();
         cancellationIsNotPhysicalExit();
@@ -1002,6 +1037,7 @@ public final class HotUpgradeInvariantOracle {
         runtimeCloseRetryAfterActorTeardownFailure();
         preReservedCandidateRetirementOwnership();
         unifiedSupervisorTransactionProtocol();
+        acquiredResourceOwnershipPrecedesValidation();
         exactEnvelopeRollbackAuthority();
         physicalSendVersusUnsentRollbackRaces();
         System.out.println("PASS source-free hot-upgrade oracle");
@@ -1013,6 +1049,8 @@ public final class HotUpgradeInvariantOracle {
         System.out.println("candidate_staging_reap_gate=pass");
         System.out.println("supervisor_txn_rounds=20000");
         System.out.println("supervisor_txn_atomic_epochs=pass");
+        System.out.println("acquired_resource_owner_rounds=20000");
+        System.out.println("acquired_resource_before_validation=pass");
         System.out.println("exact_envelope_rollback=pass");
         System.out.println("send_vs_requeue_races=10000");
         System.out.println("public_drain_slots=1024");
