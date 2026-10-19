@@ -458,6 +458,177 @@ public final class HotUpgradeInvariantOracle {
         }
     }
 
+    private static final class ProxyEnvelope {
+        final long sequence;
+
+        ProxyEnvelope(long sequence) {
+            this.sequence = sequence;
+        }
+    }
+
+    /**
+     * Source-free model of the local mailbox ownership rule. This intentionally
+     * models identity/epoch/attempt invariants only; it is not copied from the
+     * private Oreslang mailbox implementation.
+     */
+    private static final class ProxyLedger {
+        private final Object lock = new Object();
+        private final Map<Long, ProxyEnvelope> outstanding = new HashMap<>();
+        private final Set<Long> attempted = new HashSet<>();
+        private long routeEpoch = 1L;
+        private long highestDispatched;
+
+        ProxyEnvelope dispatch() {
+            synchronized (lock) {
+                long sequence = ++highestDispatched;
+                ProxyEnvelope envelope = new ProxyEnvelope(sequence);
+                check(outstanding.put(sequence, envelope) == null,
+                        "duplicate proxy sequence");
+                return envelope;
+            }
+        }
+
+        void beginPhysicalSend(ProxyEnvelope envelope, long expectedEpoch) {
+            synchronized (lock) {
+                ProxyEnvelope exact = outstanding.get(envelope.sequence);
+                if (expectedEpoch != routeEpoch || exact != envelope) {
+                    throw new SecurityException(
+                            "foreign envelope or stale route");
+                }
+                if (!attempted.add(envelope.sequence)) {
+                    throw new IllegalStateException(
+                            "duplicate physical send attempt");
+                }
+            }
+        }
+
+        void requeueUnsent(ProxyEnvelope envelope, long expectedEpoch) {
+            synchronized (lock) {
+                ProxyEnvelope exact = outstanding.get(envelope.sequence);
+                if (expectedEpoch != routeEpoch
+                        || envelope.sequence != highestDispatched
+                        || exact != envelope) {
+                    throw new SecurityException(
+                            "rollback lacks exact current envelope authority");
+                }
+                if (attempted.contains(envelope.sequence)) {
+                    throw new IllegalStateException(
+                            "attempted physical send cannot be requeued");
+                }
+                outstanding.remove(envelope.sequence);
+                highestDispatched--;
+            }
+        }
+
+        int outstanding() {
+            synchronized (lock) {
+                return outstanding.size();
+            }
+        }
+
+        int attempts() {
+            synchronized (lock) {
+                return attempted.size();
+            }
+        }
+    }
+
+    private static void exactEnvelopeRollbackAuthority() {
+        ProxyLedger owner = new ProxyLedger();
+        ProxyLedger foreign = new ProxyLedger();
+        ProxyEnvelope exact = owner.dispatch();
+        ProxyEnvelope copied = new ProxyEnvelope(exact.sequence);
+        ProxyEnvelope foreignEnvelope = foreign.dispatch();
+
+        try {
+            owner.requeueUnsent(copied, 1L);
+            throw new AssertionError("copied envelope gained rollback authority");
+        } catch (SecurityException expected) {
+            // exact object identity is required
+        }
+        try {
+            owner.requeueUnsent(foreignEnvelope, 1L);
+            throw new AssertionError("foreign mailbox envelope gained authority");
+        } catch (SecurityException expected) {
+            // another mailbox's equal-looking envelope is never authority
+        }
+        try {
+            owner.requeueUnsent(exact, 2L);
+            throw new AssertionError("stale route epoch gained rollback authority");
+        } catch (SecurityException expected) {
+            // route epoch is part of local authority
+        }
+        check(owner.outstanding() == 1,
+                "rejected rollback mutated outstanding ownership");
+
+        owner.requeueUnsent(exact, 1L);
+        check(owner.outstanding() == 0,
+                "exact pre-send rollback did not restore ownership");
+
+        ProxyEnvelope attempted = owner.dispatch();
+        owner.beginPhysicalSend(attempted, 1L);
+        try {
+            owner.requeueUnsent(attempted, 1L);
+            throw new AssertionError("attempted send was requeued");
+        } catch (IllegalStateException expected) {
+            // ambiguous/accepted work remains quarantined
+        }
+        check(owner.outstanding() == 1 && owner.attempts() == 1,
+                "rejected attempted-send rollback mutated authority");
+    }
+
+    private static void physicalSendVersusUnsentRollbackRaces()
+            throws Exception {
+        for (int round = 0; round < 10_000; ++round) {
+            ProxyLedger ledger = new ProxyLedger();
+            ProxyEnvelope envelope = ledger.dispatch();
+            CountDownLatch go = new CountDownLatch(1);
+            AtomicBoolean sendWon = new AtomicBoolean();
+            AtomicBoolean rollbackWon = new AtomicBoolean();
+            AtomicInteger unexpected = new AtomicInteger();
+
+            Thread sender = Thread.ofPlatform().start(() -> {
+                try {
+                    go.await();
+                    ledger.beginPhysicalSend(envelope, 1L);
+                    sendWon.set(true);
+                } catch (SecurityException | IllegalStateException lostRace) {
+                    // rollback may have removed exact outstanding authority
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    unexpected.incrementAndGet();
+                }
+            });
+            Thread rollback = Thread.ofPlatform().start(() -> {
+                try {
+                    go.await();
+                    ledger.requeueUnsent(envelope, 1L);
+                    rollbackWon.set(true);
+                } catch (SecurityException | IllegalStateException lostRace) {
+                    // physical send reservation may have won
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    unexpected.incrementAndGet();
+                }
+            });
+
+            go.countDown();
+            sender.join();
+            rollback.join();
+            check(unexpected.get() == 0, "rollback race thread interrupted");
+            check(sendWon.get() != rollbackWon.get(),
+                    "exactly one send/resend authority must win");
+
+            if (sendWon.get()) {
+                check(ledger.outstanding() == 1 && ledger.attempts() == 1,
+                        "send winner lost attempted outstanding authority");
+            } else {
+                check(ledger.outstanding() == 0 && ledger.attempts() == 0,
+                        "rollback winner left physical attempt authority");
+            }
+        }
+    }
+
     private static final class RuntimeCloseModel {
         private final Cell cell = new Cell();
         private boolean closed;
@@ -516,10 +687,14 @@ public final class HotUpgradeInvariantOracle {
         terminalDispositionSweep();
         completionVersusTerminationRaces();
         runtimeCloseRetryAfterActorTeardownFailure();
+        exactEnvelopeRollbackAuthority();
+        physicalSendVersusUnsentRollbackRaces();
         System.out.println("PASS source-free hot-upgrade oracle");
         System.out.println("route_race_rounds=2000");
         System.out.println("terminal_race_rounds=10000");
         System.out.println("runtime_close_retry=pass");
+        System.out.println("exact_envelope_rollback=pass");
+        System.out.println("send_vs_requeue_races=10000");
         System.out.println("public_drain_slots=1024");
         System.out.println("private_source_bytes=0");
     }
