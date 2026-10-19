@@ -803,12 +803,15 @@ public final class HotUpgradeInvariantOracle {
         terminalDispositionSweep();
         completionVersusTerminationRaces();
         runtimeCloseRetryAfterActorTeardownFailure();
+        preReservedCandidateRetirementOwnership();
         exactEnvelopeRollbackAuthority();
         physicalSendVersusUnsentRollbackRaces();
         System.out.println("PASS source-free hot-upgrade oracle");
         System.out.println("route_race_rounds=2000");
         System.out.println("terminal_race_rounds=10000");
         System.out.println("runtime_close_retry=pass");
+        System.out.println("candidate_owner_rounds=20000");
+        System.out.println("candidate_owner_races=2000");
         System.out.println("exact_envelope_rollback=pass");
         System.out.println("send_vs_requeue_races=10000");
         System.out.println("public_drain_slots=1024");
