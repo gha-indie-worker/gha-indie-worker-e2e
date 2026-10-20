@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "functions": [
+    {
+      "name": "task_tick",
+      "operations": [
+        {"kind": "loop", "iterations": 32, "operations": [
+          {"kind": "copy", "bytes": 16}
+        ]},
+        {"kind": "call", "target": "update"}
+      ]
+    },
+    {
+      "name": "update",
+      "operations": [{"kind": "copy", "bytes": 8}]
+    }
+  ]
+}

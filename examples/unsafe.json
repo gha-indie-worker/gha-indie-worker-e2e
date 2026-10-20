@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "functions": [
+    {
+      "name": "tick",
+      "operations": [
+        {"kind": "allocate", "bytes": null},
+        {"kind": "blocking_io"},
+        {"kind": "loop", "iterations": null, "operations": [{"kind": "unsafe_ffi"}]}
+      ]
+    }
+  ]
+}
