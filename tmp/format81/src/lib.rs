@@ -2831,11 +2831,11 @@ end
         assert!(got.contains("fnc build(int id) -> int;"));
         assert_eq!(format_source(&got).unwrap(), got);
 
-        // The formatter must not bless a nonsensical static instance-interface
-        // declaration by rewriting it into a canonical-looking form.
+        // The formatter must fail closed on a nonsensical static
+        // instance-interface declaration rather than preserving a malformed
+        // end-delimited frame or rewriting it into canonical-looking source.
         let invalid = "static interface define Bad as\nend\n";
-        let invalid_got = format_source(invalid).unwrap();
-        assert!(invalid_got.contains("static interface define Bad as"));
+        assert!(format_source(invalid).is_err());
     }
 
     #[test]
@@ -2951,7 +2951,7 @@ end
 "#;
         let expected = r#"fnc consume(Channel<int> incoming) -> void
   do select {
-    case readch incoming: val number {
+    when readch incoming: val number {
       return;
     }
   }
