@@ -24,6 +24,7 @@ jobs:
           test "$(git rev-parse HEAD:tmp/format81/src/match_switch.rs)" = "efed4a922a78cdbcdf853d8ad79e4cdaa0bbfdd1"
           test "$(git rev-parse HEAD:tmp/format81/src/select.rs)" = "105d3a93494b11f7c4bc6689f8945d93dffe02d5"
           test "$(git rev-parse HEAD:tmp/format81/src/unused_imports.rs)" = "b4a57154691edf832e1dc33d65b603560f89c084"
+          test "$(git rev-parse HEAD:tmp/format81/tests/fixtures/end-delimited-roundtrip.ores)" = "c91a244cb99c1aaa74b3abadf9b99d8e1f3aea86"
           echo "FORMAT81_EXACT_BLOBS_PASS"
       - name: Run formatter library unit tests
         working-directory: tmp/format81
