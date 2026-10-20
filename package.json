@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "test": "node tests/contracts.e2e.mjs && node tests/transports.e2e.mjs && node --test tests/ores-compose-machine.e2e.mjs && npm run test:sourcefree-oreslang-ci",
-    "test:sourcefree-oreslang-ci": "node --test sourcefree-oreslang-ci-20261019/admission-model.test.mjs"
+    "test:sourcefree-oreslang-ci": "node --test sourcefree-oreslang-ci-20261019/*.test.mjs"
   }
 }
