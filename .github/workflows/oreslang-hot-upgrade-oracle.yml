@@ -71,3 +71,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/TaskRetirementRetryOracle.java
       - name: Run TaskScope physical retirement retry races
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle TaskRetirementRetryOracle
+      - name: Compile source-free event cleanup retry oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/EventCleanupRetryOracle.java
+      - name: Run event cleanup retry races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle EventCleanupRetryOracle
