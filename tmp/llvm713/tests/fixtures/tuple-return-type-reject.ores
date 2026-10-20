@@ -1,0 +1,3 @@
+fnc classify(int x): tuple (int, int, string) {
+    return x;
+}
