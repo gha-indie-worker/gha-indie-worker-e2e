@@ -43,8 +43,20 @@ jobs:
           for f in root.rglob('*'):
               assert not f.is_symlink(), f
               if f.is_file():
-                  assert f.suffix == '.mjs', f
                   assert f.stat().st_size <= 65536, f
+                  if f.suffix == '.mjs':
+                      pass
+                  elif f == root / 'native-index-reference.c':
+                      import re
+                      source = f.read_text(encoding='utf-8')
+                      included = re.findall(r'^\\s*#\\s*include\\s+(\\S+)', source, re.M)
+                      headers = {'<assert.h>', '<stdint.h>', '<stddef.h>',
+                                 '<stdio.h>', '<string.h>'}
+                      assert included and set(included) <= headers, f
+                      assert not re.search(r'^\\s*#\\s*(include_next|import)\\b',
+                                           source, re.M), f
+                  else:
+                      raise AssertionError(f)
                   found += 1
           assert 1 <= found <= 40, found
           PY
