@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Standalone spelling equivalent to oreslang test."""
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+from oreslang_test.cli import main
+sys.exit(main())

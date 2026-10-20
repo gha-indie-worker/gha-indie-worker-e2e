@@ -1,0 +1,6 @@
+{"op":"begin","version":1,"run_id":"fixture","backend":"synthetic"}
+{"op":"task","task":"a"}
+{"op":"task","task":"b"}
+{"op":"access","task":"a","location":"heap:object1.value","mode":"W"}
+{"op":"access","task":"b","location":"heap:object1.value","mode":"R"}
+{"op":"end","run_id":"fixture","events":4}

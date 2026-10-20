@@ -1,0 +1,16 @@
+# These examples are synthetic, not real guest traces.
+# Configure a real native executable and/or an instrumented runtime target:
+# [native]
+# files = ["tests/test_suite.ores"]
+# [fuzz]
+# command = ["/path/to/real/oreslang", "tests/fuzz_property.ores"]
+# corpus = "tests/corpus"
+# max_bytes = 256
+# [race]
+# command = ["/path/to/instrumented-runtime", "tests/race_suite.ores"]
+# [logical]
+# models = ["tests/models/atomic-update.json"]
+# [deadlock]
+# command = ["/path/to/instrumented-runtime", "tests/deadlock_suite.ores"]
+# [schedule]
+# command = ["/path/to/oreslang-compiler", "test", "tests/concurrency.ores"]

@@ -1,0 +1,54 @@
+{
+  "initial": {
+    "count": 0
+  },
+  "expected": {
+    "count": 2
+  },
+  "actors": [
+    {
+      "name": "a",
+      "turns": [
+        [
+          {
+            "op": "read",
+            "key": "count",
+            "as": "seen"
+          }
+        ],
+        [
+          {
+            "op": "write",
+            "key": "count",
+            "value": {
+              "local": "seen",
+              "add": 1
+            }
+          }
+        ]
+      ]
+    },
+    {
+      "name": "b",
+      "turns": [
+        [
+          {
+            "op": "read",
+            "key": "count",
+            "as": "seen"
+          }
+        ],
+        [
+          {
+            "op": "write",
+            "key": "count",
+            "value": {
+              "local": "seen",
+              "add": 1
+            }
+          }
+        ]
+      ]
+    }
+  ]
+}

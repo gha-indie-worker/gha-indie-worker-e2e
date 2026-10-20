@@ -1,0 +1,34 @@
+{
+  "initial": {
+    "count": 0
+  },
+  "expected": {
+    "count": 2
+  },
+  "actors": [
+    {
+      "name": "a",
+      "turns": [
+        [
+          {
+            "op": "atomic_add",
+            "key": "count",
+            "value": 1
+          }
+        ]
+      ]
+    },
+    {
+      "name": "b",
+      "turns": [
+        [
+          {
+            "op": "atomic_add",
+            "key": "count",
+            "value": 1
+          }
+        ]
+      ]
+    }
+  ]
+}
