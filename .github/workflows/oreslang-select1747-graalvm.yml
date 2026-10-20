@@ -1,0 +1,49 @@
+name: Oreslang exact-head select plan GraalVM 25
+on:
+  push:
+    branches: [test/oreslang-select-plan-1747-exact-20261020]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  select:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify all Git blobs against source PR commit
+        working-directory: ci/oreslang-select-1747
+        shell: bash
+        run: |
+          set -euo pipefail
+          n=0
+          while read -r expected file; do
+            if [[ "${expected:0:1}" == "#" || -z "$expected" ]]; then continue; fi
+            actual="$(git hash-object "$file")"
+            if [[ "$expected" != "$actual" ]]; then
+              echo "::error file=$file::Expected Git blob $expected but found $actual"
+              exit 1
+            fi
+            n=$((n+1))
+          done < source-sha1.txt
+          echo "Verified $n exact source blobs"
+          test "$n" -eq 128
+      - uses: graalvm/setup-graalvm@v1
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: 'graalvm'
+          cache: maven
+      - name: Focused Channel Future and DynamicSelectPlan JUnit tests
+        shell: bash
+        run: |
+          mvn -B -ntp -f ci/oreslang-select-1747/pom.xml -Dtest=DynamicSelectPlanGenerationTest,ChannelRuntimeTest,FutureChannelSelectTest,ChannelSelectArmBudgetTest,ChannelPendingAdmissionTest,ChannelFutureSelectQuotaTest,ChannelSelectFairAdmissionRaceTest,FutureSelectAttachmentPublicationBarrierTest,FutureSelectLateDetachBarrierTest,ChannelMappedSelectionCancellationTest,ActorSelectFairnessIsolationTest,SelectPeerFutureAliasReadinessTest,FutureSelectAdditionalRegressionTest,ChannelMappedCancellationStressTest test
+      - name: Publish Surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-select-plan-1747-surefire
+          path: ci/oreslang-select-1747/target/surefire-reports/
+          if-no-files-found: ignore
