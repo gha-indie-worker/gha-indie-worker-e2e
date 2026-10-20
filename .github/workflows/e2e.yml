@@ -16,3 +16,16 @@ jobs:
         with:
           persist-credentials: false
       - run: npm test
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Compile source-free finalization retry oracle
+        run: |
+          mkdir -p build/finalization-retry-oracle
+          javac --release 25 -Xlint:all -Werror \
+            -d build/finalization-retry-oracle \
+            src/test-oracles/FinalizationRetryOracle.java
+      - name: Execute source-free finalization retry oracle
+        run: |
+          java -cp build/finalization-retry-oracle FinalizationRetryOracle
