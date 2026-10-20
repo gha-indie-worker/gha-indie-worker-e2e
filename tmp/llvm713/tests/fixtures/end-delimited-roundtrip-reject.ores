@@ -1,0 +1,13 @@
+fnc identity(int x) -> int as return x; end
+
+fnc classify(int x) -> int as if x > 0 then return 1; else return 0; fi end
+
+fnc callback() -> () => void as
+    return || -> { return; };
+end
+
+fnc text() -> string /* ; as do end */ as return "do end fi;"; end
+
+define module math as
+    fnc double(int x) -> int as return x + x; end
+end
