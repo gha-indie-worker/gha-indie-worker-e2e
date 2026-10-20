@@ -1,0 +1,232 @@
+{
+  "schema": "oreslang-callable-syntax-v1",
+  "cases": [
+    {
+      "id": "root-end-arrow-int",
+      "domain": "root_function",
+      "body": "end",
+      "separator": "->",
+      "return_type": "int",
+      "expected": "accept",
+      "body_boundary": "newline"
+    },
+    {
+      "id": "module-end-arrow-void",
+      "domain": "module_function",
+      "body": "end",
+      "separator": "->",
+      "return_type": "void",
+      "expected": "accept",
+      "body_boundary": "newline"
+    },
+    {
+      "id": "root-end-implicit-return",
+      "domain": "root_function",
+      "body": "end",
+      "separator": "none",
+      "return_type": null,
+      "expected": "reject"
+    },
+    {
+      "id": "root-end-colon",
+      "domain": "root_function",
+      "body": "end",
+      "separator": ":",
+      "return_type": "int",
+      "expected": "reject"
+    },
+    {
+      "id": "class-method-end",
+      "domain": "instance_method",
+      "body": "end",
+      "separator": "->",
+      "return_type": "int",
+      "expected": "reject"
+    },
+    {
+      "id": "class-static-end",
+      "domain": "static_method",
+      "body": "end",
+      "separator": "->",
+      "return_type": "int",
+      "expected": "reject"
+    },
+    {
+      "id": "actor-callable-end",
+      "domain": "actor_callable",
+      "body": "end",
+      "separator": "->",
+      "return_type": "int",
+      "expected": "reject"
+    },
+    {
+      "id": "root-brace-colon",
+      "domain": "root_function",
+      "body": "brace",
+      "separator": ":",
+      "return_type": "int",
+      "expected": "accept"
+    },
+    {
+      "id": "root-brace-arrow",
+      "domain": "root_function",
+      "body": "brace",
+      "separator": "->",
+      "return_type": "int",
+      "expected": "accept"
+    },
+    {
+      "id": "module-contract-arrow",
+      "domain": "module_contract_signature",
+      "body": "signature",
+      "separator": "->",
+      "return_type": "tuple (int, int, string)",
+      "expected": "accept"
+    },
+    {
+      "id": "static-contract-arrow",
+      "domain": "static_contract_signature",
+      "body": "signature",
+      "separator": "->",
+      "return_type": "Result<Option<tuple (int, string)>, Error>",
+      "expected": "accept"
+    },
+    {
+      "id": "interface-arrow",
+      "domain": "interface_signature",
+      "body": "signature",
+      "separator": "->",
+      "return_type": "int",
+      "expected": "reject"
+    },
+    {
+      "id": "interface-fat-arrow",
+      "domain": "interface_signature",
+      "body": "signature",
+      "separator": "=>",
+      "return_type": "int",
+      "expected": "accept"
+    },
+    {
+      "id": "trait-fat-arrow",
+      "domain": "trait_signature",
+      "body": "signature",
+      "separator": "=>",
+      "return_type": "bool",
+      "expected": "accept"
+    },
+    {
+      "id": "root-end-arrow-as",
+      "domain": "root_function",
+      "body": "end",
+      "separator": "->",
+      "return_type": "int",
+      "body_boundary": "as",
+      "body_separator_line": "header",
+      "expected": "accept"
+    },
+    {
+      "id": "root-end-arrow-as-leading-do-select",
+      "domain": "root_function",
+      "body": "end",
+      "separator": "->",
+      "return_type": "void",
+      "body_boundary": "as",
+      "body_separator_line": "header",
+      "first_statement": "do_select",
+      "expected": "accept"
+    },
+    {
+      "id": "root-end-arrow-as-next-line",
+      "domain": "root_function",
+      "body": "end",
+      "separator": "->",
+      "return_type": "int",
+      "body_boundary": "as",
+      "body_separator_line": "body",
+      "expected": "reject"
+    },
+    {
+      "id": "root-end-arrow-do-retired",
+      "domain": "root_function",
+      "body": "end",
+      "separator": "->",
+      "return_type": "int",
+      "body_boundary": "do",
+      "body_separator_line": "header",
+      "expected": "reject"
+    },
+    {
+      "id": "root-end-colon-as",
+      "domain": "root_function",
+      "body": "end",
+      "separator": ":",
+      "return_type": "int",
+      "body_boundary": "as",
+      "body_separator_line": "header",
+      "expected": "reject"
+    },
+    {
+      "id": "root-end-arrow-leading-do-select",
+      "domain": "root_function",
+      "body": "end",
+      "separator": "->",
+      "return_type": "void",
+      "body_boundary": "newline",
+      "first_statement": "do_select",
+      "expected": "accept"
+    }
+  ],
+  "return_flow": [
+    {
+      "id": "nonvoid-all-paths-return",
+      "return_type": "int",
+      "normal_fallthrough": false,
+      "expected": "accept"
+    },
+    {
+      "id": "nonvoid-fallthrough",
+      "return_type": "int",
+      "normal_fallthrough": true,
+      "expected": "reject"
+    },
+    {
+      "id": "void-fallthrough",
+      "return_type": "void",
+      "normal_fallthrough": true,
+      "expected": "accept"
+    },
+    {
+      "id": "void-value-return",
+      "return_type": "void",
+      "returns_value": true,
+      "expected": "reject"
+    }
+  ],
+  "tuple_types": [
+    {
+      "id": "tuple-3",
+      "source": "tuple (int, int, string)",
+      "slots": 3,
+      "expected": "accept"
+    },
+    {
+      "id": "tuple-nested",
+      "source": "Result<Option<tuple (int, string)>, Error>",
+      "slots": 2,
+      "expected": "accept"
+    },
+    {
+      "id": "tuple-large-65",
+      "source": "tuple (int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int)",
+      "slots": 65,
+      "expected": "accept"
+    },
+    {
+      "id": "tuple-existing-large-65",
+      "source": "[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int]",
+      "slots": 65,
+      "expected": "accept"
+    }
+  ]
+}
