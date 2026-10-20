@@ -18,7 +18,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD:tmp/format81/Cargo.toml)" = "c5b033adfe33bb10ba62b73a561794c7929b50c1"
-          test "$(git rev-parse HEAD:tmp/format81/src/lib.rs)" = "d13845492ce9aae0cedfcfe100c70223390a0c18"
+          test "$(git rev-parse HEAD:tmp/format81/src/lib.rs)" = "5c988945c6f3b863de61a0d537f26838528481e4"
           test "$(git rev-parse HEAD:tmp/format81/src/inline_blocks.rs)" = "d5bbcdf030f8aa2f079e12f0d5b9a8de859c72b2"
           test "$(git rev-parse HEAD:tmp/format81/src/keyword_blocks.rs)" = "79489f01782469376f61239a7a09f440040f2625"
           test "$(git rev-parse HEAD:tmp/format81/src/match_switch.rs)" = "efed4a922a78cdbcdf853d8ad79e4cdaa0bbfdd1"
