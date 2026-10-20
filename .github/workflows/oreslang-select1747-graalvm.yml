@@ -30,12 +30,16 @@ jobs:
           done < source-sha1.txt
           echo "Verified $n exact source blobs"
           test "$n" -eq 128
-      - uses: graalvm/setup-graalvm@v1
+      - name: Install approved GraalVM JDK 25 toolchain
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
-          version: '25.3'
           java-version: '25'
-          distribution: 'graalvm'
-          cache: maven
+          distribution: graalvm
+      - name: Verify JDK 25 runner and Maven
+        run: |
+          java -version
+          javac -version
+          mvn -version
       - name: Focused Channel Future and DynamicSelectPlan JUnit tests
         shell: bash
         run: |
