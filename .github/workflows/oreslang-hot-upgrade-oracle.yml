@@ -79,3 +79,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/ReliablePendingReleaseOracle.java
       - name: Run RELIABLE pending release retry races
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle ReliablePendingReleaseOracle
+      - name: Compile source-free actor output release oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/ActorOutputReleaseOracle.java
+      - name: Run actor output release retry races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle ActorOutputReleaseOracle
