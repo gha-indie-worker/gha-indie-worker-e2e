@@ -1,0 +1,30 @@
+name: Oreslang formatter 81 exact lib tests
+on:
+  push:
+    branches:
+      - 'ci/oreslang-format81-lib-20261020'
+permissions:
+  contents: read
+jobs:
+  format-lib:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Verify exact formatter source blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:tmp/format81/Cargo.toml)" = "c5b033adfe33bb10ba62b73a561794c7929b50c1"
+          test "$(git rev-parse HEAD:tmp/format81/src/lib.rs)" = "d13845492ce9aae0cedfcfe100c70223390a0c18"
+          test "$(git rev-parse HEAD:tmp/format81/src/inline_blocks.rs)" = "d5bbcdf030f8aa2f079e12f0d5b9a8de859c72b2"
+          test "$(git rev-parse HEAD:tmp/format81/src/keyword_blocks.rs)" = "79489f01782469376f61239a7a09f440040f2625"
+          test "$(git rev-parse HEAD:tmp/format81/src/match_switch.rs)" = "efed4a922a78cdbcdf853d8ad79e4cdaa0bbfdd1"
+          test "$(git rev-parse HEAD:tmp/format81/src/select.rs)" = "105d3a93494b11f7c4bc6689f8945d93dffe02d5"
+          test "$(git rev-parse HEAD:tmp/format81/src/unused_imports.rs)" = "b4a57154691edf832e1dc33d65b603560f89c084"
+          echo "FORMAT81_EXACT_BLOBS_PASS"
+      - name: Run formatter library unit tests
+        working-directory: tmp/format81
+        run: cargo test --lib
