@@ -59,3 +59,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/RetiredStopRetryOracle.java
       - name: Run retired stop recovery and concurrency oracle
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle RetiredStopRetryOracle
+      - name: Compile source-free physical unregister oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/UnregisterFaultOracle.java
+      - name: Run physical registry removal before-after failure oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle UnregisterFaultOracle
