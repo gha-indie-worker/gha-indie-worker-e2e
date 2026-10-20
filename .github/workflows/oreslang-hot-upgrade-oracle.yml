@@ -83,3 +83,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/ActorOutputReleaseOracle.java
       - name: Run actor output release retry races
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle ActorOutputReleaseOracle
+      - name: Compile source-free generation retirement retry oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/GenerationRetirementRetryOracle.java
+      - name: Run generation retirement retry races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle GenerationRetirementRetryOracle
