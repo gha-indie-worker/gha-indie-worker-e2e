@@ -1,0 +1,27 @@
+name: Oreslang wasm PR16 exact-tree validation
+on:
+  push:
+    branches:
+      - tmp/oreslang-wasm-pr16-exact-20261019
+permissions:
+  contents: read
+jobs:
+  exact-tree:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 1a6ad618f54df12beb5f6e8d5d79de11b984e9cb
+          persist-credentials: false
+      - name: Verify mirrored source tree
+        run: |
+          test "$(git rev-parse HEAD)" = "1a6ad618f54df12beb5f6e8d5d79de11b984e9cb"
+          test "$(git rev-parse HEAD^{tree})" = "747dde5904113c3c549fd2678548b093ada6d0d7"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install wasm toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+      - name: Run exact-tree tests
+        run: npm test
