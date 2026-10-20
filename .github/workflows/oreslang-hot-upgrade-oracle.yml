@@ -39,6 +39,10 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/CandidateQuarantineOracle.java
       - name: Run candidate quarantine and physical release oracle
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle CandidateQuarantineOracle
+      - name: Compile source-free proxy rollback oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/ProxyRollbackOracle.java
+      - name: Run proxy freeze rollback recovery race oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle ProxyRollbackOracle
       - name: Compile source-free ghost child lifetime oracle
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/GhostChildLifetimeOracle.java
       - name: Run ghost child lifecycle fault oracle
