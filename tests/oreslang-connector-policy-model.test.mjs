@@ -140,18 +140,21 @@ test('connector root changes only the private source subtree',()=>{
   assert.equal(tree.some(x=>x.path==='ci/oreslang-receipt.json'),false);
 });
 
-test('connector commit envelope is exact three-line identity binding',()=>{
+test('connector commit envelope binds identity and receipt digest',()=>{
+  const receiptDigest='7'.repeat(64);
   const message=
     'ci: exact private Oreslang tree '+SOURCE_HEAD+' tree '+SOURCE_TREE+'\n'+
     'carrier-base '+BASE+' tree '+BASE_TREE+'\n'+
-    'connector-authorized source-repository '+SOURCE_REPO+' id '+SOURCE_REPO_ID;
+    'connector-authorized source-repository '+SOURCE_REPO+' id '+SOURCE_REPO_ID+'\n'+
+    'Oreslang-CI-Receipt-SHA256: '+receiptDigest;
   const lines=message.split('\n');
-  assert.equal(lines.length,3);
+  assert.equal(lines.length,4);
   assert.equal(lines[0],
     'ci: exact private Oreslang tree '+SOURCE_HEAD+' tree '+SOURCE_TREE);
   assert.equal(lines[1],'carrier-base '+BASE+' tree '+BASE_TREE);
   assert.equal(lines[2],
     'connector-authorized source-repository '+SOURCE_REPO+' id '+SOURCE_REPO_ID);
+  assert.equal(lines[3],'Oreslang-CI-Receipt-SHA256: '+receiptDigest);
 });
 
 test('payload branch derives only from verified source tree',()=>{
