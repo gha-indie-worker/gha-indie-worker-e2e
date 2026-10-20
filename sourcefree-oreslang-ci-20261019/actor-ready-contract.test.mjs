@@ -92,3 +92,45 @@ test('retire rejects new work but drains admitted messages without parallel call
  }
  assert.equal(s.next(),null);
 });
+
+test('CONTROL outranks earlier lower-index DATA after a single carrier releases',()=> {
+ const s=new SchedulerOracle(65536);
+ const slots=[0,63,64,4095,4096,65535];
+ for(const slot of slots)s.spawn(slot);
+ assert.equal(s.data(0),true);
+ assert.deepEqual(s.next(),{slot:0,kind:'DATA'});
+ for(const slot of slots.slice(1))assert.equal(s.data(slot),true);
+ assert.equal(s.control(65535),true);
+ // A native single carrier is still executing slot 0 here. The next
+ // dispatch must choose the high-slot CONTROL even across summary groups.
+ s.finish(0);
+ assert.deepEqual(s.next(),{slot:65535,kind:'CONTROL'});
+ assert.notEqual(s.next()?.slot,65535,'a control callback cannot overlap its DATA turn');
+ s.finish(65535);
+ const seen=new Set([0]);
+ while(true){
+  const turn=s.next();
+  if(!turn)break;
+  assert.equal(turn.kind,'DATA');
+  seen.add(turn.slot);
+  s.finish(turn.slot);
+ }
+ assert.deepEqual([...seen].sort((a,b)=>a-b),slots);
+});
+test('CONTROL pending on a busy lane cannot bypass physical ownership',()=> {
+ const s=new SchedulerOracle(4097);
+ s.spawn(4096);
+ assert.equal(s.data(4096),true);
+ assert.deepEqual(s.next(),{slot:4096,kind:'DATA'});
+ assert.equal(s.control(4096),true);
+ assert.equal(s.control(4096),false,'only one pending CONTROL envelope');
+ assert.equal(s.next(),null,'current owner must leave before CONTROL runs');
+ s.stop(4096);
+ assert.equal(s.data(4096),false);
+ assert.equal(s.control(4096),false);
+ s.finish(4096);
+ assert.deepEqual(s.next(),{slot:4096,kind:'CONTROL'},'previously accepted CONTROL drains after stop');
+ assert.equal(s.next(),null);
+ s.finish(4096);
+ assert.equal(s.next(),null);
+});
