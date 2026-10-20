@@ -11,6 +11,8 @@ public final class MemorySliceCloseOracle {
     private static final AtomicLong CHECKS = new AtomicLong();
 
     private static final class InjectedFault extends Error {
+        private static final long serialVersionUID = 1L;
+
         InjectedFault(String message) {
             super(message);
         }
