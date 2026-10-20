@@ -1,0 +1,25 @@
+name: Exact Oreslang RT region verification
+on:
+  push:
+    branches:
+      - ci-mirror/oreslang-rt-region-20261019
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile and run exact-source verifier
+        run: |
+          mkdir -p rt-verify/classes
+          javac --release 21 -d rt-verify/classes rt-verify/src/dev/oreslang/compiler/RealtimeRegionFlow.java rt-verify/src/dev/oreslang/compiler/RealtimeRegionFlowSelfTest.java
+          java -ea -cp rt-verify/classes dev.oreslang.compiler.RealtimeRegionFlowSelfTest
