@@ -20,7 +20,7 @@ jobs:
       - name: Run synthetic policy tests
         run: |
           node --version
-          node --test sourcefree-oreslang-ci-20261019/admission-model.test.mjs
+          node --test sourcefree-oreslang-ci-20261019/*.test.mjs
       - name: Confirm source-free scope
         run: |
           test ! -e sourcefree-oreslang-ci-20261019/private-source
