@@ -51,17 +51,27 @@ test('CONTROL precedes DATA across 64 and 4096 actor boundaries',()=>{
  for(const id of [0,63,64,4095,4096,65535])assert.equal(s.data(id),true);
  assert.equal(s.control(65535),true);
  assert.deepEqual(s.next(),{slot:65535,kind:'CONTROL'});
- assert.notEqual(s.next()?.slot,65535,'busy actor cannot execute twice');
+ // next() acquires a turn. Account for the other DATA owner instead of
+ // silently discarding its completion in a negative assertion.
+ const concurrent=s.next();
+ assert.ok(concurrent,'unrelated DATA lane remains dispatchable');
+ assert.equal(concurrent.kind,'DATA');
+ assert.notEqual(concurrent.slot,65535,'the CONTROL owner is still active');
+ assert.equal(s.rows.get(65535).active,true);
+ assert.equal(s.rows.get(concurrent.slot).active,true);
+ s.finish(concurrent.slot);
  s.finish(65535);
- let last=false;
+ // All six original DATA turns must be delivered exactly once.
+ const seen=new Set([concurrent.slot]);
  while(true){
   const turn=s.next();
   if(!turn)break;
   assert.equal(turn.kind,'DATA');
-  if(turn.slot===65535)last=true;
+  assert.equal(seen.has(turn.slot),false,'duplicate DATA turn');
+  seen.add(turn.slot);
   s.finish(turn.slot);
  }
- assert.equal(last,true);
+ assert.deepEqual([...seen].sort((a,b)=>a-b),[0,63,64,4095,4096,65535]);
 });
 test('round robin DATA does not starve remote actor under replenishment',()=>{
  const s=new SchedulerOracle(65536);
