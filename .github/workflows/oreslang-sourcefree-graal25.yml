@@ -1,0 +1,110 @@
+name: Source-free GraalVM JDK 25 toolchain canary
+
+on:
+  push:
+    branches:
+      - ci/source-free-graalvm25-toolchain-20261020
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-free-graalvm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Install pinned GraalVM for JDK 25
+        uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
+        with:
+          java-version: '25'
+          version: '25.3'
+          distribution: graalvm
+          github-token: ${{ github.token }}
+      - name: Record toolchain and require JDK 25
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          mvn -version
+          native-image --version
+          java -XshowSettings:properties -version 2>&1 | grep -Eq 'java\.version = 25([.+-]|$)'
+      - name: Compile and execute synthetic Maven and JUnit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/graal25-source-free"
+          mkdir -p "$work/src/main/java" "$work/src/test/java"
+          cat > "$work/pom.xml" <<'POM'
+          <project xmlns="http://maven.apache.org/POM/4.0.0"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+            <modelVersion>4.0.0</modelVersion>
+            <groupId>dev.synthetic</groupId>
+            <artifactId>graal25-capacity-canary</artifactId>
+            <version>1.0.0</version>
+            <properties>
+              <maven.compiler.release>25</maven.compiler.release>
+              <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+            </properties>
+            <dependencies>
+              <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>5.11.4</version>
+                <scope>test</scope>
+              </dependency>
+            </dependencies>
+            <build>
+              <plugins>
+                <plugin>
+                  <groupId>org.apache.maven.plugins</groupId>
+                  <artifactId>maven-compiler-plugin</artifactId>
+                  <version>3.14.0</version>
+                </plugin>
+                <plugin>
+                  <groupId>org.apache.maven.plugins</groupId>
+                  <artifactId>maven-surefire-plugin</artifactId>
+                  <version>3.5.2</version>
+                </plugin>
+              </plugins>
+            </build>
+          </project>
+          POM
+          cat > "$work/src/main/java/ToolchainProbe.java" <<'JAVA'
+          public final class ToolchainProbe {
+              public static long add(long a, long b) { return Math.addExact(a, b); }
+              public static void main(String[] args) {
+                  if (Runtime.version().feature() != 25 || add(7, 2) != 9L) {
+                      throw new AssertionError("wrong JDK or arithmetic");
+                  }
+                  System.out.println("SOURCE_FREE_GRAAL25_JAVA_PASS");
+              }
+          }
+          JAVA
+          cat > "$work/src/test/java/ToolchainProbeTest.java" <<'JAVA'
+          import static org.junit.jupiter.api.Assertions.*;
+          import org.junit.jupiter.api.Test;
+          class ToolchainProbeTest {
+              @Test void java25AndCheckedArithmetic() {
+                  assertEquals(25, Runtime.version().feature());
+                  assertEquals(9L, ToolchainProbe.add(7L, 2L));
+              }
+              @Test void overflowsRejectRatherThanWrap() {
+                  assertThrows(ArithmeticException.class, () -> ToolchainProbe.add(Long.MAX_VALUE, 1L));
+              }
+          }
+          JAVA
+          mvn -B -ntp -f "$work/pom.xml" clean test
+          grep -q 'tests="2"' "$work/target/surefire-reports/TEST-ToolchainProbeTest.xml"
+          java -cp "$work/target/classes" ToolchainProbe | grep -Fx SOURCE_FREE_GRAAL25_JAVA_PASS
+          echo "SOURCE_FREE_MAVEN_JUNIT_PASS tests=2"
+      - name: Compile and execute actual GraalVM Native Image
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/graal25-source-free"
+          native-image --no-fallback -cp "$work/target/classes" -o "$work/probe-native" ToolchainProbe
+          "$work/probe-native" | grep -Fx SOURCE_FREE_GRAAL25_JAVA_PASS
+          echo "SOURCE_FREE_GRAAL25_NATIVE_IMAGE_PASS"
