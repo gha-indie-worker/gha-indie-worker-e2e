@@ -34,3 +34,21 @@ jobs:
             -d build/finalization-memory-oracle \
             src/test-oracles/FinalizationMemoryRetryOracle.java
           java -cp build/finalization-memory-oracle FinalizationMemoryRetryOracle
+
+  actor-group-close-retry-oracle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '25'
+      - run: |
+          mkdir -p build/actor-group-close-oracle
+          javac --release 25 -Xlint:all -Werror \
+            -d build/actor-group-close-oracle \
+            src/test-oracles/ActorGroupCloseRetryOracle.java
+          java -cp build/actor-group-close-oracle ActorGroupCloseRetryOracle
