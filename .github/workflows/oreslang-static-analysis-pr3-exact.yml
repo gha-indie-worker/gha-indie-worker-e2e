@@ -1,0 +1,35 @@
+name: Oreslang static-analysis PR3 exact-tree validation
+on:
+  push:
+    branches:
+      - tmp/oreslang-static-analysis-pr3-exact-20261019
+permissions:
+  contents: read
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 5ffac25836fe3064f7e54a8ef0173a27ff32d431
+          persist-credentials: false
+      - name: Verify exact source tree
+        run: |
+          test "$(git rev-parse HEAD)" = "5ffac25836fe3064f7e54a8ef0173a27ff32d431"
+          test "$(git rev-parse HEAD^{tree})" = "70df5bc80af29174a9ec6f1ce2b9fc49e1e4de5c"
+      - name: Install Rust stable
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - run: cargo +stable fmt --all -- --check
+      - run: cargo +stable test --locked --workspace --all-targets
+      - run: cargo +stable clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo +stable run --locked -p ores-analyze -- examples/hard-realtime.json hard
+      - name: Verify cross-repo scalar v1 fixture
+        run: |
+          cargo +stable run --locked -p ores-analyze -- examples/rust-scalar-expected.json hard > target/rust-scalar-report.json
+          python3 -c 'import json; r=json.load(open("target/rust-scalar-report.json")); assert r["assurance_level"] == "untrusted_effect_ir_model_only"; assert r["functions"]["answer"]["allocations_upper_bound"] == 0; assert r["functions"]["answer"]["copies_upper_bound"] == 0'
+      - name: Reject unsafe program
+        run: |
+          if cargo +stable run --locked -p ores-analyze -- examples/unsafe.json hard; then
+            exit 1
+          fi
