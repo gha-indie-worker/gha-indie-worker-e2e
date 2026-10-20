@@ -16,3 +16,16 @@ jobs:
         with:
           persist-credentials: false
       - run: npm test
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Compile source-free proxy rollback ownership oracle
+        run: |
+          mkdir -p build/proxy-rollback-oracle
+          javac --release 25 -Xlint:all -Werror \
+            -d build/proxy-rollback-oracle \
+            src/test-oracles/ProxyRollbackOwnershipOracle.java
+      - name: Execute source-free proxy rollback ownership oracle
+        run: |
+          java -cp build/proxy-rollback-oracle ProxyRollbackOwnershipOracle
