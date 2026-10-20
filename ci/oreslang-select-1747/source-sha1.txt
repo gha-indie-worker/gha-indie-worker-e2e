@@ -1,4 +1,4 @@
-# Exact select loop hoisting verification: ores-truffle-oreslang/oreslang-source.java@8d902fbaf3da72436d1e65ded3386468b5e76dc6
+# Exact select loop hoisting verification: ores-truffle-oreslang/oreslang-source.java@4c56c1a379b9e88d8841b802e575de70d1467fbd
 2fbedd1086357c7c6385ba439c42f4315f050974 pom.xml
 d7d79b3af7aae08a5277fe63ca6b6047c0da9aa6 scripts/build-native-thread.sh
 a824833042142f88ceabfef8eb0d86ed62d8dcd8 src/main/c/oresmailbox.c
@@ -128,4 +128,4 @@ d2cd9b8e0cd3e3bb3ee6a5f9cebf9ab3312c44f4 stdlib/core.ores
 677754a41983167bb4f8ba5ffa8551bb87aaf9f7 stdlib/testing.ores
 f4ff35b10683880e42e3151b34fc140d52704dba stdlib/trace.ores
 a2a1be7666093186ca09771c003a306112750c92 src/test/java/dev/oreslang/SelectLoopDescriptorHoistTest.java
-b0d5da57a25beaee1b955150e0c6237aa9785749 src/test/java/dev/oreslang/runtime/StaticSelectTicketTest.java
+7883ac184c44624c4ea2f3e3153757b0501260e5 src/test/java/dev/oreslang/runtime/StaticSelectTicketTest.java

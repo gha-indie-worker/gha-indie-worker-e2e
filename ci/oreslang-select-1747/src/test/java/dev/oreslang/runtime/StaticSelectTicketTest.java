@@ -19,7 +19,9 @@ final class StaticSelectTicketTest {
         assertTrue(b.tryWrite(4));
         assertEquals(0, cached.tryStaticSelect(ChannelRuntime.SelectPolicy.FAIR, 2)
                 .orElseThrow().index());
-        // Source-site completions must never rotate the plan's own FAIR cursor.
+        // Both channels are ready; if a source ticket had rotated the plan's
+        // independent cursor this would pick the wrong first arm.
+        assertTrue(a.tryWrite(5));
         assertEquals(0, cached.trySelect(ChannelRuntime.SelectPolicy.FAIR)
                 .orElseThrow().index());
     }
