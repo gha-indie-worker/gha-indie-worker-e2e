@@ -34,7 +34,13 @@ export function executed(run,head){
     if(!j||!pos(j.id)||!pos(j.runnerId)||!pin(j.head,head)||j.runId!==run.id||j.attempt!==run.attempt||j.conclusion!=='success')return 'JOB_IDENTITY_UNKNOWN';
     if(!Array.isArray(j.steps)){missing=true;continue;}
     if(!j.steps.length)empty=true;
-    testSteps+=j.steps.filter(x=>x&&x.status==='completed'&&x.conclusion==='success'&&/^Run (tests|unit tests|synthetic policy tests)$/i.test(x.name)).length;
+    // The job-level success flag is insufficient if step evidence contradicts
+    // it or is incomplete. Treat failed/cancelled/in-progress/forged steps as
+    // untrustworthy rather than counting an earlier successful test step.
+    if(j.steps.some(x=>!x||typeof x.name!=='string'||
+      !((x.status==='completed'&&x.conclusion==='success')||
+        (x.status==='completed'&&x.conclusion==='skipped'))))return 'JOB_STEP_CONFLICT';
+    testSteps+=j.steps.filter(x=>x.conclusion==='success'&&/^Run (tests|unit tests|synthetic policy tests)$/i.test(x.name)).length;
   }
   return missing?'STEPS_UNOBSERVED':empty?'OBSERVED_ZERO_STEPS':testSteps?'SYNTHETIC_TEST_STEPS_EXECUTED':'NO_TEST_STEPS';
 }
