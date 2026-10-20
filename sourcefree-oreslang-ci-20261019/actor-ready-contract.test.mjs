@@ -144,3 +144,20 @@ test('CONTROL pending on a busy lane cannot bypass physical ownership',()=> {
  s.finish(4096);
  assert.equal(s.next(),null);
 });
+
+test('stopped high-slot lane drains previously admitted CONTROL before DATA',()=> {
+ const s=new SchedulerOracle(65536);
+ s.spawn(65535);
+ assert.equal(s.data(65535),true);
+ assert.equal(s.control(65535),true);
+ s.stop(65535);
+ assert.equal(s.data(65535),false,'stop rejects a later DATA admission');
+ assert.equal(s.control(65535),false,'stop rejects a later CONTROL admission');
+ assert.deepEqual(s.next(),{slot:65535,kind:'CONTROL'});
+ assert.equal(s.next(),null,'no overlapping callback on stopped lane');
+ s.finish(65535);
+ assert.deepEqual(s.next(),{slot:65535,kind:'DATA'});
+ assert.equal(s.next(),null,'only one owner per actor');
+ s.finish(65535);
+ assert.equal(s.next(),null,'both accepted envelopes drained exactly once');
+});
