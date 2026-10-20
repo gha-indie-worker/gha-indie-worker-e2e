@@ -1,90 +1,103 @@
-/* Public independent C11 reference: NO private Oreslang source or Git blobs. */
+/* PUBLIC SOURCE-FREE REFERENCE: independently authored count-based index.
+ * Does not reproduce the private Oreslang scheduler's bitmap implementation.
+ * No private source, Git trees, credentials or cross-org checkout. */
 #include <assert.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-enum { ACTORS = 65536, WORDS = 1024, GROUPS = 16 };
+enum { ACTORS = 65536, BLOCK = 64, BLOCKS = 1024,
+       REGION = 4096, REGIONS = 16 };
 typedef struct {
-    uint64_t words[WORDS], summary[GROUPS];
     unsigned char present[ACTORS];
+    uint16_t by_block[BLOCKS], by_region[REGIONS];
 } Index;
-static unsigned low_bit(uint64_t x) {
-    assert(x);
-    unsigned n = 0;
-    while (!(x & UINT64_C(1))) { ++n; x >>= 1; }
-    return n;
-}
-static void assign(Index* b, size_t slot, int set) {
+static void assign(Index* x, size_t slot, int set) {
     assert(slot < ACTORS);
-    size_t w = slot / 64;
-    uint64_t bit = UINT64_C(1) << (slot % 64);
-    if (set) b->words[w] |= bit;
-    else b->words[w] &= ~bit;
-    uint64_t group_bit = UINT64_C(1) << (w % 64);
-    if (b->words[w]) b->summary[w / 64] |= group_bit;
-    else b->summary[w / 64] &= ~group_bit;
-    b->present[slot] = (unsigned char)!!set;
+    unsigned char now = (unsigned char)!!set;
+    if (x->present[slot] == now) return;
+    uint16_t* block = &x->by_block[slot / BLOCK];
+    uint16_t* region = &x->by_region[slot / REGION];
+    if (now) {
+        assert(*block < BLOCK && *region < REGION);
+        ++*block; ++*region;
+    } else {
+        assert(*block && *region);
+        --*block; --*region;
+    }
+    x->present[slot] = now;
 }
-static size_t first_span(const Index* b, size_t low, size_t high) {
-    assert(low <= high && high <= ACTORS);
-    if (low == high) return ACTORS;
-    size_t start_w = low / 64, end_w = (high - 1) / 64;
-    for (size_t g = start_w / 64; g <= end_w / 64; ++g) {
-        uint64_t available = b->summary[g];
-        if (g == start_w / 64)
-            available &= UINT64_MAX << (start_w % 64);
-        if (g == end_w / 64 && end_w % 64 != 63)
-            available &= (UINT64_C(1) << (end_w % 64 + 1)) - 1;
-        while (available) {
-            size_t w = g * 64 + low_bit(available);
-            assert(w < WORDS);
-            uint64_t bits = b->words[w];
-            if (w == start_w) bits &= UINT64_MAX << (low % 64);
-            if (w == end_w && high % 64)
-                bits &= (UINT64_C(1) << (high % 64)) - 1;
-            if (bits) return w * 64 + low_bit(bits);
-            available &= available - 1;
+static size_t next(const Index* x, size_t cursor) {
+    assert(cursor < ACTORS);
+    /* Count-based skipping is intentionally different from the private
+     * two-level bit index. Model the observable first-ready semantics. */
+    for (int pass = 0; pass != 2; ++pass) {
+        size_t low = pass ? 0 : cursor;
+        size_t high = pass ? cursor : ACTORS;
+        if (low >= high) continue;
+        size_t first_region = low / REGION;
+        size_t last_region = (high - 1) / REGION;
+        for (size_t region = first_region; region <= last_region; ++region) {
+            if (!x->by_region[region]) continue;
+            size_t rlo = region * REGION;
+            size_t rhi = rlo + REGION;
+            if (rlo < low) rlo = low;
+            if (rhi > high) rhi = high;
+            for (size_t block = rlo / BLOCK; block <= (rhi - 1) / BLOCK; ++block) {
+                if (!x->by_block[block]) continue;
+                size_t blo = block * BLOCK;
+                size_t bhi = blo + BLOCK;
+                if (blo < rlo) blo = rlo;
+                if (bhi > rhi) bhi = rhi;
+                for (size_t slot = blo; slot < bhi; ++slot)
+                    if (x->present[slot]) return slot;
+            }
         }
     }
     return ACTORS;
 }
-static size_t next(const Index* b, size_t cursor) {
-    assert(cursor < ACTORS);
-    size_t result = first_span(b, cursor, ACTORS);
-    return result != ACTORS ? result : first_span(b, 0, cursor);
-}
-static size_t expected(const Index* b, size_t cursor) {
-    for (size_t k = 0; k < ACTORS; ++k) {
-        size_t i = (cursor + k) % ACTORS;
-        if (b->present[i]) return i;
+static size_t independent_oracle(const Index* x, size_t cursor) {
+    for (size_t offset = 0; offset < ACTORS; ++offset) {
+        size_t slot = (cursor + offset) % ACTORS;
+        if (x->present[slot]) return slot;
     }
     return ACTORS;
 }
-static void invariant(const Index* b) {
-    for (size_t w = 0; w < WORDS; ++w) {
-        uint64_t word = 0;
-        for (unsigned bit = 0; bit < 64; ++bit)
-            if (b->present[64 * w + bit]) word |= UINT64_C(1) << bit;
-        assert(b->words[w] == word);
-        assert(!!(b->summary[w / 64] & (UINT64_C(1) << (w % 64))) == !!word);
+static void invariant(const Index* x) {
+    for (size_t region = 0; region < REGIONS; ++region) {
+        size_t region_total = 0;
+        for (size_t block = region * (REGION / BLOCK);
+             block < (region + 1) * (REGION / BLOCK); ++block) {
+            size_t block_total = 0;
+            for (size_t i = block * BLOCK; i < (block + 1) * BLOCK; ++i) {
+                assert(x->present[i] <= 1);
+                block_total += x->present[i];
+            }
+            assert(block_total == x->by_block[block]);
+            region_total += block_total;
+        }
+        assert(region_total == x->by_region[region]);
     }
 }
-static uint32_t rnd(uint32_t* seed) {
+static uint32_t deterministic(uint32_t* seed) {
     uint32_t x = *seed;
-    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
     return *seed = x;
 }
 int main(void) {
     static Index data, control;
-    const size_t boundary[] = {0,1,62,63,64,65,4094,4095,4096,4097,65534,65535};
+    const size_t boundary[] =
+        {0,1,62,63,64,65,4094,4095,4096,4097,65534,65535};
     const size_t count = sizeof boundary / sizeof boundary[0];
     for (size_t i = 0; i < count; ++i) assign(&data, boundary[i], 1);
     invariant(&data);
     for (size_t i = 0; i < count; ++i) {
-        assert(next(&data, boundary[i]) == expected(&data, boundary[i]));
+        assert(next(&data, boundary[i]) ==
+               independent_oracle(&data, boundary[i]));
         size_t cursor = (boundary[i] + 1) % ACTORS;
-        assert(next(&data, cursor) == expected(&data, cursor));
+        assert(next(&data, cursor) == independent_oracle(&data, cursor));
     }
     for (size_t i = 0; i < count; ++i) {
         assign(&data, boundary[i], 0);
@@ -93,19 +106,20 @@ int main(void) {
     assert(next(&data, 0) == ACTORS);
     assert(next(&data, 65535) == ACTORS);
     uint32_t seed = UINT32_C(0x9e3779b9);
-    for (size_t k = 0; k < 18000; ++k) {
-        size_t slot = rnd(&seed) % ACTORS;
-        assign(&data, slot, (int)(rnd(&seed) & 1));
-        if (k % 11 == 0) {
-            size_t cursor = rnd(&seed) % ACTORS;
-            assert(next(&data, cursor) == expected(&data, cursor));
+    for (size_t step = 0; step < 18000; ++step) {
+        size_t slot = deterministic(&seed) % ACTORS;
+        assign(&data, slot, (int)(deterministic(&seed) & 1));
+        if (step % 11 == 0) {
+            size_t cursor = deterministic(&seed) % ACTORS;
+            assert(next(&data, cursor) == independent_oracle(&data, cursor));
         }
-        if (k % 113 == 0) invariant(&data);
+        if (step % 113 == 0) invariant(&data);
     }
     invariant(&data);
     memset(&data, 0, sizeof data);
     for (size_t i = 0; i < count; ++i) assign(&data, boundary[i], 1);
     assign(&control, 65535, 1);
+    /* Separate priority plane always wins over lower-index DATA. */
     assert(next(&control, 0) == 65535);
     assign(&control, 65535, 0);
     assert(next(&data, 0) == 0);
@@ -124,7 +138,7 @@ int main(void) {
     }
     assert(high_served == 1000);
     puts("SOURCEFREE_NATIVE_INDEX_PASS actors=65536 mixed=18000 "
-         "word_boundary=64 summary_boundary=4096 high_slot=65535 "
+         "block=64 region=4096 high_slot=65535 "
          "priority=pass round_robin=pass native_oreslang=false");
     return 0;
 }
