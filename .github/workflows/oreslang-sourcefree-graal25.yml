@@ -74,10 +74,54 @@ jobs:
           public final class ToolchainProbe {
               public static long add(long a, long b) { return Math.addExact(a, b); }
               public static void main(String[] args) {
-                  if (Runtime.version().feature() != 25 || add(7, 2) != 9L) {
+                  if (args.length == 1 && "--i64".equals(args[0])) {
+                      I64Oracle.main(args);
+                      return;
+                  }
+                  if (args.length != 0 || Runtime.version().feature() != 25 || add(7, 2) != 9L) {
                       throw new AssertionError("wrong JDK or arithmetic");
                   }
                   System.out.println("SOURCE_FREE_GRAAL25_JAVA_PASS");
+              }
+          }
+          JAVA
+          cat > "$work/src/main/java/I64Oracle.java" <<'JAVA'
+          import java.util.function.LongSupplier;
+          public final class I64Oracle {
+              private static String checked(LongSupplier f) {
+                  try { return Long.toString(f.getAsLong()); }
+                  catch (ArithmeticException overflow) { return "OVERFLOW"; }
+              }
+              private static String checkedDivide(long a, long b) {
+                  if (a == Long.MIN_VALUE && b == -1L) return "OVERFLOW";
+                  return checked(() -> a / b);
+              }
+              private static void output(String id, String value) {
+                  System.out.println(id + "\t" + value);
+              }
+              public static void main(String[] args) {
+                  if (args.length != 1 || !"--i64".equals(args[0]))
+                      throw new IllegalArgumentException("i64-only mode");
+                  long lo = Long.MIN_VALUE, hi = Long.MAX_VALUE;
+                  output("p01", checked(() -> Math.addExact(hi, 1L)));
+                  output("p02", checked(() -> Math.addExact(lo, -1L)));
+                  output("p03", checked(() -> Math.subtractExact(lo, 1L)));
+                  output("p04", checked(() -> Math.subtractExact(hi, -1L)));
+                  output("p05", checked(() -> Math.multiplyExact(hi, 2L)));
+                  output("p06", checked(() -> Math.multiplyExact(lo, -1L)));
+                  output("p07", checked(() -> Math.addExact(lo, hi)));
+                  output("p08", checked(() -> Math.subtractExact(lo, lo)));
+                  output("p09", checked(() -> Math.multiplyExact(-3037000499L, 3037000499L)));
+                  output("p10", checkedDivide(lo, -1L));
+                  output("p11", checkedDivide(lo, 1L));
+                  output("p12", Long.toString(hi + 1L));
+                  output("p13", Long.toString(hi * 2L));
+                  output("p14", Long.toString(-1L >> 1));
+                  output("p15", Long.toString(-1L >>> 1));
+                  String literal;
+                  try { literal = Long.toString(Long.parseLong("9223372036854775808")); }
+                  catch (NumberFormatException overflow) { literal = "INVALID"; }
+                  output("p16", literal);
               }
           }
           JAVA
@@ -98,6 +142,39 @@ jobs:
           grep -q 'tests="2"' "$work/target/surefire-reports/TEST-ToolchainProbeTest.xml"
           java -cp "$work/target/classes" ToolchainProbe | grep -Fx SOURCE_FREE_GRAAL25_JAVA_PASS
           echo "SOURCE_FREE_MAVEN_JUNIT_PASS tests=2"
+      - name: Independently compare complete JS BigInt and JDK25 i64 values
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/graal25-source-free"
+          node --input-type=module > "$work/js-i64.tsv" <<'JS'
+          const lo = -(1n<<63n), hi = (1n<<63n)-1n;
+          const checked = n => n<lo || n>hi ? "OVERFLOW" : n.toString();
+          const wrap = n => BigInt.asIntN(64,n).toString();
+          const tests = [
+            ["p01",checked(hi+1n)], ["p02",checked(lo-1n)],
+            ["p03",checked(lo-1n)], ["p04",checked(hi+1n)],
+            ["p05",checked(hi*2n)], ["p06",checked(lo*-1n)],
+            ["p07",checked(lo+hi)], ["p08",checked(lo-lo)],
+            ["p09",checked(-3037000499n*3037000499n)],
+            ["p10",checked(lo/-1n)], ["p11",checked(lo/1n)],
+            ["p12",wrap(hi+1n)], ["p13",wrap(hi*2n)],
+            ["p14",(-1n>>1n).toString()],
+            ["p15",(BigInt.asUintN(64,-1n)>>1n).toString()],
+            ["p16", "9223372036854775808" === hi.toString() ? "INVALID_FIXTURE" : "INVALID"],
+          ];
+          if (tests.length !== 16 || new Set(tests.map(x=>x[0])).size !== 16) throw new Error("invalid i64 suite");
+          for (const [id,value] of tests) console.log(id+"\t"+value);
+          JS
+          java -cp "$work/target/classes" ToolchainProbe --i64 > "$work/java-i64.tsv"
+          diff -u "$work/js-i64.tsv" "$work/java-i64.tsv"
+          cp "$work/js-i64.tsv" "$work/invalid-i64.tsv"
+          printf 'extra-unexpected-row\n' >> "$work/invalid-i64.tsv"
+          if diff -q "$work/java-i64.tsv" "$work/invalid-i64.tsv"; then
+            echo "::error::i64 comparator incorrectly accepted extra record"
+            exit 1
+          fi
+          echo "SOURCE_FREE_JS_JAVA_I64_VALUES_PASS count=16"
       - name: Compile and execute actual GraalVM Native Image
         shell: bash
         run: |
@@ -105,4 +182,9 @@ jobs:
           work="$RUNNER_TEMP/graal25-source-free"
           native-image --no-fallback -cp "$work/target/classes" -o "$work/probe-native" ToolchainProbe
           "$work/probe-native" | grep -Fx SOURCE_FREE_GRAAL25_JAVA_PASS
+          "$work/probe-native" --i64 > "$work/native-i64.tsv"
+          diff -u "$work/js-i64.tsv" "$work/native-i64.tsv"
+          diff -u "$work/java-i64.tsv" "$work/native-i64.tsv"
+          sha256sum "$work/js-i64.tsv" "$work/java-i64.tsv" "$work/native-i64.tsv"
+          echo "SOURCE_FREE_JS_JAVA_NATIVE_I64_VALUES_PASS count=16"
           echo "SOURCE_FREE_GRAAL25_NATIVE_IMAGE_PASS"
