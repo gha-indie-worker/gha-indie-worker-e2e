@@ -1,0 +1,31 @@
+name: Source-free actor hot-reload model canary
+on:
+  push:
+    branches:
+      - test/source-free-actor-reload-canary-20261020
+    paths:
+      - 'tests/source-free-actor-reload-canary.test.mjs'
+      - '.github/workflows/oreslang-source-free-actor-reload.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  model-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source-free test branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Check this job actually reached a runner
+        run: |
+          set -euo pipefail
+          test -n "${GITHUB_SHA}"
+          node --version
+          git rev-parse HEAD
+      - name: Run source-free linearizable publication model
+        run: node --test tests/source-free-actor-reload-canary.test.mjs
+      - name: Limit claim to source-free CI
+        run: |
+          echo "SOURCE_FREE_MODEL_ONLY: never claim JVM/GraalVM/LLVM execution"
