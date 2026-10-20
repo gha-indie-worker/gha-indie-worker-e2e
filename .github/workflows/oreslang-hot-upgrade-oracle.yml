@@ -51,3 +51,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/TransferFreezeOracle.java
       - name: Run pre-return transfer freeze and retirement races
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle TransferFreezeOracle
+      - name: Compile source-free proxy setup rollback oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/SetupProxyRollbackOracle.java
+      - name: Run proxy setup freeze retry and concurrent reconciliation
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle SetupProxyRollbackOracle
