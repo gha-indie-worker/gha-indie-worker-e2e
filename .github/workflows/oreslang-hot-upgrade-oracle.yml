@@ -63,3 +63,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/UnregisterFaultOracle.java
       - name: Run physical registry removal before-after failure oracle
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle UnregisterFaultOracle
+      - name: Compile source-free private memory finalization oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/MemorySliceCloseOracle.java
+      - name: Run private memory seal and cleanup retry oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle MemorySliceCloseOracle
