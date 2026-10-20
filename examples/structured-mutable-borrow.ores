@@ -1,0 +1,13 @@
+define class Player as
+  pub let int health = 100;
+  pub let int stamina = 80;
+end
+fnc damage(borrow mut Player player): void {
+  player.health = player.health - 10;
+  return;
+}
+pub fnc main(): int {
+  let Player player = new Player();
+  damage(rt borrow mut player);
+  return player.health - player.stamina + 32;
+}

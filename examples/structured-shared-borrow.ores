@@ -1,0 +1,11 @@
+define class Box as
+  pub let int a = 12;
+  pub let int b = 30;
+end
+fnc read(borrow Box box): int {
+  return box.a + box.b;
+}
+pub fnc main(): int {
+  let Box box = new Box();
+  return read(rt borrow box);
+}

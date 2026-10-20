@@ -1,0 +1,3 @@
+# Structured Oreslang guest admission (experimental)
+
+The bounded native class subset supports actual `class`, two i64 fields, borrowed getters, exclusive mutable borrow, and field mutation via the Wasm32 bridge. Set `ORESLANG_LLVM_COMPILER=/absolute/oreslang-llvmc` for the real tests. Without a compiler configured the tests explicitly skip and do not count as compiler parity. Positive guests return 42n using zero imports, fixed two-page memory, and a SHA-256 verified v1 manifest. A source fixture with overlapping mutable and shared borrows must fail before artifact publication. This does not extend the public ABI to structured values, implement Wasm actors, or prove GraalVM behavioral parity.

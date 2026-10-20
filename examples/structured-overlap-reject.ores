@@ -1,0 +1,11 @@
+define class Box as
+  pub let int a = 4;
+  pub let int b = 42;
+end
+fnc inspect(borrow mut Box one, borrow Box two): int {
+  return one.b;
+}
+pub fnc main(): int {
+  let Box box = new Box();
+  return inspect(rt borrow mut box, rt borrow box);
+}

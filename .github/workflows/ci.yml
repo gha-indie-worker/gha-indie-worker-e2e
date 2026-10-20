@@ -1,0 +1,17 @@
+name: Build and verify real core Wasm
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install wasm32 toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+      - run: npm test

@@ -1,0 +1,4 @@
+// Current LLVM integer subset: no capability headers until native admission is implemented.
+pub fnc main(): int {
+  return 40 + 2;
+}

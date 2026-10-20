@@ -1,0 +1,10 @@
+package oreslang:host@0.1.0;
+
+interface clock {
+  clock-ms: func() -> float64;
+}
+
+world oreslang-runtime {
+  import clock;
+  export abi-version: func() -> u32;
+}

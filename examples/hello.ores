@@ -1,0 +1,6 @@
+// FUTURE native Oreslang -> wasm compilation fixture, NOT compiled by this repository.
+// ores:targets=browser,edge-js,edge-wasi
+// ores:requires=clock
+pub fnc add_one(int value): int {
+  return value + 1;
+}
