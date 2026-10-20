@@ -52,3 +52,21 @@ jobs:
             -d build/actor-group-close-oracle \
             src/test-oracles/ActorGroupCloseRetryOracle.java
           java -cp build/actor-group-close-oracle ActorGroupCloseRetryOracle
+
+  nested-group-teardown-retry-oracle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '25'
+      - run: |
+          mkdir -p build/nested-group-teardown-oracle
+          javac --release 25 -Xlint:all -Werror \
+            -d build/nested-group-teardown-oracle \
+            src/test-oracles/NestedGroupTeardownRetryOracle.java
+          java -cp build/nested-group-teardown-oracle NestedGroupTeardownRetryOracle
