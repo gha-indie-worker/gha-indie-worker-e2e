@@ -9,11 +9,13 @@ class SchedulerOracle {
   assert.ok(!this.rows.has(slot));
   this.rows.set(slot,{queued:0,control:false,active:false,retired:false});
  }
- data(slot){
+ tryData(slot){
   const x=this.rows.get(slot);
-  if(!x||x.retired)return false;
-  x.queued++;return true;
+  if(!x)return 'INVALID_REF';
+  if(x.retired)return 'TERMINATED';
+  x.queued++;return 'ACCEPTED';
  }
+ data(slot){return this.tryData(slot)==='ACCEPTED';}
  control(slot){
   const x=this.rows.get(slot);
   if(!x||x.retired||x.control)return false;
@@ -160,4 +162,24 @@ test('stopped high-slot lane drains previously admitted CONTROL before DATA',()=
  assert.equal(s.next(),null,'only one owner per actor');
  s.finish(65535);
  assert.equal(s.next(),null,'both accepted envelopes drained exactly once');
+});
+
+test('typed post-stop admission distinguishes TERMINATED from INVALID_REF',()=> {
+ const s=new SchedulerOracle(65536);
+ assert.equal(s.tryData(65535),'INVALID_REF');
+ s.spawn(65535);
+ assert.equal(s.tryData(65535),'ACCEPTED');
+ assert.equal(s.control(65535),true);
+ s.stop(65535);
+ const before=s.rows.get(65535).queued;
+ assert.equal(s.tryData(65535),'TERMINATED');
+ assert.equal(s.tryData(17),'INVALID_REF');
+ assert.equal(s.rows.get(65535).queued,before,'rejected sends cannot mutate pending mail');
+ assert.deepEqual(s.next(),{slot:65535,kind:'CONTROL'});
+ assert.equal(s.next(),null);
+ s.finish(65535);
+ assert.deepEqual(s.next(),{slot:65535,kind:'DATA'});
+ assert.equal(s.next(),null);
+ s.finish(65535);
+ assert.equal(s.next(),null);
 });
