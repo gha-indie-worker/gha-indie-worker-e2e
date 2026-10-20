@@ -1,0 +1,19 @@
+name: Source-free bounded actor-hop oracle (synthetic only)
+on:
+  push:
+    branches: [ci/source-free-actor-hop-oracle-20261020]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  synthetic-actor-history:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: node --test tests/source-free-actor-hop-oracle.test.mjs
