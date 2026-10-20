@@ -1,0 +1,1 @@
+fnc consume(Channel<int> incoming) -> void as do select { case readch incoming: val value { return; } } end
