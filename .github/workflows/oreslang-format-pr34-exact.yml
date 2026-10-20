@@ -12,9 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: 2a6a8aba9c27907fb6a16f4f9f5e578140d18276
           persist-credentials: false
       - name: Verify exact source tree
-        run: test "$(git rev-parse HEAD^{tree})" = "71ed6ca7b188a35caf700eb21283e9e76d469d60"
+        run: |
+          test "$(git rev-parse HEAD)" = "2a6a8aba9c27907fb6a16f4f9f5e578140d18276"
+          test "$(git rev-parse HEAD^{tree})" = "71ed6ca7b188a35caf700eb21283e9e76d469d60"
       - name: Install Rust 1.85
         run: rustup toolchain install 1.85.0 --profile minimal --component rustfmt,clippy
       - name: Format
