@@ -108,6 +108,24 @@
       "expected": "accept"
     },
     {
+      "id": "interface-colon",
+      "domain": "interface_signature",
+      "body": "signature",
+      "separator": ":",
+      "return_type": "int",
+      "expected": "accept",
+      "canonical_separator": "=>"
+    },
+    {
+      "id": "trait-colon",
+      "domain": "trait_signature",
+      "body": "signature",
+      "separator": ":",
+      "return_type": "bool",
+      "expected": "accept",
+      "canonical_separator": "=>"
+    },
+    {
       "id": "trait-fat-arrow",
       "domain": "trait_signature",
       "body": "signature",
