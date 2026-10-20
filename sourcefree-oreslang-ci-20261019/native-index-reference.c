@@ -86,6 +86,29 @@ static uint32_t deterministic(uint32_t* seed) {
     x ^= x << 5;
     return *seed = x;
 }
+/* Synthetic at-most-once accounting across the same sparse boundary
+ * slots. This is a separate reference, not the Oreslang runtime implementation. */
+static int reference_deliver_once(uint_fast64_t* observed, size_t slot) {
+    const size_t names[] = {0, 63, 64, 4095, 4096, 65535};
+    size_t index = 0;
+    for (; index < sizeof names / sizeof names[0]; ++index)
+        if (names[index] == slot) break;
+    if (index == sizeof names / sizeof names[0]) return 0;
+    uint_fast64_t bit = UINT64_C(1) << index;
+    if (*observed & bit) return 0;
+    *observed |= bit;
+    return 1;
+}
+static void delivery_accounting_contract(void) {
+    uint_fast64_t mask = 0;
+    const size_t slots[] = {0, 63, 64, 4095, 4096, 65535};
+    for (size_t i = 0; i < sizeof slots / sizeof slots[0]; ++i)
+        assert(reference_deliver_once(&mask, slots[i]));
+    assert(mask == UINT64_C(0x3f));
+    assert(!reference_deliver_once(&mask, 65535)); /* duplicate */
+    assert(!reference_deliver_once(&mask, 42));    /* unexpected slot */
+    assert(mask == UINT64_C(0x3f)); /* rejection does not corrupt account */
+}
 int main(void) {
     static Index data, control;
     const size_t boundary[] =
@@ -137,6 +160,7 @@ int main(void) {
         cursor = (chosen + 1) % ACTORS;
     }
     assert(high_served == 1000);
+    delivery_accounting_contract();
     puts("SOURCEFREE_NATIVE_INDEX_PASS actors=65536 mixed=18000 "
          "block=64 region=4096 high_slot=65535 "
          "priority=pass round_robin=pass native_oreslang=false");
