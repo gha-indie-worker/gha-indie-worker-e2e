@@ -61,3 +61,27 @@ test('null jobs, absent steps and forged step metadata never certify execution',
  assert.equal(executed({...run,jobs:[{...run.jobs[0],steps:[]}]},A),'OBSERVED_ZERO_STEPS');
  assert.equal(executed({...run,jobs:[{...run.jobs[0],runnerId:null}]},A),'JOB_IDENTITY_UNKNOWN');
 });
+
+test('job and step evidence must agree before a synthetic run can be credited',()=>{
+ const step={name:'Run synthetic policy tests',status:'completed',conclusion:'success'};
+ const job={id:200,runnerId:300,runId:100,attempt:1,head:A,conclusion:'success',
+   steps:[step,{name:'Post checkout',status:'completed',conclusion:'success'}]};
+ const run={id:100,attempt:1,head:A,status:'completed',conclusion:'success',jobs:[job]};
+ assert.equal(executed(run,A),'SYNTHETIC_TEST_STEPS_EXECUTED');
+ for(const contradiction of [
+   {name:'Run a failing step',status:'completed',conclusion:'failure'},
+   {name:'Cancel',status:'completed',conclusion:'cancelled'},
+   {name:'Unfinished job step',status:'in_progress',conclusion:null},
+   {name:'Forged success',status:null,conclusion:'success'},
+   {name:'Malformed',status:'completed',conclusion:'success',unexpected:true,other:1},
+   null,
+ ]){
+   const changed=contradiction?.name==='Malformed'?{...contradiction,name:undefined}:contradiction;
+   const result=executed({...run,jobs:[{...job,steps:[step,changed]}]},A);
+   assert.equal(result,'JOB_STEP_CONFLICT',JSON.stringify(contradiction));
+ }
+ assert.equal(executed({...run,jobs:[{...job,steps:[step,{name:'Optional',status:'completed',conclusion:'skipped'}]}]},A),
+   'SYNTHETIC_TEST_STEPS_EXECUTED');
+ assert.equal(executed({...run,jobs:[{...job,steps:[{name:'Run synthetic policy tests',status:'completed',conclusion:'skipped'}]}]},A),
+   'NO_TEST_STEPS');
+});
