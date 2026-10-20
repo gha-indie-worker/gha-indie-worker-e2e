@@ -17,8 +17,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD:tmp/common103/fixtures/callable-syntax-v1.json)" = "9311565439817243f976bda66abe83a965f05ac4"
-          test "$(git rev-parse HEAD:tmp/common103/tests/test_callable_syntax_v1.py)" = "c1805ea03d5f203b485c16863b2f3f43fad9c234"
+          test "$(git rev-parse HEAD:tmp/common103/fixtures/callable-syntax-v1.json)" = "4e046b034c9e0f37dee37ea3b06ce3e0004be318"
+          test "$(git rev-parse HEAD:tmp/common103/tests/test_callable_syntax_v1.py)" = "4561de08d282a52bca8519db2206fe5a3819dda9"
           echo "EXACT_BLOBS_PASS"
       - name: Execute callable syntax oracle
         run: python3 -m unittest discover -s tmp/common103/tests -p 'test_callable_syntax_v1.py' -v
