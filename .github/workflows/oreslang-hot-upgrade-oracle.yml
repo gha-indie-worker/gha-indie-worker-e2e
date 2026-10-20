@@ -31,3 +31,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/HotUpgradeInvariantOracle.java
       - name: Run lifecycle oracle
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle HotUpgradeInvariantOracle
+      - name: Compile independent admission lease oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/AdmissionLeaseOracle.java
+      - name: Run admission lease race oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle AdmissionLeaseOracle
