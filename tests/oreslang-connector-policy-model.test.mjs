@@ -173,3 +173,68 @@ test('feature-branch policy is not protected-main authorization',()=>{
   const protectedMainPolicy='# no approvals';
   assert.notEqual(localPolicy,protectedMainPolicy);
 });
+
+
+test('executing control plane must equal protected-main bytes and trusted paths',()=>{
+  const protectedMain=Object.freeze({
+    guard:'guard-v1',
+    launcher:'launcher-v1',
+    legacyPublisher:'legacy-v1',
+    v3Publisher:'v3-v1'
+  });
+  const trustedRoot='/trusted/main';
+  function bindControlPlane({local,modulePaths}){
+    assert.deepEqual(local,protectedMain,'local control-plane bytes diverge');
+    assert.equal(modulePaths.v3,trustedRoot+'/scripts/publish-private-ci-source-v3.py');
+    assert.equal(modulePaths.legacy,trustedRoot+'/scripts/publish-private-ci-source.py');
+    return true;
+  }
+  assert.equal(bindControlPlane({
+    local:{...protectedMain},
+    modulePaths:{
+      v3:trustedRoot+'/scripts/publish-private-ci-source-v3.py',
+      legacy:trustedRoot+'/scripts/publish-private-ci-source.py'
+    }
+  }),true);
+  for(const mutate of [
+    x=>{x.local.v3Publisher='modified';},
+    x=>{x.local.legacyPublisher='modified';},
+    x=>{x.local.guard='modified';},
+    x=>{x.local.launcher='modified';},
+    x=>{x.modulePaths.v3='/tmp/copied-v3.py';},
+    x=>{x.modulePaths.legacy='/tmp/copied-legacy.py';}
+  ]){
+    const candidate={
+      local:{...protectedMain},
+      modulePaths:{
+        v3:trustedRoot+'/scripts/publish-private-ci-source-v3.py',
+        legacy:trustedRoot+'/scripts/publish-private-ci-source.py'
+      }
+    };
+    mutate(candidate);
+    assert.throws(()=>bindControlPlane(candidate));
+  }
+});
+
+test('source PR must still be the exact open head immediately before authorization refs',()=>{
+  function twoPhaseAuthorize(initialPr,finalPr){
+    authorize({
+      repo:goodRepo(),main:goodMain(),workflow:goodWorkflow(),pr:initialPr
+    });
+    return authorize({
+      repo:goodRepo(),main:goodMain(),workflow:goodWorkflow(),pr:finalPr
+    });
+  }
+  assert.equal(twoPhaseAuthorize(goodPr(),goodPr()).mode,'connector');
+  for(const mutate of [
+    p=>{p.head.sha='1'.repeat(40);},
+    p=>{p.state='closed';},
+    p=>{p.head.repo='other/repo';},
+    p=>{p.base.ref='other/base';},
+    p=>{p.base.sha='2'.repeat(40);}
+  ]){
+    const finalPr=goodPr();
+    mutate(finalPr);
+    assert.throws(()=>twoPhaseAuthorize(goodPr(),finalPr));
+  }
+});
