@@ -67,3 +67,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/MemorySliceCloseOracle.java
       - name: Run private memory seal and cleanup retry oracle
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle MemorySliceCloseOracle
+      - name: Compile source-free TaskScope retirement retry oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/TaskRetirementRetryOracle.java
+      - name: Run TaskScope physical retirement retry races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle TaskRetirementRetryOracle
