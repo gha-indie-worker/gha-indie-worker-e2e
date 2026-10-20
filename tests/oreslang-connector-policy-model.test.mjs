@@ -238,3 +238,28 @@ test('source PR must still be the exact open head immediately before authorizati
     assert.throws(()=>twoPhaseAuthorize(goodPr(),finalPr));
   }
 });
+
+
+test('policy change after payload ref blocks detached authorization ref',()=>{
+  const carrierCommit='8'.repeat(40);
+  let protectedPolicy='approved-v1';
+  const expectedPolicy=protectedPolicy;
+  const refs=[];
+
+  const attest=()=>{
+    assert.equal(protectedPolicy,expectedPolicy,'protected source policy changed');
+  };
+
+  attest();
+  attest();
+  refs.push({ref:'refs/heads/ci/oreslang-'+SOURCE_TREE,sha:carrierCommit});
+
+  protectedPolicy='revoked-v2';
+  assert.throws(()=>attest(),/protected source policy changed/);
+
+  assert.equal(
+    refs.some(x=>x.ref==='refs/heads/ci/authorized-'+carrierCommit),
+    false,
+    'authorization ref must not be minted from stale pre-payload evidence'
+  );
+});
