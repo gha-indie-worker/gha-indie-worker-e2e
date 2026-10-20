@@ -3,25 +3,57 @@ on:
   push:
     branches:
       - ci/oreslang-sourcefree-admission-matrix-20261019
+  pull_request:
+    paths:
+      - 'sourcefree-oreslang-ci-20261019/**'
+      - '.github/workflows/oreslang-sourcefree-admission-matrix-20261019.yml'
+      - 'package.json'
 permissions:
   contents: read
 concurrency:
-  group: sourcefree-oreslang-admission-model-${{ github.ref }}
+  group: sourcefree-oreslang-admission-model-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   sourcefree-admission:
-    if: ${{ github.repository == 'gha-indie-worker/gha-indie-worker-e2e' && github.ref == 'refs/heads/ci/oreslang-sourcefree-admission-matrix-20261019' }}
-    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'gha-indie-worker/gha-indie-worker-e2e' && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check out the exact reviewed public head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
           persist-credentials: false
-      - name: Run synthetic policy tests
+      - name: Prove the checkout and synthetic source-free scope
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test ! -e sourcefree-oreslang-ci-20261019/private-source
+          test ! -e private-oreslang-source
+          test ! -e ci/oreslang-receipt.json
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path('sourcefree-oreslang-ci-20261019')
+          assert root.is_dir() and not root.is_symlink()
+          found = 0
+          for f in root.rglob('*'):
+              assert not f.is_symlink(), f
+              if f.is_file():
+                  assert f.suffix == '.mjs', f
+                  assert f.stat().st_size <= 65536, f
+                  found += 1
+          assert 1 <= found <= 40, found
+          PY
+      - name: Run synthetic policy tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN
           node --version
           node --test sourcefree-oreslang-ci-20261019/*.test.mjs
-      - name: Confirm source-free scope
-        run: |
-          test ! -e sourcefree-oreslang-ci-20261019/private-source
-          echo 'SYNTHETIC_ONLY=true; SOURCE_EXPORT_AUTHORIZED=false; COMPILER_TESTED=false'
+      - name: Mark evidence scope
+        run: echo 'SYNTHETIC_ONLY=true; SOURCE_EXPORT_AUTHORIZED=false; COMPILER_TESTED=false'
