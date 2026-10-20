@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oreslang.dev/contracts/reachability-report.schema.json",
+  "title": "Oreslang Reachability Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version","backend","profile","target","artifact_kind","roots","retained","removed","dynamic_regions"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "backend": {"type":"string","minLength":1,"maxLength":64},
+    "profile": {"type":"string","minLength":1,"maxLength":64},
+    "target": {"type":"string","minLength":1,"maxLength":128},
+    "artifact_kind": {"enum":["executable","library","firmware","wasm","mobile-bundle","fpga","asic","test","other"]},
+    "compiler_revision": {"type":"string","pattern":"^[0-9a-f]{40}$"},
+    "roots": {
+      "type":"array","maxItems":100000,
+      "items":{"$ref":"#/$defs/node_reason"}
+    },
+    "retained": {
+      "type":"array","maxItems":1000000,
+      "items":{"$ref":"#/$defs/node_reason"}
+    },
+    "removed": {
+      "type":"object","additionalProperties":false,
+      "required":["total"],
+      "properties":{
+        "total":{"type":"integer","minimum":0},
+        "by_kind":{"type":"object","additionalProperties":{"type":"integer","minimum":0}}
+      }
+    },
+    "dynamic_regions": {
+      "type":"array","maxItems":10000,
+      "items":{
+        "type":"object","additionalProperties":false,
+        "required":["id","policy","reason"],
+        "properties":{
+          "id":{"type":"string","minLength":1,"maxLength":512},
+          "policy":{"enum":["explicit","conservative","rejected"]},
+          "reason":{"type":"string","minLength":1,"maxLength":2048}
+        }
+      }
+    },
+    "artifact_bytes":{"type":"integer","minimum":0},
+    "notes":{"type":"array","maxItems":1000,"items":{"type":"string","maxLength":4096}}
+  },
+  "$defs":{
+    "node_reason":{
+      "type":"object","additionalProperties":false,
+      "required":["id","kind","reason"],
+      "properties":{
+        "id":{"type":"string","minLength":1,"maxLength":512},
+        "kind":{"enum":["function","type","module","runtime","capability","metadata","data","asset","hardware","other"]},
+        "reason":{"type":"string","minLength":1,"maxLength":2048},
+        "parent":{"type":"string","minLength":1,"maxLength":512}
+      }
+    }
+  }
+}
