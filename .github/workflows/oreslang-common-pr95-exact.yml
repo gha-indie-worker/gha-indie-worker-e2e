@@ -1,0 +1,24 @@
+name: Oreslang common PR95 exact-blob validation
+on:
+  push:
+    branches:
+      - tmp/oreslang-common-pr95-validator-20261019
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify source blob identities
+        run: |
+          test "$(git hash-object scripts/reachability_report_gate.py)" = "53319ded06ecf9198aef6d53d0249476d1d8fb5f"
+          test "$(git hash-object tests/test_reachability_report_gate.py)" = "89016e1e837b4de3d6342f2b4a9990d48e31af0e"
+          test "$(git hash-object contracts/reachability-report.schema.json)" = "b2fc2d422eb72e21461cb5e781d772e97e1d142f"
+      - name: Run reachability gate tests
+        run: python3 tests/test_reachability_report_gate.py -v
+      - name: Compile validator
+        run: python3 -m py_compile scripts/reachability_report_gate.py
