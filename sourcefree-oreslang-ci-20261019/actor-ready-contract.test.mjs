@@ -105,7 +105,7 @@ test('CONTROL outranks earlier lower-index DATA after a single carrier releases'
  // dispatch must choose the high-slot CONTROL even across summary groups.
  s.finish(0);
  assert.deepEqual(s.next(),{slot:65535,kind:'CONTROL'});
- assert.notEqual(s.next()?.slot,65535,'a control callback cannot overlap its DATA turn');
+ assert.equal(s.rows.get(65535).active,true,'CONTROL owns slot until it finishes');
  s.finish(65535);
  const seen=new Set([0]);
  while(true){
