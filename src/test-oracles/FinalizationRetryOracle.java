@@ -128,6 +128,21 @@ public final class FinalizationRetryOracle {
         check(model.cleanupSuccesses() == 1, "completed finalization remains exactly once");
     }
 
+    private static void selfJoinGuard() {
+        final Thread owner = Thread.currentThread();
+        final boolean physicallyFinalized = false;
+        boolean rejected = false;
+        try {
+            if (!physicallyFinalized && owner == Thread.currentThread()) {
+                throw new IllegalStateException(
+                        "terminal callback cannot join its own physical finalization");
+            }
+        } catch (IllegalStateException expected) {
+            rejected = true;
+        }
+        check(rejected, "finalization owner must reject a self-join");
+    }
+
     private static void concurrentRound(ExecutorService pool)
             throws InterruptedException, ExecutionException {
         Model model = new Model();
@@ -149,6 +164,7 @@ public final class FinalizationRetryOracle {
 
     public static void main(String[] args) throws Exception {
         negativeControl();
+        selfJoinGuard();
         for (int i = 0; i < 10_000; i++) sequentialRound();
 
         ExecutorService pool = Executors.newFixedThreadPool(4);
