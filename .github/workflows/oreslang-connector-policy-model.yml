@@ -1,0 +1,22 @@
+name: Oreslang connector policy model
+
+on:
+  push:
+    branches:
+      - "ci/oreslang-connector-policy-model-20261019"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Run connector policy model
+        run: node --test tests/oreslang-connector-policy-model.test.mjs
