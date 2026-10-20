@@ -1,0 +1,27 @@
+name: Oreslang source-free private-CI admission model
+on:
+  push:
+    branches:
+      - ci/oreslang-sourcefree-admission-matrix-20261019
+permissions:
+  contents: read
+concurrency:
+  group: sourcefree-oreslang-admission-model-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  sourcefree-admission:
+    if: ${{ github.repository == 'gha-indie-worker/gha-indie-worker-e2e' && github.ref == 'refs/heads/ci/oreslang-sourcefree-admission-matrix-20261019' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Run synthetic policy tests
+        run: |
+          node --version
+          node --test sourcefree-oreslang-ci-20261019/admission-model.test.mjs
+      - name: Confirm source-free scope
+        run: |
+          test ! -e sourcefree-oreslang-ci-20261019/private-source
+          echo 'SYNTHETIC_ONLY=true; SOURCE_EXPORT_AUTHORIZED=false; COMPILER_TESTED=false'
