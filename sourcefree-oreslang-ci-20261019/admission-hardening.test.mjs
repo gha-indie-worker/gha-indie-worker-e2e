@@ -56,7 +56,7 @@ test('null jobs, absent steps and forged step metadata never certify execution',
  assert.equal(executed(run,A),'SYNTHETIC_TEST_STEPS_EXECUTED');
  assert.equal(executed({...run,jobs:[null]},A),'JOB_IDENTITY_UNKNOWN');
  assert.equal(executed({...run,jobs:[]},A),'RUN_NOT_SUCCESS');
- assert.equal(executed({...run,jobs:[{...run.jobs[0],steps:[null]}]},A),'NO_TEST_STEPS');
+ assert.equal(executed({...run,jobs:[{...run.jobs[0],steps:[null]}]},A),'JOB_STEP_CONFLICT');
  assert.equal(executed({...run,jobs:[{...run.jobs[0],steps:null}]},A),'STEPS_UNOBSERVED');
  assert.equal(executed({...run,jobs:[{...run.jobs[0],steps:[]}]},A),'OBSERVED_ZERO_STEPS');
  assert.equal(executed({...run,jobs:[{...run.jobs[0],runnerId:null}]},A),'JOB_IDENTITY_UNKNOWN');
