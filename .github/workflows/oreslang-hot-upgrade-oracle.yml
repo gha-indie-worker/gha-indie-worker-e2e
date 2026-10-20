@@ -43,3 +43,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/GhostChildLifetimeOracle.java
       - name: Run ghost child lifecycle fault oracle
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle GhostChildLifetimeOracle
+      - name: Compile source-free pre-return transfer freeze oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/TransferFreezeOracle.java
+      - name: Run pre-return transfer freeze and retirement races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle TransferFreezeOracle
