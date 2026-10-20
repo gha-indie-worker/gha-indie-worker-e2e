@@ -55,3 +55,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/SetupProxyRollbackOracle.java
       - name: Run proxy setup freeze retry and concurrent reconciliation
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle SetupProxyRollbackOracle
+      - name: Compile independent retired physical stop retry oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/RetiredStopRetryOracle.java
+      - name: Run retired stop recovery and concurrency oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle RetiredStopRetryOracle
