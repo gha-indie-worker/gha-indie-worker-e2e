@@ -179,6 +179,7 @@ public final class FinalizationRetryOracle {
                         + " sequential_rounds=10000"
                         + " race_rounds=5000 workers=4"
                         + " negative_control=early_finalized_stuck_detected"
+                        + " self_join_guard=verified"
                         + " private_source_bytes=0");
     }
 }
