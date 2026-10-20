@@ -1,0 +1,22 @@
+name: Oreslang Gate-C source-free oracle
+
+on:
+  push:
+    branches:
+      - "ci/oreslang-gate-c-source-free-20261019"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate-c:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Run Gate-C oracle
+        run: node --test tests/oreslang-gate-c-source-free.test.mjs
