@@ -143,6 +143,53 @@ final class SelectLoopDescriptorHoistTest {
         assertEquals("ABAB", run(program));
     }
 
+    @Test
+    void suspendableForOfRetainsLoopPlanAcrossCooperateResumption() throws Exception {
+        String program = """
+                pub async fnc main(): void {
+                  val Channel<int> inbox = Channel.new<int>(8);
+                  for val number of [10, 20, 30] {
+                    rt cooperate;
+                    writech inbox, number;
+                    select first {
+                      when readch inbox: val msg {
+                        rt cooperate;
+                        stdio.stdout.write(msg);
+                        stdio.stdout.write(":");
+                      }
+                    }
+                  }
+                  return;
+                }
+                """;
+        assertDoesNotThrow(() -> OresCompiler.parseAndTypeCheck(program));
+        assertEquals("10:20:30:", run(program));
+    }
+
+    @Test
+    void suspendableLoopDoesNotResetPlanAfterEachCooperate() throws Exception {
+        String program = """
+                pub async fnc main(): void {
+                  val Channel<int> inbox = Channel.new<int>(8);
+                  let int remaining = 3;
+                  loop {
+                    rt cooperate;
+                    writech inbox, remaining;
+                    try select first {
+                      when readch inbox: val msg {
+                        stdio.stdout.write(msg);
+                      }
+                    }
+                    remaining = remaining - 1;
+                    if remaining == 0 then break; fi
+                  }
+                  return;
+                }
+                """;
+        assertDoesNotThrow(() -> OresCompiler.parseAndTypeCheck(program));
+        assertEquals("321", run(program));
+    }
+
     private static String run(String source) throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         Source program = Source.newBuilder(OresLanguage.ID, source, "select-hoist.ores")
