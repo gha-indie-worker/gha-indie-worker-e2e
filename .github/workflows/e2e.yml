@@ -18,7 +18,7 @@ jobs:
       - run: npm test
 
   select-plan-exact:
-    if: github.ref == 'refs/heads/test/oreslang-select-plan-1747-exact-20261020'
+    if: github.ref == 'refs/heads/test/oreslang-select-hoist-exact-20261020'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -36,7 +36,7 @@ jobs:
             test "$(git hash-object "$file")" = "$expected"
             n=$((n+1))
           done < source-sha1.txt
-          test "$n" -eq 128
+          test "$n" -eq 130
           echo "verified $n source blob SHAs"
       - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
@@ -45,4 +45,4 @@ jobs:
       - name: Exact-head select-plan regression suite
         run: |
           mvn -B -ntp -f ci/oreslang-select-1747/pom.xml \
-            -Dtest=DynamicSelectPlanGenerationTest,ChannelRuntimeTest,FutureChannelSelectTest,ChannelSelectArmBudgetTest,ChannelPendingAdmissionTest,ChannelFutureSelectQuotaTest,ChannelSelectFairAdmissionRaceTest,FutureSelectAttachmentPublicationBarrierTest,FutureSelectLateDetachBarrierTest,ChannelMappedSelectionCancellationTest,ActorSelectFairnessIsolationTest,SelectPeerFutureAliasReadinessTest,FutureSelectAdditionalRegressionTest,ChannelMappedCancellationStressTest test
+            -Dtest=SelectLoopDescriptorHoistTest,StaticSelectTicketTest,DynamicSelectPlanGenerationTest,ChannelRuntimeTest,FutureChannelSelectTest,ChannelSelectArmBudgetTest,ChannelPendingAdmissionTest,ChannelFutureSelectQuotaTest,ChannelSelectFairAdmissionRaceTest,FutureSelectAttachmentPublicationBarrierTest,FutureSelectLateDetachBarrierTest,ChannelMappedSelectionCancellationTest,ActorSelectFairnessIsolationTest,SelectPeerFutureAliasReadinessTest,FutureSelectAdditionalRegressionTest,ChannelMappedCancellationStressTest test

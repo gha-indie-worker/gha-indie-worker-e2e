@@ -1,6 +1,4 @@
-# Exact select-plan runtime test source manifest
-# repo ores-truffle-oreslang/oreslang-source.java
-# ref aab7b26c41b1a6d7bcf5f2850e328863b0352e44
+# Exact select loop hoisting verification: ores-truffle-oreslang/oreslang-source.java@8d902fbaf3da72436d1e65ded3386468b5e76dc6
 2fbedd1086357c7c6385ba439c42f4315f050974 pom.xml
 d7d79b3af7aae08a5277fe63ca6b6047c0da9aa6 scripts/build-native-thread.sh
 a824833042142f88ceabfef8eb0d86ed62d8dcd8 src/main/c/oresmailbox.c
@@ -27,7 +25,7 @@ ee355dd00b19988be25415c37c4bc3d407e65081 src/main/java/dev/oreslang/compiler/Bui
 40c4cdb69929867da99252a24157b097715588cb src/main/java/dev/oreslang/interop/MixedSourceUnit.java
 bff9daee369346e40aa107c3d3cac2ec21493eed src/main/java/dev/oreslang/launcher/OresMain.java
 d8840cb153ff671a28a28ab7dd62b93ad8ab232f src/main/java/dev/oreslang/nodes/HostAwaitProjection.java
-1e6a9cca650d0396fb1724d458b35c481e0ed3c3 src/main/java/dev/oreslang/nodes/OresEvalRootNode.java
+da224996180459ba63838b68b8059a4d8fdb83a9 src/main/java/dev/oreslang/nodes/OresEvalRootNode.java
 62ac55ad410d3e07d9494b73b3f658d43de70351 src/main/java/dev/oreslang/nodes/OresInteropRootNode.java
 4dc6ff0971176c6ed3ce7b2faca9b1f5e6a42c38 src/main/java/dev/oreslang/parser/Lexer.java
 6d57e79a3b7b857d8814f9d2d48a92d7da77729a src/main/java/dev/oreslang/parser/Parser.java
@@ -49,7 +47,7 @@ bd7d5764c02dccb05dc5060e82cdf5aece19772b src/main/java/dev/oreslang/runtime/Acto
 63826cd4ccdbc316240d448cae9d83c1c7647d29 src/main/java/dev/oreslang/runtime/Awaitable.java
 f870bf475f3656c16306a6323621ed629655218a src/main/java/dev/oreslang/runtime/BoundedSourceReader.java
 4e7408248ddbc90a001acdaa0fd45aba555bc33c src/main/java/dev/oreslang/runtime/CapabilityChecker.java
-3ae9c3c976ef78a18f6e5498e5303f08c5215279 src/main/java/dev/oreslang/runtime/ChannelRuntime.java
+4352f6442b57131d3f2e26f862f1823e5d53e8c9 src/main/java/dev/oreslang/runtime/ChannelRuntime.java
 854fad088bdb27d398a14af02ad621328e869db3 src/main/java/dev/oreslang/runtime/CooperativeActorMailman.java
 101d9abbfada99070cf47a0dc57947c498eea85e src/main/java/dev/oreslang/runtime/CoreDebug.java
 91c80a1a0adbfc0212d0900da944e4af4cc5b8fa src/main/java/dev/oreslang/runtime/CoreLog.java
@@ -129,3 +127,5 @@ d2cd9b8e0cd3e3bb3ee6a5f9cebf9ab3312c44f4 stdlib/core.ores
 21169e5c262cd79997637c97d448e05a835e2e44 stdlib/http_wire.ores
 677754a41983167bb4f8ba5ffa8551bb87aaf9f7 stdlib/testing.ores
 f4ff35b10683880e42e3151b34fc140d52704dba stdlib/trace.ores
+a2a1be7666093186ca09771c003a306112750c92 src/test/java/dev/oreslang/SelectLoopDescriptorHoistTest.java
+b0d5da57a25beaee1b955150e0c6237aa9785749 src/test/java/dev/oreslang/runtime/StaticSelectTicketTest.java
