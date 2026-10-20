@@ -1,0 +1,59 @@
+name: Oreslang LLVM 713 exact frontend rejection
+on:
+  push:
+    branches:
+      - 'ci/oreslang-llvm713-frontend-20261020'
+permissions:
+  contents: read
+jobs:
+  llvm713-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Verify exact LLVM frontend blobs
+        working-directory: tmp/llvm713
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:tmp/llvm713/src/main/cpp/oreslang/frontend/Parser.cpp)" = "084d0c87356ee5b45ce29647fa8b402ed41eb155"
+          test "$(git rev-parse HEAD:tmp/llvm713/src/main/cpp/oreslang/frontend/Parser.hpp)" = "75254dc4343e212bd3b31b6de4785d93d6a56e91"
+          test "$(git rev-parse HEAD:tmp/llvm713/src/main/cpp/oreslang/frontend/CallableSelector.hpp)" = "39b2bbb6aca56adc019165a41a26334e23916cfd"
+          test "$(git rev-parse HEAD:tmp/llvm713/src/main/cpp/oreslang/types/OwnershipChecker.cpp)" = "e4881b2f2a21eb69a548f1e0252a736959c457d3"
+          test "$(git rev-parse HEAD:tmp/llvm713/src/main/cpp/oreslang/types/OwnershipChecker.hpp)" = "417fa18c9ff5448aebdda210fdbdd49c6fec222b"
+          test "$(git rev-parse HEAD:tmp/llvm713/src/main/cpp/oreslang/types/OwnershipCfg.hpp)" = "551505552aab4a8f1fb419d2c39c3b5d6948fe41"
+          test "$(git rev-parse HEAD:tmp/llvm713/src/main/cpp/oreslang/types/FunctionEffects.hpp)" = "fc7c86965ff8278b405335a47526f79c03f3c4a4"
+          test "$(git rev-parse HEAD:tmp/llvm713/tests/fixtures/end-delimited-fnc-reject.ores)" = "22d0ced02825328d67f5c2d8410c9aaa3d58428f"
+          test "$(git rev-parse HEAD:tmp/llvm713/tests/fixtures/end-delimited-fnc-as-reject.ores)" = "293cd8652342e64b77ad2f3d83dd0b9ca64c788d"
+          test "$(git rev-parse HEAD:tmp/llvm713/tests/fixtures/end-delimited-fnc-do-reject.ores)" = "a28f67ef89f8ae2ef30e2dc9d17a670d2a06c42b"
+          test "$(git rev-parse HEAD:tmp/llvm713/tests/fixtures/end-delimited-fnc-higher-order-reject.ores)" = "550f6fd9ce73996225ba4feee357761e795d03de"
+          test "$(git rev-parse HEAD:tmp/llvm713/tests/fixtures/end-delimited-fnc-comment-boundary-reject.ores)" = "8d2fe8f08acd0ede75f18ff208fa9d8e27274f92"
+          test "$(git rev-parse HEAD:tmp/llvm713/tests/fixtures/end-delimited-roundtrip-reject.ores)" = "c91a244cb99c1aaa74b3abadf9b99d8e1f3aea86"
+          test "$(git rev-parse HEAD:tmp/llvm713/tests/fixtures/end-delimited-routine-as-reject.ores)" = "24c469886248e9e5c09d668532e838dc51ed78a4"
+          test "$(git rev-parse HEAD:tmp/llvm713/tests/fixtures/end-delimited-fnc-as-do-select-reject.ores)" = "b1c9c28e71d14c0c74353ddd3035af49f361a69b"
+          test "$(git rev-parse HEAD:tmp/llvm713/tests/fixtures/tuple-return-type-reject.ores)" = "6f7ad582f78c7bc3c6a67b0457c24d3a767a8001"
+          echo "LLVM713_EXACT_BLOBS_PASS"
+      - name: Compile exact native frontend
+        working-directory: tmp/llvm713
+        run: >-
+          g++ -std=c++17 -O0 -Wall -Wextra -pedantic
+          -I src/main/cpp
+          src/main/cpp/oreslang/frontend/Parser.cpp
+          src/main/cpp/oreslang/types/OwnershipChecker.cpp
+          parser_gate.cpp
+          -o parser_gate
+      - name: Verify slim-arrow fail-closed fixtures
+        working-directory: tmp/llvm713
+        shell: bash
+        run: |
+          set -euo pipefail
+          diag="native slim-arrow/end-delimited callable syntax requires typed return/body parity"
+          for f in             end-delimited-fnc-reject.ores             end-delimited-fnc-as-reject.ores             end-delimited-fnc-do-reject.ores             end-delimited-fnc-higher-order-reject.ores             end-delimited-fnc-comment-boundary-reject.ores             end-delimited-roundtrip-reject.ores             end-delimited-routine-as-reject.ores             end-delimited-fnc-as-do-select-reject.ores
+          do
+            ./parser_gate "tests/fixtures/$f" "$diag"
+          done
+      - name: Verify tuple ABI fail-closed fixture
+        working-directory: tmp/llvm713
+        run: ./parser_gate tests/fixtures/tuple-return-type-reject.ores "native tuple return types require typed tuple ABI and lowering"
