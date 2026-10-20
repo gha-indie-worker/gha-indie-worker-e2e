@@ -49,7 +49,7 @@ def expected_declaration(
         if domain in {"module_contract_signature", "static_contract_signature"}:
             return "accept" if separator in {"->", ":", "=>"} else "reject"
         if domain in {"interface_signature", "trait_signature"}:
-            return "accept" if separator == "=>" else "reject"
+            return "accept" if separator in {"=>", ":"} else "reject"
     return "reject"
 
 
@@ -107,6 +107,10 @@ class CallableSyntaxV1ContractTest(unittest.TestCase):
             "interface-arrow",
         ):
             self.assertEqual(by_id[case_id]["expected"], "reject")
+        self.assertEqual(by_id["interface-colon"]["expected"], "accept")
+        self.assertEqual(by_id["interface-colon"]["canonical_separator"], "=>")
+        self.assertEqual(by_id["trait-colon"]["expected"], "accept")
+        self.assertEqual(by_id["trait-colon"]["canonical_separator"], "=>")
         self.assertEqual(by_id["module-contract-arrow"]["expected"], "accept")
         self.assertEqual(by_id["static-contract-arrow"]["expected"], "accept")
         self.assertEqual(by_id["root-end-arrow-as"]["expected"], "accept")
