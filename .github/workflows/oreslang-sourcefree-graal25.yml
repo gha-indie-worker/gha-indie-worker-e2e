@@ -14,13 +14,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - name: Install pinned GraalVM for JDK 25
-        uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
+      - name: Install GraalVM JDK 25 via pinned first-party setup-java
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
           java-version: '25'
-          version: '25.3'
           distribution: graalvm
-          github-token: ${{ github.token }}
       - name: Record toolchain and require JDK 25
         shell: bash
         run: |
