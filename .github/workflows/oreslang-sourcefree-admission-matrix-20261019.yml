@@ -49,11 +49,11 @@ jobs:
                   elif f == root / 'native-index-reference.c':
                       import re
                       source = f.read_text(encoding='utf-8')
-                      included = re.findall(r'^\\s*#\\s*include\\s+(\\S+)', source, re.M)
+                      included = re.findall(r'^\s*#\s*include\s+(\S+)', source, re.M)
                       headers = {'<assert.h>', '<stdint.h>', '<stddef.h>',
                                  '<stdio.h>', '<string.h>'}
                       assert included and set(included) <= headers, f
-                      assert not re.search(r'^\\s*#\\s*(include_next|import)\\b',
+                      assert not re.search(r'^\s*#\s*(include_next|import)\b',
                                            source, re.M), f
                   else:
                       raise AssertionError(f)
