@@ -1,0 +1,21 @@
+name: Oreslang PR1581 capacity probe
+
+on:
+  push:
+    branches:
+      - ci/oreslang-pr1581-probe-20261020
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Prove runner allocation
+        run: |
+          set -euo pipefail
+          uname -a
+          echo "ORESLANG_PR1581_RUNNER_ALLOCATED"
