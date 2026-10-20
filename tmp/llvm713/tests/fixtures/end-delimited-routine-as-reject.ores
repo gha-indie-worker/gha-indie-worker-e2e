@@ -1,0 +1,1 @@
+routine identity(int x) -> int as return x; end
