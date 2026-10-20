@@ -75,3 +75,7 @@ jobs:
         run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/EventCleanupRetryOracle.java
       - name: Run event cleanup retry races
         run: java -ea -cp tmp/oreslang-hot-upgrade-oracle EventCleanupRetryOracle
+      - name: Compile source-free RELIABLE pending release oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/ReliablePendingReleaseOracle.java
+      - name: Run RELIABLE pending release retry races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle ReliablePendingReleaseOracle
