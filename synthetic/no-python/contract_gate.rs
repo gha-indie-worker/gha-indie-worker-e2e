@@ -580,6 +580,228 @@ fn verify_reactive(root: &Path) -> Result<(), String> {
     verify_reactive_doc(&doc)
 }
 
+
+fn rol(value: u32, n: u32) -> u32 {
+    (value << n) | (value >> (32 - n))
+}
+
+fn sha1(bytes: &[u8]) -> [u8; 20] {
+    let mut h = [
+        0x67452301u32,
+        0xefcdab89,
+        0x98badcfe,
+        0x10325476,
+        0xc3d2e1f0,
+    ];
+    let bit_len = (bytes.len() as u64) * 8;
+    let mut data = bytes.to_vec();
+    data.push(0x80);
+    while data.len() % 64 != 56 {
+        data.push(0);
+    }
+    data.extend_from_slice(&bit_len.to_be_bytes());
+    for chunk in data.chunks_exact(64) {
+        let mut w = [0u32; 80];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes(chunk[i * 4..i * 4 + 4].try_into().expect("4-byte word"));
+        }
+        for i in 16..80 {
+            w[i] = rol(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e] = h;
+        for (i, word) in w.iter().enumerate() {
+            let (f, k) = match i {
+                0..=19 => ((b & c) | ((!b) & d), 0x5a827999),
+                20..=39 => (b ^ c ^ d, 0x6ed9eba1),
+                40..=59 => ((b & c) | (b & d) | (c & d), 0x8f1bbcdc),
+                _ => (b ^ c ^ d, 0xca62c1d6),
+            };
+            let temp = rol(a, 5)
+                .wrapping_add(f)
+                .wrapping_add(e)
+                .wrapping_add(k)
+                .wrapping_add(*word);
+            e = d;
+            d = c;
+            c = rol(b, 30);
+            b = a;
+            a = temp;
+        }
+        for (slot, value) in h.iter_mut().zip([a, b, c, d, e]) {
+            *slot = slot.wrapping_add(value);
+        }
+    }
+    let mut out = [0u8; 20];
+    for (i, value) in h.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&value.to_be_bytes());
+    }
+    out
+}
+
+fn git_blob_sha1(bytes: &[u8]) -> String {
+    let mut framed = format!("blob {}\0", bytes.len()).into_bytes();
+    framed.extend_from_slice(bytes);
+    hex(&sha1(&framed))
+}
+
+const STRUCTURAL_EXPECTED: [(&str, &str); 30] = [
+    ("syn.explicit", "accept"),
+    ("syn.shorthand", "accept"),
+    ("syn.structural", "accept"),
+    ("syn.optional.middle", "reject"),
+    ("syn.optional.value", "accept"),
+    ("shape.two", "accept"),
+    ("shape.three", "accept"),
+    ("shape.four", "accept"),
+    ("shape.direct", "accept"),
+    ("shape.one", "reject"),
+    ("shape.wrong.required", "reject"),
+    ("shape.wrong.optional", "reject"),
+    ("shape.exact.extra", "reject"),
+    ("shape.non.tuple", "reject"),
+    ("shape.unknown.spread", "reject"),
+    ("shape.private.extra", "reject"),
+    ("overload.arity.first", "accept"),
+    ("overload.same.arity", "reject"),
+    ("overload.primitive", "reject"),
+    ("overload.ambiguous.pack", "reject"),
+    ("safety.mutable", "reject"),
+    ("safety.async", "reject"),
+    ("safety.actor", "reject"),
+    ("safety.fixed.array", "reject"),
+    ("safety.eval.once", "accept"),
+    ("safety.no.implicit.pack", "reject"),
+    ("safety.tuple.width.65", "reject"),
+    ("safety.family.size.129", "reject"),
+    ("safety.unknown.slot", "reject"),
+    ("safety.mutable.borrow.slot", "reject"),
+];
+
+fn verify_structural_doc(doc: &Json, readme: &[u8], manifest: &[u8]) -> Result<(), String> {
+    require(
+        git_blob_sha1(readme) == "1a61b6267fd2185879628d7879db05804698a310",
+        "v2 README Git blob drift",
+    )?;
+    require(
+        git_blob_sha1(manifest) == "57c80adaa4029c6fd3e46a63c490cb193f951568",
+        "v2 cases Git blob drift",
+    )?;
+    exact_keys(doc, &["contract", "status", "backend_ids", "cases"])?;
+    require(
+        string(field(doc, "contract")?)? == "oreslang.structural-positional-tuple.v2",
+        "v2 contract name changed",
+    )?;
+    require(string(field(doc, "status")?)? == "target-only", "runtime parity promoted without proof")?;
+    require(
+        string_array(field(doc, "backend_ids")?)? == ["java", "llvm", "net", "wasm", "forge"],
+        "backend order/scope drift",
+    )?;
+    let cases = array(field(doc, "cases")?)?;
+    require(cases.len() == STRUCTURAL_EXPECTED.len(), "missing or extra v2 case")?;
+    for (index, (case, expected)) in cases.iter().zip(STRUCTURAL_EXPECTED).enumerate() {
+        exact_keys(case, &["id", "expect", "source", "reason"])?;
+        require(
+            string(field(case, "id")?)? == expected.0
+                && string(field(case, "expect")?)? == expected.1,
+            &format!("changed v2 case identity/order/outcome: {index}"),
+        )?;
+        for key in ["source", "reason"] {
+            require(
+                !string(field(case, key)?)?.trim().is_empty(),
+                &format!("missing v2 {key}: {index}"),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn structural_mutation_suite(good: &Json, readme: &[u8], manifest: &[u8]) -> Result<usize, String> {
+    let mut rejected = 0usize;
+    let check = |name: &str, candidate: Json, md: &[u8], raw: &[u8], rejected: &mut usize| -> Result<(), String> {
+        if verify_structural_doc(&candidate, md, raw).is_ok() {
+            Err(format!("structural mutation escaped gate: {name}"))
+        } else {
+            *rejected += 1;
+            Ok(())
+        }
+    };
+
+    {
+        let mut d = good.clone();
+        array_mut(field_mut(&mut d, "cases")?)?.pop();
+        check("case removed", d, readme, manifest, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let cases = array_mut(field_mut(&mut d, "cases")?)?;
+        cases.push(cases[0].clone());
+        check("case duplicated", d, readme, manifest, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        array_mut(field_mut(&mut d, "cases")?)?.reverse();
+        check("case order reversed", d, readme, manifest, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let cases = array_mut(field_mut(&mut d, "cases")?)?;
+        *field_mut(&mut cases[0], "expect")? = Json::String("reject".into());
+        check("outcome changed", d, readme, manifest, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let cases = array_mut(field_mut(&mut d, "cases")?)?;
+        *field_mut(&mut cases[0], "source")? = Json::String(String::new());
+        check("source emptied", d, readme, manifest, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        *field_mut(&mut d, "status")? = Json::String("verified".into());
+        check("status promoted", d, readme, manifest, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        array_mut(field_mut(&mut d, "backend_ids")?)?.pop();
+        check("backend removed", d, readme, manifest, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        object_mut(&mut d)?.push(("unknown".into(), Json::String("unreviewed".into())));
+        check("unknown field", d, readme, manifest, &mut rejected)?;
+    }
+    {
+        let mut md = readme.to_vec();
+        md.push(b'\n');
+        check("README drift", good.clone(), &md, manifest, &mut rejected)?;
+    }
+    {
+        let mut raw = manifest.to_vec();
+        raw.push(b'\n');
+        check("manifest drift", good.clone(), readme, &raw, &mut rejected)?;
+    }
+    require(rejected == 10, "structural mutation inventory drift")?;
+    for raw in [
+        b"{\"id\":\"x\",\"id\":\"x\"}".as_slice(),
+        b"NaN".as_slice(),
+        b"[]".as_slice(),
+        b"{\"x\":Infinity}".as_slice(),
+    ] {
+        require(parse_json(raw).is_err(), "malformed structural JSON accepted")?;
+    }
+    Ok(rejected + 4)
+}
+
+fn verify_structural_v2(root: &Path) -> Result<(), String> {
+    let readme_path = root.join("contracts/structural/v2/README.md");
+    let cases_path = root.join("contracts/structural/v2/cases.json");
+    let readme = fs::read(&readme_path).map_err(|e| format!("read {}: {e}", readme_path.display()))?;
+    let manifest = fs::read(&cases_path).map_err(|e| format!("read {}: {e}", cases_path.display()))?;
+    let doc = parse_json(&manifest)?;
+    verify_structural_doc(&doc, &readme, &manifest)?;
+    let rejected = structural_mutation_suite(&doc, &readme, &manifest)?;
+    require(rejected == 14, "structural self-test count drift")
+}
+
 fn object_mut(value: &mut Json) -> Result<&mut Vec<(String, Json)>, String> {
     match value {
         Json::Object(v) => Ok(v),
@@ -1427,7 +1649,7 @@ fn verify_enum_v2(root: &Path) -> Result<(), String> {
 
 #[cfg(not(test))]
 fn usage() -> ! {
-    eprintln!("usage: contract_gate <integration|serde|reactive|actor-pipeline|enum-v2> [repository-root]");
+    eprintln!("usage: contract_gate <integration|serde|reactive|actor-pipeline|structural-v2|enum-v2> [repository-root]");
     process::exit(2);
 }
 
@@ -1444,6 +1666,7 @@ fn main() {
         "serde" => verify_serde(&root),
         "reactive" => verify_reactive(&root),
         "actor-pipeline" => verify_actor_pipeline(&root),
+        "structural-v2" => verify_structural_v2(&root),
         "enum-v2" => verify_enum_v2(&root),
         _ => usage(),
     };
@@ -1534,6 +1757,17 @@ mod tests {
         items.iter_mut().find(|(k, _)| k == "observable").expect("observable").1 =
             Json::String("implemented".into());
         assert!(verify_reactive_doc(&forged).is_err());
+    }
+
+    #[test]
+    fn sha1_known_vector() {
+        assert_eq!(hex(&sha1(b"abc")), "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(git_blob_sha1(b"test\n"), "9daeafb9864cf43055ae93beb0afd6c7d144bfa4");
+    }
+
+    #[test]
+    fn structural_v2_self_test() {
+        verify_structural_v2(Path::new(".")).unwrap();
     }
 
     #[test]
