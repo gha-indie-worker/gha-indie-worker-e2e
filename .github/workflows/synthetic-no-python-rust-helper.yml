@@ -24,6 +24,8 @@ jobs:
           rustc --edition=2021 -D warnings --test synthetic/no-python/contract_gate.rs -o /tmp/contract-gate-tests
           /tmp/contract-gate-tests sha256_known_vector
           /tmp/contract-gate-tests sha1_known_vector
+          /tmp/contract-gate-tests exact_decimal_arithmetic
+          /tmp/contract-gate-tests checked_i64_parser_rejects_overflow
           /tmp/contract-gate-tests parser_rejects_duplicate_keys_and_non_json_constants
           /tmp/contract-gate-tests integration_all_backends
           /tmp/contract-gate-tests integration_adversarial_inputs_fail_closed
