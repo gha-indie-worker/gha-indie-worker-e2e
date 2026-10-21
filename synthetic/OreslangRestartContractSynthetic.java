@@ -284,6 +284,75 @@ public final class OreslangRestartContractSynthetic {
         }
     }
 
+    private static final class SupervisorDefinition {
+        private static final Set<String> REQUIRED =
+                Set.of("on_throw", "on_raise", "on_panic");
+        private final Set<String> hiddenHandlers;
+
+        SupervisorDefinition(boolean supervisor, Set<String> handlers) {
+            if (!supervisor && !handlers.isEmpty())
+                throw new IllegalArgumentException("privileged handlers require supervisor actor");
+            if (supervisor && !handlers.equals(REQUIRED))
+                throw new IllegalArgumentException("supervisor handlers must be exhaustive");
+            hiddenHandlers = Set.copyOf(handlers);
+        }
+
+        boolean ordinaryMethodVisible(String name) {
+            return !hiddenHandlers.contains(name);
+        }
+    }
+
+    private static final class RevocableChildFailure {
+        private final FailureKind kind;
+        private String directive;
+        private boolean active = true;
+
+        RevocableChildFailure(FailureKind kind) { this.kind = kind; }
+
+        FailureKind kind() {
+            requireActive();
+            return kind;
+        }
+
+        void choose(String value) {
+            requireActive();
+            if (directive != null) throw new IllegalStateException("directive already chosen");
+            directive = value;
+        }
+
+        String directiveOrRetain() {
+            requireActive();
+            return directive == null ? "RETAIN" : directive;
+        }
+
+        void revoke() { active = false; }
+
+        private void requireActive() {
+            if (!active) throw new SecurityException("expired ChildFailure");
+        }
+    }
+
+    private static final class DeferredRestart {
+        int handlerCalls;
+        boolean armed;
+        boolean restarted;
+
+        void firstControl() {
+            handlerCalls++;
+            armed = true;
+        }
+
+        boolean prematureRedispatch() {
+            return false;
+        }
+
+        void timerWake() {
+            if (!armed) throw new IllegalStateException("wake not armed");
+            armed = false;
+            restarted = true;
+        }
+    }
+
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
     }
@@ -554,9 +623,69 @@ public final class OreslangRestartContractSynthetic {
                         && retainedControls.acknowledge(panicEvent),
                 "42 retained controls require explicit acknowledgement");
 
-        System.out.println("SYNTHETIC JAVA CONTRACT: 42/42 invariants passed");
-        System.out.println("JAVA_SOURCE_SHA=8af1fd66d27197e1d38d97b710069ecf76f374f8");
-        System.out.println("JAVA_SOURCE_TREE=6ad8684e90dd9c027116b5ef8fa571fdc10d87b3");
+        SupervisorDefinition sourceSupervisor = new SupervisorDefinition(
+                true, Set.of("on_throw", "on_raise", "on_panic"));
+        check(!sourceSupervisor.ordinaryMethodVisible("on_panic"),
+                "43 source supervisor handlers stay hidden from ordinary method lookup");
+
+        boolean incompleteSupervisorRejected = false;
+        try {
+            new SupervisorDefinition(true, Set.of("on_throw", "on_panic"));
+        } catch (IllegalArgumentException expectedFailure) {
+            incompleteSupervisorRejected = true;
+        }
+        check(incompleteSupervisorRejected,
+                "44 source supervisor handler set must be exhaustive");
+
+        boolean ordinaryActorRejected = false;
+        try {
+            new SupervisorDefinition(false, Set.of("on_panic"));
+        } catch (IllegalArgumentException expectedFailure) {
+            ordinaryActorRejected = true;
+        }
+        check(ordinaryActorRejected,
+                "45 ordinary actor cannot acquire privileged supervisor handlers");
+
+        check(FailureKind.THROW.name().equals("THROW")
+                        && FailureKind.RAISE.name().equals("RAISE")
+                        && FailureKind.PANIC.name().equals("PANIC"),
+                "46 source terminal effects retain typed CONTROL identity");
+
+        RevocableChildFailure childFailure =
+                new RevocableChildFailure(FailureKind.PANIC);
+        check(childFailure.kind() == FailureKind.PANIC,
+                "47 ChildFailure exposes immutable typed metadata");
+        childFailure.choose("RESTART");
+        boolean secondDirectiveRejected = false;
+        try {
+            childFailure.choose("ACKNOWLEDGE");
+        } catch (IllegalStateException expectedFailure) {
+            secondDirectiveRejected = true;
+        }
+        check(secondDirectiveRejected
+                        && "RESTART".equals(childFailure.directiveOrRetain()),
+                "48 ChildFailure permits exactly one supervisor decision");
+        childFailure.revoke();
+        boolean expiredCapabilityRejected = false;
+        try {
+            childFailure.kind();
+        } catch (SecurityException expectedFailure) {
+            expiredCapabilityRejected = true;
+        }
+        check(expiredCapabilityRejected,
+                "49 ChildFailure capability is revoked after CONTROL turn");
+
+        DeferredRestart deferred = new DeferredRestart();
+        deferred.firstControl();
+        check(!deferred.prematureRedispatch() && deferred.handlerCalls == 1,
+                "50 armed backoff cannot re-enter guest handler early");
+        deferred.timerWake();
+        check(deferred.restarted && deferred.handlerCalls == 1,
+                "51 timer wake resumes stored RESTART without guest re-entry");
+
+        System.out.println("SYNTHETIC JAVA CONTRACT: 51/51 invariants passed");
+        System.out.println("JAVA_SOURCE_SHA=ba3f2c395b93e3a35c7e3499fc92a8c59c2ffdb0");
+        System.out.println("JAVA_SOURCE_TREE=238b56cd7365de9ba9642e9020343da76a186973");
         System.out.println("LLVM_SOURCE_SHA=9e28dcdd855b22fdfadb47978ebfcd2c918f703b");
         System.out.println("LLVM_SOURCE_TREE=e9bf402f802c0654ab602d1f12be4f10bfa58c50");
         System.out.println("NOTE=source-free model; no private Oreslang source copied");

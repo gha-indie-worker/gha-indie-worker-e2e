@@ -59,9 +59,9 @@ jobs:
           set -euo pipefail
           output="$(java -ea -cp synthetic-classes synthetic.OreslangRestartContractSynthetic)"
           printf '%s\n' "$output"
-          grep -F 'SYNTHETIC JAVA CONTRACT: 42/42 invariants passed' <<<"$output"
-          grep -F 'JAVA_SOURCE_SHA=8af1fd66d27197e1d38d97b710069ecf76f374f8' <<<"$output"
-          grep -F 'JAVA_SOURCE_TREE=6ad8684e90dd9c027116b5ef8fa571fdc10d87b3' <<<"$output"
+          grep -F 'SYNTHETIC JAVA CONTRACT: 51/51 invariants passed' <<<"$output"
+          grep -F 'JAVA_SOURCE_SHA=ba3f2c395b93e3a35c7e3499fc92a8c59c2ffdb0' <<<"$output"
+          grep -F 'JAVA_SOURCE_TREE=238b56cd7365de9ba9642e9020343da76a186973' <<<"$output"
           grep -F 'LLVM_SOURCE_SHA=9e28dcdd855b22fdfadb47978ebfcd2c918f703b' <<<"$output"
           grep -F 'LLVM_SOURCE_TREE=e9bf402f802c0654ab602d1f12be4f10bfa58c50' <<<"$output"
 
