@@ -41,6 +41,9 @@ jobs:
           rustc --edition=2021 -D warnings --test synthetic/no-python/actor_arena_receipt.rs -o /tmp/arena-receipt-tests
           /tmp/arena-receipt-tests
           rustc --edition=2021 -D warnings synthetic/no-python/actor_arena_receipt.rs -o /tmp/arena-receipt
+          rustc --edition=2021 -D warnings --test synthetic/no-python/shared_domain_receipt.rs -o /tmp/shared-domain-receipt-tests
+          /tmp/shared-domain-receipt-tests
+          rustc --edition=2021 -D warnings synthetic/no-python/shared_domain_receipt.rs -o /tmp/shared-domain-receipt
           mkdir -p /tmp/aot-fixtures
           /tmp/aot-fixture make-negative /tmp/aot-fixtures
           test -s /tmp/aot-fixtures/valid.wasm
