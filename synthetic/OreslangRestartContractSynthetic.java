@@ -684,8 +684,8 @@ public final class OreslangRestartContractSynthetic {
                 "51 timer wake resumes stored RESTART without guest re-entry");
 
         System.out.println("SYNTHETIC JAVA CONTRACT: 51/51 invariants passed");
-        System.out.println("JAVA_SOURCE_SHA=ba3f2c395b93e3a35c7e3499fc92a8c59c2ffdb0");
-        System.out.println("JAVA_SOURCE_TREE=238b56cd7365de9ba9642e9020343da76a186973");
+        System.out.println("JAVA_SOURCE_SHA=6bc6737174e680c17746d77f3ccdd4f5bdb67561");
+        System.out.println("JAVA_SOURCE_TREE=84f6a832c7620a5510aa5747a1e618f18575529a");
         System.out.println("LLVM_SOURCE_SHA=9e28dcdd855b22fdfadb47978ebfcd2c918f703b");
         System.out.println("LLVM_SOURCE_TREE=e9bf402f802c0654ab602d1f12be4f10bfa58c50");
         System.out.println("NOTE=source-free model; no private Oreslang source copied");
