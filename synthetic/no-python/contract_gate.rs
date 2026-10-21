@@ -1717,6 +1717,527 @@ fn verify_actor_arena_lifecycle(root: &Path) -> Result<usize, String> {
     actor_arena_mutation_suite(&doc, &raw)
 }
 
+
+const QUIESCENCE_BARRIERS: [&str; 16] = [
+    "single-flight-per-actor",
+    "bounded-mailbox-and-memory-credit",
+    "authenticated-data-control-separation",
+    "logical-revocation-before-reclaim",
+    "physical-turn-quiescence",
+    "read-loan-quiescence",
+    "external-continuation-lease-quiescence",
+    "shared-domain-membership-quiescence",
+    "routed-mail-publication-and-retirement",
+    "stop-cancel-terminal-drain",
+    "retryable-partial-physical-cleanup",
+    "generation-incarnation-aba-fence",
+    "zeroization-before-capacity-reuse",
+    "cross-carrier-release-no-guest-dereference",
+    "failure-reason-observability",
+    "exact-head-native-evidence",
+];
+
+const QUIESCENCE_STATUS: [(&str, &str); 6] = [
+    ("host_substrate", "PRESENT_UNCERTIFIED"),
+    ("source_actor_execution", "NOT_VERIFIED"),
+    ("native_execution", "NOT_VERIFIED"),
+    ("native_aot", "NOT_VERIFIED"),
+    ("source_local_run", "NOT_EXECUTED"),
+    ("live_streams_and_callbacks", "NOT_VERIFIED"),
+];
+
+const QUIESCENCE_EVIDENCE_FLAGS: [&str; 6] = [
+    "exact_pr_head_and_git_tree",
+    "issuer_bound_required_check",
+    "authorized_source_local_runner",
+    "adversarial_actor_lifecycle_fixtures",
+    "independent_code_review",
+    "pass_failure_artifact_manifest",
+];
+
+fn verify_quiescence_doc(doc: &Json) -> Result<(), String> {
+    exact_keys(
+        doc,
+        &[
+            "schema",
+            "revision",
+            "purpose",
+            "source_free_policy_only",
+            "never_export_private_source_to_unapproved_org",
+            "required_barriers",
+            "mandatory_native_evidence",
+            "backends",
+        ],
+    )?;
+    require(
+        string(field(doc, "schema")?)? == "oreslang.actor_arena_quiescence_evidence.v2"
+            && field(doc, "revision")? == &Json::Number("2".into()),
+        "unrecognized matrix revision",
+    )?;
+    require(
+        string(field(doc, "purpose")?)? == "Canonical source-free gating: not a runtime certificate",
+        "quiescence purpose drift",
+    )?;
+    require(
+        field(doc, "source_free_policy_only")? == &Json::Bool(true),
+        "policy material cannot claim runtime certification",
+    )?;
+    require(
+        field(doc, "never_export_private_source_to_unapproved_org")? == &Json::Bool(true),
+        "private source export is not authorized",
+    )?;
+    let barriers = string_array(field(doc, "required_barriers")?)?;
+    require(
+        barriers == QUIESCENCE_BARRIERS
+            && barriers.iter().copied().collect::<BTreeSet<_>>().len() == QUIESCENCE_BARRIERS.len(),
+        "missing/reordered/duplicated actor quiescence requirement",
+    )?;
+
+    let evidence = field(doc, "mandatory_native_evidence")?;
+    exact_keys(
+        evidence,
+        &[
+            "exact_pr_head_and_git_tree",
+            "issuer_bound_required_check",
+            "authorized_source_local_runner",
+            "minimum_executed_job_steps",
+            "adversarial_actor_lifecycle_fixtures",
+            "independent_code_review",
+            "pass_failure_artifact_manifest",
+            "zero_step_result",
+        ],
+    )?;
+    for key in QUIESCENCE_EVIDENCE_FLAGS {
+        require(
+            field(evidence, key)? == &Json::Bool(true),
+            "mandatory native evidence removed",
+        )?;
+    }
+    let Json::Number(minimum_steps) = field(evidence, "minimum_executed_job_steps")? else {
+        return Err("zero-step CI cannot certify a compiler".into());
+    };
+    let minimum_steps: u64 = minimum_steps
+        .parse()
+        .map_err(|_| "zero-step CI cannot certify a compiler".to_string())?;
+    require(minimum_steps >= 1, "zero-step CI cannot certify a compiler")?;
+    require(
+        string(field(evidence, "zero_step_result")?)? == "NOT_EXECUTED",
+        "zero-step jobs misclassified",
+    )?;
+
+    let backends = field(doc, "backends")?;
+    exact_keys(backends, &ARENA_BACKENDS)?;
+    for backend in ARENA_BACKENDS {
+        let row = field(backends, backend)?;
+        exact_keys(
+            row,
+            &[
+                "host_substrate",
+                "source_actor_execution",
+                "native_execution",
+                "native_aot",
+                "source_local_run",
+                "live_streams_and_callbacks",
+            ],
+        )?;
+        for (key, expected) in QUIESCENCE_STATUS {
+            require(
+                string(field(row, key)?)? == expected,
+                "unsupported/false runtime claim",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn quiescence_negative_controls(base: &Json) -> Result<usize, String> {
+    let reject = |name: &str, candidate: Json| -> Result<(), String> {
+        require(
+            verify_quiescence_doc(&candidate).is_err(),
+            &format!("weakened quiescence contract accepted: {name}"),
+        )
+    };
+    let mut count = 0usize;
+
+    for index in 0..QUIESCENCE_BARRIERS.len() {
+        let mut d = base.clone();
+        array_mut(field_mut(&mut d, "required_barriers")?)?.remove(index);
+        reject("barrier removed", d)?;
+        count += 1;
+    }
+    {
+        let mut d = base.clone();
+        let barriers = array_mut(field_mut(&mut d, "required_barriers")?)?;
+        barriers.push(barriers[0].clone());
+        reject("barrier duplicated", d)?;
+    }
+    count += 1;
+    for key in [
+        "source_free_policy_only",
+        "never_export_private_source_to_unapproved_org",
+    ] {
+        let mut d = base.clone();
+        *field_mut(&mut d, key)? = Json::Bool(false);
+        reject(key, d)?;
+        count += 1;
+    }
+    {
+        let mut d = base.clone();
+        *field_mut(
+            field_mut(&mut d, "mandatory_native_evidence")?,
+            "minimum_executed_job_steps",
+        )? = Json::Number("0".into());
+        reject("zero executed steps", d)?;
+    }
+    count += 1;
+    {
+        let mut d = base.clone();
+        *field_mut(field_mut(&mut d, "mandatory_native_evidence")?, "zero_step_result")? =
+            Json::String("PASS".into());
+        reject("zero-step classified pass", d)?;
+    }
+    count += 1;
+    for key in ["issuer_bound_required_check", "authorized_source_local_runner"] {
+        let mut d = base.clone();
+        *field_mut(field_mut(&mut d, "mandatory_native_evidence")?, key)? = Json::Bool(false);
+        reject(key, d)?;
+        count += 1;
+    }
+    {
+        let mut d = base.clone();
+        object_mut(field_mut(&mut d, "backends")?)?.retain(|(key, _)| key != "forge");
+        reject("backend removed", d)?;
+    }
+    count += 1;
+    for (backend, key, value) in [
+        ("llvm", "native_execution", "VERIFIED"),
+        ("wasm", "source_local_run", "PASSED"),
+        ("java", "native_aot", "VERIFIED"),
+    ] {
+        let mut d = base.clone();
+        *field_mut(field_mut(field_mut(&mut d, "backends")?, backend)?, key)? =
+            Json::String(value.into());
+        reject("runtime status promoted", d)?;
+        count += 1;
+    }
+    require(count == 27, "quiescence negative-control inventory drift")?;
+    Ok(count)
+}
+
+fn verify_actor_arena_quiescence(root: &Path) -> Result<(usize, usize), String> {
+    let path = root.join("contracts/v1/actor_arena_quiescence_matrix_v2.json");
+    let raw = fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let doc = parse_json(&raw)?;
+    verify_quiescence_doc(&doc)?;
+    let negatives = quiescence_negative_controls(&doc)?;
+    Ok((QUIESCENCE_BARRIERS.len(), negatives))
+}
+
+const SHARED_LIFECYCLE: [&str; 9] = [
+    "create-domain",
+    "issue-control",
+    "grant-membership",
+    "critical-access",
+    "logical-retire",
+    "authority-revocation",
+    "quiescence",
+    "byte-scrub",
+    "physical-reclamation",
+];
+
+const SHARED_CASES: [(&str, &str); 37] = [
+    ("domain-control-opaque", "deny-fabrication"),
+    ("control-one-shot", "required"),
+    ("foreign-control-denied", "deny"),
+    ("stale-control-same-address-reuse-denied", "deny-stale"),
+    ("actor-ref-not-domain-capability", "deny"),
+    ("grant-binds-domain", "required"),
+    ("grant-binds-actor", "required"),
+    ("grant-binds-incarnation", "required"),
+    ("read-permit-allows-read", "allow"),
+    ("read-permit-denies-write", "deny"),
+    ("write-permit-allows-read-write", "allow"),
+    ("missing-permit-denied", "deny"),
+    ("critical-read-nonsuspending", "required"),
+    ("critical-write-nonsuspending", "required"),
+    ("no-guest-callback-under-lock", "required"),
+    ("critical-admission-nonparking", "required"),
+    ("writer-conflict-is-busy", "retryable-busy"),
+    ("reader-conflict-with-writer-is-busy", "retryable-busy"),
+    ("revocation-monotonic", "required"),
+    ("stale-grant-denied", "deny-stale"),
+    ("handle-domain-fence", "deny-foreign"),
+    ("handle-generation-fence", "deny-stale"),
+    ("generation-never-wraps", "fail-closed"),
+    ("lifetime-pin-no-byte-authority", "required"),
+    ("lifetime-pin-off-carrier-release", "allow-release-only"),
+    ("lifetime-pin-quota-bounded", "fail-closed"),
+    ("retire-seals-new-authority", "required"),
+    ("active-lease-delays-reclaim", "defer"),
+    ("lifetime-pin-delays-reclaim", "defer"),
+    ("failed-reclaim-remains-sealed", "required"),
+    ("scrub-before-capacity-reuse", "required"),
+    ("retirement-idempotent", "required"),
+    ("rt-share-unsupported-until-guest-lowering", "unsupported"),
+    ("scheduler-derived-actor-identity-required", "required"),
+    ("guest-critical-lowering-needs-proof", "pending-evidence"),
+    ("tenant-aggregate-quota-required", "required"),
+    ("exact-head-runtime-evidence-required", "pending-evidence"),
+];
+
+fn object_key_order(value: &Json) -> Result<Vec<&str>, String> {
+    Ok(object(value)?.iter().map(|(key, _)| key.as_str()).collect())
+}
+
+fn verify_shared_domain_doc(doc: &Json) -> Result<(), String> {
+    exact_keys(
+        doc,
+        &[
+            "contract",
+            "version",
+            "status",
+            "scope",
+            "lifecycle_order",
+            "source_semantics",
+            "backend_support",
+            "cases",
+        ],
+    )?;
+    require(
+        string(field(doc, "contract")?)? == "oreslang-shared-domain-arena-v1",
+        "contract name differs",
+    )?;
+    require(
+        field(doc, "version")? == &Json::Number("1".into()),
+        "contract version differs",
+    )?;
+    require(
+        string(field(doc, "status")?)? == "source-free-contract-only",
+        "contract status promoted",
+    )?;
+    require(
+        string(field(doc, "scope")?)?.contains("no guest/runtime parity certification"),
+        "scope must remain non-certifying",
+    )?;
+    require(
+        string_array(field(doc, "lifecycle_order")?)? == SHARED_LIFECYCLE,
+        "lifecycle order differs",
+    )?;
+
+    let source = field(doc, "source_semantics")?;
+    exact_keys(
+        source,
+        &[
+            "critical_read",
+            "critical_write",
+            "guest_callback_while_locked",
+            "busy_policy",
+            "rt_share",
+        ],
+    )?;
+    for (key, expected) in [
+        ("critical_read", "lexical-nonsuspending-read-lease"),
+        ("critical_write", "lexical-nonsuspending-exclusive-lease"),
+        ("guest_callback_while_locked", "forbidden"),
+        ("busy_policy", "fail-fast-scheduler-retry"),
+        ("rt_share", "unsupported-until-guest-lowering-and-source-conformance"),
+    ] {
+        require(string(field(source, key)?)? == expected, "source semantics differ")?;
+    }
+
+    let support = field(doc, "backend_support")?;
+    require(
+        object_key_order(support)? == ARENA_BACKENDS,
+        "backend set/order differs",
+    )?;
+    for backend in ARENA_BACKENDS {
+        let row = field(support, backend)?;
+        exact_keys(
+            row,
+            &[
+                "host_shared_domain",
+                "guest_critical_lowering",
+                "rt_share",
+                "exact_head_runtime_evidence",
+            ],
+        )?;
+        require(
+            string(field(row, "guest_critical_lowering")?)? == "unsupported",
+            "guest lowering promoted",
+        )?;
+        require(
+            string(field(row, "rt_share")?)? == "unsupported",
+            "rt share promoted",
+        )?;
+        require(
+            string(field(row, "exact_head_runtime_evidence")?)? == "pending",
+            "runtime evidence promoted",
+        )?;
+        let expected_host = if backend == "llvm" {
+            "candidate-host-prototype"
+        } else {
+            "unsupported"
+        };
+        require(
+            string(field(row, "host_shared_domain")?)? == expected_host,
+            "host shared-domain support promoted",
+        )?;
+    }
+
+    let cases = array(field(doc, "cases")?)?;
+    require(cases.len() == SHARED_CASES.len(), "case inventory differs")?;
+    let mut observed = BTreeMap::new();
+    for case in cases {
+        exact_keys(case, &["id", "expect"])?;
+        let id = string(field(case, "id")?)?;
+        let expect = string(field(case, "expect")?)?;
+        require(observed.insert(id, expect).is_none(), "case id missing or duplicated")?;
+    }
+    require(
+        observed.len() == SHARED_CASES.len()
+            && SHARED_CASES
+                .iter()
+                .all(|(id, expected)| observed.get(id).copied() == Some(*expected)),
+        "case expectations differ",
+    )?;
+    Ok(())
+}
+
+fn shared_domain_test_suite(base: &Json) -> Result<usize, String> {
+    let mut tests = 0usize;
+
+    verify_shared_domain_doc(base)?;
+    tests += 1;
+
+    require(
+        object(base)?.len() == 8,
+        "root fields are not exact",
+    )?;
+    tests += 1;
+
+    require(array(field(base, "cases")?)?.len() == 37, "case inventory is not 37")?;
+    tests += 1;
+
+    let ids = array(field(base, "cases")?)?
+        .iter()
+        .map(|case| string(field(case, "id")?))
+        .collect::<Result<Vec<_>, String>>()?;
+    require(ids.iter().copied().collect::<BTreeSet<_>>().len() == ids.len(), "case ids duplicated")?;
+    tests += 1;
+
+    require(object_key_order(field(base, "backend_support")?)? == ARENA_BACKENDS, "backend inventory differs")?;
+    tests += 1;
+
+    require(
+        ARENA_BACKENDS.iter().all(|backend| {
+            field(base, "backend_support")
+                .and_then(|support| field(support, backend))
+                .and_then(|row| field(row, "guest_critical_lowering"))
+                .and_then(string)
+                .is_ok_and(|value| value == "unsupported")
+        }),
+        "guest lowering promoted",
+    )?;
+    tests += 1;
+
+    require(
+        ARENA_BACKENDS.iter().all(|backend| {
+            field(base, "backend_support")
+                .and_then(|support| field(support, backend))
+                .and_then(|row| field(row, "rt_share"))
+                .and_then(string)
+                .is_ok_and(|value| value == "unsupported")
+        }),
+        "rt_share promoted",
+    )?;
+    tests += 1;
+
+    require(
+        string(field(field(field(base, "backend_support")?, "llvm")?, "host_shared_domain")?)?
+            == "candidate-host-prototype"
+            && ["java", "net", "wasm", "forge"].iter().all(|backend| {
+                field(base, "backend_support")
+                    .and_then(|support| field(support, backend))
+                    .and_then(|row| field(row, "host_shared_domain"))
+                    .and_then(string)
+                    .is_ok_and(|value| value == "unsupported")
+            }),
+        "host prototype inventory differs",
+    )?;
+    tests += 1;
+
+    require(
+        ARENA_BACKENDS.iter().all(|backend| {
+            field(base, "backend_support")
+                .and_then(|support| field(support, backend))
+                .and_then(|row| field(row, "exact_head_runtime_evidence"))
+                .and_then(string)
+                .is_ok_and(|value| value == "pending")
+        }),
+        "runtime evidence certified",
+    )?;
+    tests += 1;
+
+    let reject = |name: &str, candidate: Json| -> Result<(), String> {
+        require(
+            verify_shared_domain_doc(&candidate).is_err(),
+            &format!("shared-domain mutation escaped: {name}"),
+        )
+    };
+
+    {
+        let mut d = base.clone();
+        object_mut(&mut d)?.push(("certified".into(), Json::Bool(true)));
+        reject("unknown root field", d)?;
+    }
+    tests += 1;
+
+    {
+        let mut d = base.clone();
+        array_mut(field_mut(&mut d, "cases")?)?.pop();
+        reject("missing case", d)?;
+    }
+    tests += 1;
+
+    {
+        let mut d = base.clone();
+        *field_mut(
+            field_mut(field_mut(&mut d, "backend_support")?, "llvm")?,
+            "rt_share",
+        )? = Json::String("implemented".into());
+        reject("rt_share promotion", d)?;
+    }
+    tests += 1;
+
+    for (case_id, expected) in SHARED_CASES {
+        let mut d = base.clone();
+        let cases = array_mut(field_mut(&mut d, "cases")?)?;
+        let case = cases
+            .iter_mut()
+            .find(|case| field(case, "id").and_then(string).is_ok_and(|id| id == case_id))
+            .ok_or_else(|| format!("missing canonical case {case_id}"))?;
+        require(
+            string(field(case, "expect")?)? == expected,
+            "canonical shared-domain case expectation drift",
+        )?;
+        *field_mut(case, "expect")? = Json::String("unexpected-promotion".into());
+        reject(case_id, d)?;
+        tests += 1;
+    }
+
+    require(tests == 49, "shared-domain test inventory differs from pinned 49")?;
+    Ok(tests)
+}
+
+fn verify_shared_domain(root: &Path) -> Result<(usize, usize), String> {
+    let path = root.join("contracts/v1/shared_domain_arena_v1.json");
+    let raw = fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let doc = parse_json(&raw)?;
+    verify_shared_domain_doc(&doc)?;
+    let tests = shared_domain_test_suite(&doc)?;
+    Ok((SHARED_CASES.len(), tests))
+}
+
 fn object_mut(value: &mut Json) -> Result<&mut Vec<(String, Json)>, String> {
     match value {
         Json::Object(v) => Ok(v),
@@ -2564,7 +3085,7 @@ fn verify_enum_v2(root: &Path) -> Result<(), String> {
 
 #[cfg(not(test))]
 fn usage() -> ! {
-    eprintln!("usage: contract_gate <integration|serde|reactive|actor-pipeline|actor-arena-lifecycle|structural-v2|numeric|enum-v2> [repository-root]");
+    eprintln!("usage: contract_gate <integration|serde|reactive|actor-pipeline|actor-arena-lifecycle|actor-arena-quiescence|shared-domain|structural-v2|numeric|enum-v2> [repository-root]");
     process::exit(2);
 }
 
@@ -2583,6 +3104,12 @@ fn main() {
         "actor-pipeline" => verify_actor_pipeline(&root),
         "actor-arena-lifecycle" => verify_actor_arena_lifecycle(&root).map(|count| {
             println!("ACTOR_ARENA_LIFECYCLE_V1_PASS checks={count} source-free-policy-only");
+        }),
+        "actor-arena-quiescence" => verify_actor_arena_quiescence(&root).map(|(barriers, negatives)| {
+            println!("ACTOR_ARENA_QUIESCENCE_V2_PASS barriers={barriers} negative_controls={negatives} runtime=NOT_VERIFIED");
+        }),
+        "shared-domain" => verify_shared_domain(&root).map(|(cases, tests)| {
+            println!("SHARED_DOMAIN_ARENA_V1_PASS cases={cases} tests={tests} source-free-contract-only");
         }),
         "structural-v2" => verify_structural_v2(&root),
         "numeric" => verify_numeric(&root),
@@ -2708,6 +3235,16 @@ mod tests {
     #[test]
     fn structural_v2_self_test() {
         verify_structural_v2(Path::new(".")).unwrap();
+    }
+
+    #[test]
+    fn actor_arena_quiescence_real_fixture() {
+        assert_eq!(verify_actor_arena_quiescence(Path::new(".")).unwrap(), (16, 27));
+    }
+
+    #[test]
+    fn shared_domain_real_fixture() {
+        assert_eq!(verify_shared_domain(Path::new(".")).unwrap(), (37, 49));
     }
 
     #[test]
