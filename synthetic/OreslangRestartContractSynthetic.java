@@ -72,44 +72,90 @@ public final class OreslangRestartContractSynthetic {
     }
 
     private static final class RestartLimiter {
+        private static final class History {
+            final ArrayDeque<Long> times = new ArrayDeque<>();
+            long lastFailureGeneration;
+            long stableGeneration;
+            String lastDecision;
+        }
+
         private final int max;
+        private final int maxTrackedActors;
         private final long window;
         private final long minBackoff;
         private final long maxBackoff;
-        private final ArrayDeque<Long> times = new ArrayDeque<>();
-        private long lastGeneration;
-        private String lastDecision;
+        private final Map<ActorId, History> histories = new HashMap<>();
         private long now;
 
-        RestartLimiter(int max, long window, long minBackoff, long maxBackoff) {
+        RestartLimiter(
+                int max,
+                int maxTrackedActors,
+                long window,
+                long minBackoff,
+                long maxBackoff) {
             this.max = max;
+            this.maxTrackedActors = maxTrackedActors;
             this.window = window;
             this.minBackoff = minBackoff;
             this.maxBackoff = maxBackoff;
         }
 
-        String decide(long generation) {
-            if (generation < lastGeneration) throw new IllegalArgumentException("stale");
-            if (generation == lastGeneration && lastDecision != null) {
-                return lastDecision;
+        String decide(ActorId id, long generation) {
+            History h = histories.get(id);
+            if (h == null) {
+                if (histories.size() >= maxTrackedActors) return "ESCALATE";
+                h = new History();
+                histories.put(id, h);
             }
-            while (!times.isEmpty() && now - times.peekFirst() >= window) {
-                times.removeFirst();
+            if (generation < h.stableGeneration || generation < h.lastFailureGeneration)
+                throw new IllegalArgumentException("stale");
+            if (generation == h.lastFailureGeneration && h.lastDecision != null)
+                return h.lastDecision;
+            while (!h.times.isEmpty() && now - h.times.peekFirst() >= window) {
+                h.times.removeFirst();
             }
-            lastGeneration = generation;
-            if (times.size() >= max) {
-                return lastDecision = "ESCALATE";
+            h.lastFailureGeneration = generation;
+            if (h.times.size() >= max) {
+                return h.lastDecision = "ESCALATE";
             }
-            int ordinal = times.size() + 1;
+            int ordinal = h.times.size() + 1;
             long backoff = minBackoff;
             for (int i = 1; i < ordinal && backoff < maxBackoff; i++) {
                 backoff = Math.min(maxBackoff, backoff * 2);
             }
-            times.addLast(now);
-            return lastDecision = "RESTART:" + backoff;
+            h.times.addLast(now);
+            return h.lastDecision = "RESTART:" + backoff;
         }
 
-        int occupancy() { return times.size(); }
+        void resetAfterStability(ActorId id, long generation) {
+            History h = histories.get(id);
+            if (h == null) {
+                if (histories.size() >= maxTrackedActors)
+                    throw new IllegalStateException("history capacity exhausted");
+                h = new History();
+                histories.put(id, h);
+            }
+            if ((h.lastFailureGeneration > 0 && generation <= h.lastFailureGeneration)
+                    || generation < h.stableGeneration)
+                throw new IllegalArgumentException("not newer");
+            h.times.clear();
+            h.stableGeneration = generation;
+            h.lastDecision = null;
+        }
+
+        boolean forget(ActorId id, long generation) {
+            History h = histories.get(id);
+            if (h == null) return false;
+            if (generation < h.lastFailureGeneration || generation < h.stableGeneration)
+                throw new IllegalArgumentException("stale forget");
+            return histories.remove(id, h);
+        }
+
+        int occupancy(ActorId id) {
+            History h = histories.get(id);
+            return h == null ? 0 : h.times.size();
+        }
+        int trackedActors() { return histories.size(); }
         void tick(long delta) { now += delta; }
     }
 
@@ -163,20 +209,45 @@ public final class OreslangRestartContractSynthetic {
         catch (IllegalStateException expected) { exhaustedClosed = true; }
         check(exhaustedClosed, "16 generation exhaustion fails closed");
 
-        RestartLimiter limiter = new RestartLimiter(3, 10_000, 100, 800);
-        check("RESTART:100".equals(limiter.decide(1)), "17 first bounded backoff");
-        check("RESTART:100".equals(limiter.decide(1)) && limiter.occupancy() == 1,
+        ActorId policyActor = new ActorId("policy-A");
+        RestartLimiter limiter = new RestartLimiter(3, 2, 10_000, 100, 800);
+        check("RESTART:100".equals(limiter.decide(policyActor, 1)), "17 first bounded backoff");
+        check("RESTART:100".equals(limiter.decide(policyActor, 1))
+                        && limiter.occupancy(policyActor) == 1,
                 "18 repeated CONTROL observation is idempotent");
         limiter.tick(1);
-        check("RESTART:200".equals(limiter.decide(2)), "19 exponential backoff");
+        check("RESTART:200".equals(limiter.decide(policyActor, 2)), "19 exponential backoff");
         limiter.tick(1);
-        check("RESTART:400".equals(limiter.decide(3)), "20 third bounded restart");
+        check("RESTART:400".equals(limiter.decide(policyActor, 3)), "20 third bounded restart");
         limiter.tick(1);
-        check("ESCALATE".equals(limiter.decide(4)), "21 restart storm escalates");
+        check("ESCALATE".equals(limiter.decide(policyActor, 4)), "21 restart storm escalates");
 
-        System.out.println("SYNTHETIC JAVA CONTRACT: 21/21 invariants passed");
-        System.out.println("JAVA_SOURCE_SHA=2b4288a03e108359c4d9ed936fd57a5f03556b66");
-        System.out.println("JAVA_SOURCE_TREE=a962d1e89d2091bfc62e74d89aff42c1472c46e5");
+        boolean sameGenerationResetRejected = false;
+        try { limiter.resetAfterStability(policyActor, 4); }
+        catch (IllegalArgumentException expected) { sameGenerationResetRejected = true; }
+        check(sameGenerationResetRejected, "22 stability reset requires newer generation");
+        limiter.resetAfterStability(policyActor, 5);
+        check(limiter.occupancy(policyActor) == 0, "23 newer stable generation resets budget");
+
+        ActorId second = new ActorId("policy-B");
+        ActorId third = new ActorId("policy-C");
+        check("RESTART:100".equals(limiter.decide(second, 1)), "24 second actor tracked");
+        check("ESCALATE".equals(limiter.decide(third, 1))
+                        && limiter.trackedActors() == 2,
+                "25 full history table fails closed without eviction");
+        check(limiter.forget(second, 1) && limiter.trackedActors() == 1,
+                "26 quiescent exact generation can release history capacity");
+        check("RESTART:100".equals(limiter.decide(third, 1)),
+                "27 released history capacity admits new actor");
+
+        boolean staleForgetRejected = false;
+        try { limiter.forget(policyActor, 4); }
+        catch (IllegalArgumentException expected) { staleForgetRejected = true; }
+        check(staleForgetRejected, "28 stale generation cannot erase newer policy state");
+
+        System.out.println("SYNTHETIC JAVA CONTRACT: 28/28 invariants passed");
+        System.out.println("JAVA_SOURCE_SHA=25652ce5fb6803557e849ef7b608f61a75bb6ee5");
+        System.out.println("JAVA_SOURCE_TREE=460564ecfc9b9e0b190fad7e722b39b5f894cc46");
         System.out.println("LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7");
         System.out.println("LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad");
         System.out.println("NOTE=source-free model; no private Oreslang source copied");
