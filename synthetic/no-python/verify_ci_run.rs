@@ -1702,9 +1702,18 @@ fn write_source_free_report(path: &Path) -> Result<(), String> {
     let runner_name = env::var("RUNNER_NAME").unwrap_or_default();
 
     sha(&expected_head).map_err(|e| e.to_string())?;
-    sha(&observed_head).map_err(|e| e.to_string())?;
-    sha(&observed_tree).map_err(|e| e.to_string())?;
     sha(&trigger_sha).map_err(|e| e.to_string())?;
+    if source_outcome == "success" {
+        sha(&observed_head).map_err(|e| e.to_string())?;
+        sha(&observed_tree).map_err(|e| e.to_string())?;
+    } else {
+        if !observed_head.is_empty() {
+            sha(&observed_head).map_err(|e| e.to_string())?;
+        }
+        if !observed_tree.is_empty() {
+            sha(&observed_tree).map_err(|e| e.to_string())?;
+        }
+    }
 
     let trigger_matches =
         trigger_sha == observed_head && source_outcome == "success";
