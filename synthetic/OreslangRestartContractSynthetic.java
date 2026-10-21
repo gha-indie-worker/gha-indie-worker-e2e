@@ -5,6 +5,14 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class OreslangRestartContractSynthetic {
     private record ActorId(String value) { }
@@ -201,6 +209,81 @@ public final class OreslangRestartContractSynthetic {
     }
 
 
+    private enum FailureKind { THROW, RAISE, PANIC }
+
+    private record ControlEvent(Ref child, Ref parent, FailureKind kind) { }
+
+    private interface TypedControlHandler {
+        default void onThrow(ControlEvent event) throws Exception { }
+        default void onRaise(ControlEvent event) throws Exception { }
+        default void onPanic(ControlEvent event) throws Exception { }
+    }
+
+    private static final class RetainedControls {
+        private final Map<ActorId, ControlEvent> retained = new HashMap<>();
+
+        void retain(ControlEvent event) {
+            if (retained.putIfAbsent(event.child.id, event) != null)
+                throw new IllegalStateException("duplicate retained control");
+        }
+
+        boolean contains(ControlEvent event) {
+            return retained.get(event.child.id) == event;
+        }
+
+        boolean acknowledge(ControlEvent event) {
+            return retained.remove(event.child.id, event);
+        }
+    }
+
+    private static final class SerializedControlLane implements AutoCloseable {
+        private final Ref owner;
+        private final ExecutorService executor = Executors.newSingleThreadExecutor();
+        private final ThreadLocal<Boolean> controlCapability =
+                ThreadLocal.withInitial(() -> false);
+        private final AtomicInteger active = new AtomicInteger();
+        private final AtomicInteger maxActive = new AtomicInteger();
+
+        SerializedControlLane(Ref owner) {
+            this.owner = owner;
+        }
+
+        Future<?> submitUser(Runnable task) {
+            return executor.submit(task);
+        }
+
+        Future<?> submitControl(ControlEvent event, TypedControlHandler handler) {
+            if (event.parent != owner)
+                throw new IllegalArgumentException("stale parent generation");
+            return executor.submit(() -> {
+                if (controlCapability.get())
+                    throw new IllegalStateException("nested control");
+                int current = active.incrementAndGet();
+                maxActive.accumulateAndGet(current, Math::max);
+                controlCapability.set(true);
+                try {
+                    switch (event.kind) {
+                        case THROW -> handler.onThrow(event);
+                        case RAISE -> handler.onRaise(event);
+                        case PANIC -> handler.onPanic(event);
+                    }
+                } finally {
+                    controlCapability.remove();
+                    active.decrementAndGet();
+                }
+                return null;
+            });
+        }
+
+        boolean inControl() { return controlCapability.get(); }
+        int maxActive() { return maxActive.get(); }
+
+        @Override public void close() throws Exception {
+            executor.shutdownNow();
+            executor.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
     }
@@ -347,9 +430,133 @@ public final class OreslangRestartContractSynthetic {
                         && authoritativeLimiter.occupancy(controlledReplacement.id) == 0,
                 "34 stale ref cannot reset same-id replacement budget");
 
-        System.out.println("SYNTHETIC JAVA CONTRACT: 34/34 invariants passed");
-        System.out.println("JAVA_SOURCE_SHA=3e1c352f8ddaca5773c6a5e66d0a0992f5d43545");
-        System.out.println("JAVA_SOURCE_TREE=a5cf3d594d64b7ec2dbc787d3a1ee4f91fb70c89");
+        Ref parentV1 = new Ref(new ActorId("supervisor"), 7);
+        Ref parentV2 = new Ref(parentV1.id, 8);
+        Ref throwChild = new Ref(new ActorId("throw-child"), 1);
+        Ref raiseChild = new Ref(new ActorId("raise-child"), 1);
+        Ref panicChild = new Ref(new ActorId("panic-child"), 1);
+        RetainedControls retainedControls = new RetainedControls();
+        ControlEvent throwEvent = new ControlEvent(throwChild, parentV1, FailureKind.THROW);
+        ControlEvent raiseEvent = new ControlEvent(raiseChild, parentV1, FailureKind.RAISE);
+        ControlEvent panicEvent = new ControlEvent(panicChild, parentV1, FailureKind.PANIC);
+        retainedControls.retain(throwEvent);
+        retainedControls.retain(raiseEvent);
+        retainedControls.retain(panicEvent);
+
+        AtomicBoolean ordinaryActive = new AtomicBoolean();
+        AtomicBoolean overlapped = new AtomicBoolean();
+        AtomicBoolean privileged = new AtomicBoolean();
+        AtomicInteger throwsSeen = new AtomicInteger();
+        AtomicInteger raisesSeen = new AtomicInteger();
+        AtomicInteger panicsSeen = new AtomicInteger();
+        CountDownLatch ordinaryEntered = new CountDownLatch(1);
+        CountDownLatch releaseOrdinary = new CountDownLatch(1);
+        CountDownLatch firstControl = new CountDownLatch(1);
+
+        try (SerializedControlLane laneModel = new SerializedControlLane(parentV1)) {
+            Future<?> user = laneModel.submitUser(() -> {
+                ordinaryActive.set(true);
+                ordinaryEntered.countDown();
+                try {
+                    releaseOrdinary.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(interrupted);
+                } finally {
+                    ordinaryActive.set(false);
+                }
+            });
+            check(ordinaryEntered.await(5, TimeUnit.SECONDS), "35 ordinary turn entered");
+
+            Future<?> queuedControl = laneModel.submitControl(
+                    panicEvent,
+                    new TypedControlHandler() {
+                        @Override public void onPanic(ControlEvent event) {
+                            privileged.set(laneModel.inControl());
+                            overlapped.set(ordinaryActive.get());
+                            panicsSeen.incrementAndGet();
+                            firstControl.countDown();
+                        }
+                    });
+            Thread.sleep(20);
+            check(firstControl.getCount() == 1, "36 control cannot re-enter ordinary turn");
+            releaseOrdinary.countDown();
+            user.get(5, TimeUnit.SECONDS);
+            queuedControl.get(5, TimeUnit.SECONDS);
+            check(privileged.get() && !overlapped.get(),
+                    "37 control runs with scoped privilege after ordinary turn");
+
+            TypedControlHandler typed = new TypedControlHandler() {
+                private void pause() throws InterruptedException {
+                    Thread.sleep(5);
+                }
+                @Override public void onThrow(ControlEvent event) throws Exception {
+                    check(event.parent == parentV1, "exact parent throw");
+                    throwsSeen.incrementAndGet();
+                    pause();
+                }
+                @Override public void onRaise(ControlEvent event) throws Exception {
+                    check(event.parent == parentV1, "exact parent raise");
+                    raisesSeen.incrementAndGet();
+                    pause();
+                }
+                @Override public void onPanic(ControlEvent event) throws Exception {
+                    check(event.parent == parentV1, "exact parent panic");
+                    panicsSeen.incrementAndGet();
+                    pause();
+                }
+            };
+            Future<?> ft = laneModel.submitControl(throwEvent, typed);
+            Future<?> fr = laneModel.submitControl(raiseEvent, typed);
+            Future<?> fp = laneModel.submitControl(panicEvent, typed);
+            ft.get(5, TimeUnit.SECONDS);
+            fr.get(5, TimeUnit.SECONDS);
+            fp.get(5, TimeUnit.SECONDS);
+            check(throwsSeen.get() == 1 && raisesSeen.get() == 1 && panicsSeen.get() == 2,
+                    "38 typed THROW RAISE PANIC dispatch");
+            check(laneModel.maxActive() == 1,
+                    "39 supervisor control is single-flight");
+
+            ControlEvent handlerFailure =
+                    new ControlEvent(new Ref(new ActorId("handler-failure"), 1),
+                            parentV1, FailureKind.PANIC);
+            retainedControls.retain(handlerFailure);
+            Future<?> failedHandler = laneModel.submitControl(
+                    handlerFailure,
+                    new TypedControlHandler() {
+                        @Override public void onPanic(ControlEvent event) {
+                            throw new IllegalStateException("handler failed");
+                        }
+                    });
+            boolean failed = false;
+            try {
+                failedHandler.get(5, TimeUnit.SECONDS);
+            } catch (ExecutionException expectedFailure) {
+                failed = true;
+            }
+            check(failed && retainedControls.contains(handlerFailure),
+                    "40 handler failure retains authoritative child control");
+        }
+
+        boolean staleParentRejected = false;
+        try (SerializedControlLane replacementLane = new SerializedControlLane(parentV2)) {
+            try {
+                replacementLane.submitControl(panicEvent, new TypedControlHandler() { });
+            } catch (IllegalArgumentException expectedFailure) {
+                staleParentRejected = true;
+            }
+        }
+        check(staleParentRejected,
+                "41 old parent generation control cannot retarget replacement parent");
+
+        check(retainedControls.acknowledge(throwEvent)
+                        && retainedControls.acknowledge(raiseEvent)
+                        && retainedControls.acknowledge(panicEvent),
+                "42 retained controls require explicit acknowledgement");
+
+        System.out.println("SYNTHETIC JAVA CONTRACT: 42/42 invariants passed");
+        System.out.println("JAVA_SOURCE_SHA=8af1fd66d27197e1d38d97b710069ecf76f374f8");
+        System.out.println("JAVA_SOURCE_TREE=6ad8684e90dd9c027116b5ef8fa571fdc10d87b3");
         System.out.println("LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7");
         System.out.println("LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad");
         System.out.println("NOTE=source-free model; no private Oreslang source copied");
