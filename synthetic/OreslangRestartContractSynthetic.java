@@ -169,6 +169,38 @@ public final class OreslangRestartContractSynthetic {
         }
     }
 
+    private static final class ControlRegistry {
+        private final Map<ActorId, Long> retained = new HashMap<>();
+
+        void retain(Ref failed) {
+            if (retained.putIfAbsent(failed.id, failed.generation) != null)
+                throw new IllegalStateException("duplicate retained CONTROL");
+        }
+
+        String evaluate(
+                RestartLimiter limiter,
+                ActorId id,
+                long generation) {
+            Long current = retained.get(id);
+            if (current == null || current.longValue() != generation) return null;
+            return limiter.decide(id, generation);
+        }
+
+        boolean consume(ActorId id, long generation) {
+            return retained.remove(id, generation);
+        }
+
+        void resetAfterStability(
+                RestartLimiter limiter,
+                Registry registry,
+                Ref stable) {
+            if (registry.resolveExact(stable) != stable)
+                throw new IllegalArgumentException("stability requires exact live ref");
+            limiter.resetAfterStability(stable.id, stable.generation);
+        }
+    }
+
+
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
     }
@@ -272,9 +304,52 @@ public final class OreslangRestartContractSynthetic {
         }
         check(retryRejected, "30 failed admission still consumes one-shot restart permit");
 
-        System.out.println("SYNTHETIC JAVA CONTRACT: 30/30 invariants passed");
-        System.out.println("JAVA_SOURCE_SHA=4ad3136bca62a210160280122f7140d0a217329d");
-        System.out.println("JAVA_SOURCE_TREE=c4ec071b27277ec9925428d81216b1a6a039e793");
+        Registry controlActors = new Registry();
+        Ref controlledFailed = controlActors.spawnFresh("controlled-A");
+        ControlRegistry controls = new ControlRegistry();
+        controls.retain(controlledFailed);
+        RestartLimiter authoritativeLimiter =
+                new RestartLimiter(2, 2, 10_000, 0, 0);
+
+        check(controls.evaluate(
+                        authoritativeLimiter,
+                        controlledFailed.id,
+                        controlledFailed.generation + 1) == null
+                        && authoritativeLimiter.trackedActors() == 0,
+                "31 fabricated generation cannot consume authoritative budget");
+
+        check("RESTART:0".equals(controls.evaluate(
+                        authoritativeLimiter,
+                        controlledFailed.id,
+                        controlledFailed.generation))
+                        && authoritativeLimiter.occupancy(controlledFailed.id) == 1,
+                "32 exact retained CONTROL alone can consume policy budget");
+
+        check(controls.consume(controlledFailed.id, controlledFailed.generation)
+                        && controls.evaluate(
+                                authoritativeLimiter,
+                                controlledFailed.id,
+                                controlledFailed.generation) == null,
+                "33 consumed CONTROL cannot be policy-evaluated again");
+
+        controlActors.retire(controlledFailed);
+        Ref controlledReplacement = controlActors.restart(controlledFailed);
+        controls.resetAfterStability(
+                authoritativeLimiter, controlActors, controlledReplacement);
+        boolean staleStableResetRejected = false;
+        try {
+            controls.resetAfterStability(
+                    authoritativeLimiter, controlActors, controlledFailed);
+        } catch (IllegalArgumentException expected) {
+            staleStableResetRejected = true;
+        }
+        check(staleStableResetRejected
+                        && authoritativeLimiter.occupancy(controlledReplacement.id) == 0,
+                "34 stale ref cannot reset same-id replacement budget");
+
+        System.out.println("SYNTHETIC JAVA CONTRACT: 34/34 invariants passed");
+        System.out.println("JAVA_SOURCE_SHA=3e1c352f8ddaca5773c6a5e66d0a0992f5d43545");
+        System.out.println("JAVA_SOURCE_TREE=a5cf3d594d64b7ec2dbc787d3a1ee4f91fb70c89");
         System.out.println("LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7");
         System.out.println("LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad");
         System.out.println("NOTE=source-free model; no private Oreslang source copied");
