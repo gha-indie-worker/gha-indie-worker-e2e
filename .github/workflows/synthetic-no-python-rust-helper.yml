@@ -32,6 +32,12 @@ jobs:
           /tmp/contract-gate-tests enum_overlap_exhaustive
           /tmp/contract-gate-tests enum_nominal_boundaries
           rustc --edition=2021 -D warnings synthetic/no-python/contract_gate.rs -o /tmp/contract-gate
+          rustc --edition=2021 -D warnings --test synthetic/no-python/scalar_run.rs -o /tmp/scalar-run-tests
+          /tmp/scalar-run-tests sha256_vector
+          /tmp/scalar-run-tests command_split
+          /tmp/scalar-run-tests diagnostics_fail_closed
+          /tmp/scalar-run-tests symlink_and_hardlink_rejected
+          rustc --edition=2021 -D warnings synthetic/no-python/scalar_run.rs -o /tmp/scalar-run
           mkdir -p /tmp/aot-fixtures
           /tmp/aot-fixture make-negative /tmp/aot-fixtures
           test -s /tmp/aot-fixtures/valid.wasm
