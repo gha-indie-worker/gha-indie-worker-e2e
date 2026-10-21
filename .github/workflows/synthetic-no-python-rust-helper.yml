@@ -18,9 +18,11 @@ jobs:
         run: |
           set -euo pipefail
           rustc --version
+
           rustc --edition=2021 -D warnings --test synthetic/no-python/aot_fixture.rs -o /tmp/aot-fixture-tests
           /tmp/aot-fixture-tests
           rustc --edition=2021 -D warnings synthetic/no-python/aot_fixture.rs -o /tmp/aot-fixture
+
           rustc --edition=2021 -D warnings --test synthetic/no-python/contract_gate.rs -o /tmp/contract-gate-tests
           /tmp/contract-gate-tests sha256_known_vector
           /tmp/contract-gate-tests sha1_known_vector
@@ -32,30 +34,28 @@ jobs:
           /tmp/contract-gate-tests enum_overlap_exhaustive
           /tmp/contract-gate-tests enum_nominal_boundaries
           rustc --edition=2021 -D warnings synthetic/no-python/contract_gate.rs -o /tmp/contract-gate
+
           rustc --edition=2021 -D warnings --test synthetic/no-python/scalar_run.rs -o /tmp/scalar-run-tests
           /tmp/scalar-run-tests sha256_vector
           /tmp/scalar-run-tests command_split
           /tmp/scalar-run-tests diagnostics_fail_closed
           /tmp/scalar-run-tests symlink_and_hardlink_rejected
           rustc --edition=2021 -D warnings synthetic/no-python/scalar_run.rs -o /tmp/scalar-run
+
           rustc --edition=2021 -D warnings --test synthetic/no-python/actor_arena_receipt.rs -o /tmp/arena-receipt-tests
           /tmp/arena-receipt-tests
           rustc --edition=2021 -D warnings synthetic/no-python/actor_arena_receipt.rs -o /tmp/arena-receipt
+
           rustc --edition=2021 -D warnings --test synthetic/no-python/shared_domain_receipt.rs -o /tmp/shared-domain-receipt-tests
           /tmp/shared-domain-receipt-tests
           rustc --edition=2021 -D warnings synthetic/no-python/shared_domain_receipt.rs -o /tmp/shared-domain-receipt
+
           rustc --edition=2021 -D warnings synthetic/no-python/verify_ci_run.rs -o /tmp/verify-ci-run
           /tmp/verify-ci-run --self-test | tee /tmp/verify-ci-run-selftest.txt
-          grep -Eq 'CI_EVIDENCE_REGRESSIONS=([9][5-9]|[1-9][0-9]{2,})          mkdir -p /tmp/aot-fixtures
-          /tmp/aot-fixture make-negative /tmp/aot-fixtures
-          test -s /tmp/aot-fixtures/valid.wasm
-          test -s /tmp/aot-fixtures/start.wasm
-          cp /tmp/aot-fixtures/valid.wasm /tmp/aot-fixtures/corrupt.wasm
-          before="$(sha256sum /tmp/aot-fixtures/corrupt.wasm | cut -d ' ' -f 1)"
-          /tmp/aot-fixture corrupt /tmp/aot-fixtures/corrupt.wasm
-          after="$(sha256sum /tmp/aot-fixtures/corrupt.wasm | cut -d ' ' -f 1)"
-          test "$before" != "$after"
- /tmp/verify-ci-run-selftest.txt
+          count="$(sed -n 's/^CI_EVIDENCE_REGRESSIONS=//p' /tmp/verify-ci-run-selftest.txt)"
+          test -n "$count"
+          test "$count" -ge 95
+
           mkdir -p /tmp/aot-fixtures
           /tmp/aot-fixture make-negative /tmp/aot-fixtures
           test -s /tmp/aot-fixtures/valid.wasm
