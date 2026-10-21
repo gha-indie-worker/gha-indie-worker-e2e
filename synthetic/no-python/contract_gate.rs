@@ -581,8 +581,452 @@ fn verify_reactive(root: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(test))]
+
+fn push_field(out: &mut Vec<u8>, text: &str) -> Result<(), String> {
+    let raw = text.as_bytes();
+    if raw.is_empty() || raw.len() > 512 {
+        return Err("empty or unbounded ABI field".into());
+    }
+    out.extend_from_slice(&(raw.len() as u32).to_be_bytes());
+    out.extend_from_slice(raw);
+    Ok(())
+}
+
+fn positive_i32(value: &Json) -> Result<u32, String> {
+    let Json::Number(raw) = value else {
+        return Err("invalid i32 enum tag".into());
+    };
+    if raw.chars().any(|ch| matches!(ch, '.' | 'e' | 'E')) {
+        return Err("invalid i32 enum tag".into());
+    }
+    let parsed: i64 = raw.parse().map_err(|_| "invalid i32 enum tag".to_string())?;
+    if !(1..=0x7fff_ffff).contains(&parsed) {
+        return Err("invalid i32 enum tag".into());
+    }
+    Ok(parsed as u32)
+}
+
+fn nullary_schema_bytes(identity: &str, visibility: &str, cases: &Json) -> Result<Vec<u8>, String> {
+    require(matches!(visibility, "private" | "public"), "unsupported export visibility")?;
+    require(
+        identity.contains('.') && !identity.starts_with('.') && !identity.ends_with('.'),
+        "unqualified enum symbol",
+    )?;
+    let cases = array(cases)?;
+    require((1..=1024).contains(&cases.len()), "invalid AOT enum case count")?;
+
+    let mut out = Vec::new();
+    push_field(&mut out, "ores-nullary-enum-tag32-schema-v2")?;
+    push_field(&mut out, identity)?;
+    push_field(&mut out, visibility)?;
+    push_field(&mut out, &cases.len().to_string())?;
+
+    let mut previous = 0u32;
+    let mut names = BTreeSet::new();
+    for case in cases {
+        let tag = positive_i32(field(case, "tag")?)?;
+        let name = string(field(case, "name")?)?;
+        if tag <= previous || !names.insert(name.to_string()) {
+            return Err("unordered or duplicated enum case".into());
+        }
+        let mut chars = name.chars();
+        let first = chars.next().ok_or_else(|| "nonportable enum case".to_string())?;
+        if !first.is_ascii() || !(first.is_ascii_alphabetic() || first == '_') {
+            return Err("nonportable enum case".into());
+        }
+        if !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+            return Err("nonportable enum case".into());
+        }
+        previous = tag;
+        push_field(&mut out, name)?;
+        out.extend_from_slice(&tag.to_be_bytes());
+    }
+    Ok(out)
+}
+
+fn verify_nullary_tag32(root: &Path) -> Result<(), String> {
+    let path = root.join("contracts/v2/enum_tag32_schema_v2_vectors.json");
+    let raw = fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let doc = parse_json(&raw)?;
+    require(
+        string(field(&doc, "version")?)? == "nullary-enum-tag32-schema-v2",
+        "tag32 vector version drift",
+    )?;
+    require(
+        string(field(&doc, "status")?)? == "host-only-not-guest-executable",
+        "tag32 status drift",
+    )?;
+    let identity = string(field(&doc, "qualified_enum_id")?)?;
+    let cases = field(&doc, "cases")?;
+    let layouts = array(field(&doc, "layouts")?)?;
+    let mut visibilities = BTreeSet::new();
+    let mut hashes = BTreeSet::new();
+    let mut originals = Vec::new();
+    for layout in layouts {
+        let visibility = string(field(layout, "visibility")?)?;
+        visibilities.insert(visibility);
+        let wire = nullary_schema_bytes(identity, visibility, cases)?;
+        let wire_hex = hex(&wire);
+        require(
+            string(field(layout, "canonical_bytes_hex")?)? == wire_hex,
+            "tag32 canonical bytes drift",
+        )?;
+        let digest = hex(&sha256(&wire));
+        require(
+            string(field(layout, "schema_sha256")?)? == digest,
+            "tag32 schema hash drift",
+        )?;
+        hashes.insert(digest);
+        originals.push(wire);
+    }
+    require(
+        visibilities == BTreeSet::from(["private", "public"]),
+        "tag32 visibility inventory drift",
+    )?;
+    require(hashes.len() == 2, "public/private tag32 schemas coalesced")?;
+
+    let exported = nullary_schema_bytes(identity, "public", cases)?;
+    let renamed = nullary_schema_bytes(&(identity.to_string() + "2"), "private", cases)?;
+    let mut changed = cases.clone();
+    let Json::Array(items) = &mut changed else {
+        return Err("cases must be array".into());
+    };
+    let last = items.last_mut().ok_or_else(|| "cases missing".to_string())?;
+    let Json::Object(fields) = last else {
+        return Err("case must be object".into());
+    };
+    let tag = fields
+        .iter_mut()
+        .find(|(key, _)| key == "tag")
+        .ok_or_else(|| "case tag missing".to_string())?;
+    let current = positive_i32(&tag.1)?;
+    tag.1 = Json::Number((current + 1).to_string());
+    let modified = nullary_schema_bytes(identity, "private", &changed)?;
+    let private = nullary_schema_bytes(identity, "private", cases)?;
+    let unique: BTreeSet<Vec<u8>> = [private, exported, renamed, modified].into_iter().collect();
+    require(unique.len() == 4, "tag32 schema changes coalesced")?;
+    require(originals.len() == 2, "tag32 layouts incomplete")?;
+    Ok(())
+}
+
+fn codepoint_forbidden(cp: u32) -> bool {
+    let java_whitespace = cp == 0x1680
+        || cp == 0x2028
+        || cp == 0x2029
+        || cp == 0x205f
+        || cp == 0x3000
+        || (0x2000..=0x2006).contains(&cp)
+        || (0x2008..=0x200a).contains(&cp);
+    let space_chars = matches!(cp, 0x00a0 | 0x2007 | 0x202f);
+    let bidi = matches!(cp, 0x061c | 0x2060 | 0xfeff)
+        || (0x200b..=0x200f).contains(&cp)
+        || (0x202a..=0x202e).contains(&cp)
+        || (0x2066..=0x2069).contains(&cp);
+    java_whitespace || space_chars || bidi || cp <= 0x20 || (0x7f..=0x9f).contains(&cp)
+}
+
+fn valid_nominal_id(value: &str) -> Result<(), String> {
+    if value.is_empty() || value.chars().all(|c| codepoint_forbidden(c as u32)) {
+        return Err("empty nominal identity".into());
+    }
+    if value.chars().count() > 512 {
+        return Err("nominal identity character budget exceeded".into());
+    }
+    for ch in value.chars() {
+        if codepoint_forbidden(ch as u32) {
+            return Err("control or invisible codepoint".into());
+        }
+    }
+    if value.len() > 512 {
+        return Err("nominal identity UTF-8 budget exceeded".into());
+    }
+    Ok(())
+}
+
+fn qualified_nominal(value: &str) -> Result<(), String> {
+    valid_nominal_id(value)?;
+    require(
+        value.contains('.') && !value.starts_with('.') && !value.ends_with('.') && !value.contains(".."),
+        "unqualified enum symbol",
+    )
+}
+
+fn eos_encode(value: &str) -> Result<String, String> {
+    valid_nominal_id(value)?;
+    Ok(format!("{}_{}", value.len(), hex(value.as_bytes())))
+}
+
+fn eos_symbol(vector: &Json) -> Result<String, String> {
+    let domain = string(field(vector, "domain")?)?;
+    require(matches!(domain, "MODULE" | "INSTANCE" | "STATIC"), "invalid callable domain")?;
+    let owner = string(field(vector, "owner")?)?;
+    qualified_nominal(owner)?;
+    let name = string(field(vector, "name")?)?;
+    valid_nominal_id(name)?;
+    let params = array(field(vector, "params")?)?;
+    require(params.len() <= 64, "signature arity bound")?;
+
+    let mut result = format!(
+        "eos2{}{}{}a{}_",
+        eos_encode(domain)?,
+        eos_encode(owner)?,
+        eos_encode(name)?,
+        params.len()
+    );
+    for parameter in params {
+        let kind = string(field(parameter, "kind")?)?;
+        let identity = string(field(parameter, "identity")?)?;
+        match kind {
+            "FIXED" => {
+                require(
+                    matches!(identity, "bool" | "int" | "string" | "float"),
+                    "unknown fixed scalar",
+                )?;
+                require(
+                    object(parameter)?.iter().all(|(key, _)| key != "case"),
+                    "unknown fixed scalar",
+                )?;
+                result.push('F');
+                result.push_str(&eos_encode(identity)?);
+            }
+            "ENUM" => {
+                qualified_nominal(identity)?;
+                require(
+                    object(parameter)?.iter().all(|(key, _)| key != "case"),
+                    "whole enum cannot carry a case",
+                )?;
+                result.push('E');
+                result.push_str(&eos_encode(identity)?);
+            }
+            "CASE" => {
+                qualified_nominal(identity)?;
+                let case = string(field(parameter, "case")?)?;
+                result.push('C');
+                result.push_str(&eos_encode(identity)?);
+                result.push_str(&eos_encode(case)?);
+            }
+            _ => return Err("unknown parameter kind".into()),
+        }
+    }
+    Ok(result)
+}
+
+fn verify_slot_abi(root: &Path) -> Result<(), String> {
+    let path = root.join("contracts/v2/enum_case_slot_abi_vectors.json");
+    let raw = fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let doc = parse_json(&raw)?;
+    require(
+        string(field(&doc, "version")?)? == "enum-case-slot-abi-v2",
+        "EOS2 vector version drift",
+    )?;
+    require(
+        string(field(&doc, "status")?)? == "host-reference-only-not-guest-executable",
+        "EOS2 status drift",
+    )?;
+    let bounds = field(&doc, "bounds")?;
+    for (key, expected) in [
+        ("max_parameters", "64"),
+        ("max_candidates", "128"),
+        ("max_enum_cases", "1024"),
+        ("max_registered_enums", "4096"),
+        ("max_identity_utf8_bytes", "512"),
+    ] {
+        require(
+            field(bounds, key)? == &Json::Number(expected.into()),
+            "EOS2 bound drift",
+        )?;
+    }
+    let mut symbols = BTreeSet::new();
+    for vector in array(field(&doc, "vectors")?)? {
+        let actual = eos_symbol(vector)?;
+        require(
+            string(field(vector, "expected")?)? == actual,
+            "EOS2 golden symbol drift",
+        )?;
+        require(symbols.insert(actual), "EOS2 symbol collision")?;
+    }
+    require(symbols.len() >= 8, "EOS2 vector inventory shrank")?;
+
+    for value in [
+        "", ".Foo", "root..Foo", "root.Foo.", "root.\u{202e}Foo", "root.\u{200d}Foo",
+        "root.\u{0080}Foo", "root.\u{feff}Foo",
+    ] {
+        assert!(qualified_nominal(value).is_err(), "malformed nominal admitted: {value:?}");
+    }
+    for value in ["\u{00a0}", "\u{2007}", "\u{202f}"] {
+        assert!(eos_encode(value).is_err(), "invisible separator admitted");
+    }
+    require(eos_encode(&"A".repeat(513)).is_err(), "513-character identity admitted")?;
+    require(eos_encode(&"é".repeat(300)).is_err(), "oversized UTF-8 identity admitted")?;
+    require(
+        eos_encode(&"A".repeat(512))? == format!("512_{}", "41".repeat(512)),
+        "512-byte identity boundary drift",
+    )?;
+    Ok(())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+enum ModelParam {
+    Fixed(&'static str),
+    Enum(&'static str),
+    Case(&'static str, &'static str),
+}
+
+fn model_domain(enum_id: &str) -> &'static [&'static str] {
+    match enum_id {
+        "root.Foo" => &["A", "B", "C"],
+        "root.Bar" => &["X", "Y"],
+        _ => &[],
+    }
+}
+
+fn model_params() -> Vec<ModelParam> {
+    vec![
+        ModelParam::Fixed("int"),
+        ModelParam::Fixed("string"),
+        ModelParam::Enum("root.Foo"),
+        ModelParam::Case("root.Foo", "A"),
+        ModelParam::Case("root.Foo", "B"),
+        ModelParam::Case("root.Foo", "C"),
+        ModelParam::Enum("root.Bar"),
+        ModelParam::Case("root.Bar", "X"),
+        ModelParam::Case("root.Bar", "Y"),
+    ]
+}
+
+fn param_enum_id(param: &ModelParam) -> Option<&'static str> {
+    match param {
+        ModelParam::Enum(id) | ModelParam::Case(id, _) => Some(id),
+        ModelParam::Fixed(_) => None,
+    }
+}
+
+fn overlap_algorithm(left: &[ModelParam], right: &[ModelParam]) -> &'static str {
+    let mut left_subset = true;
+    let mut right_subset = true;
+    let mut disjoint = false;
+    for (a, b) in left.iter().zip(right) {
+        if matches!(a, ModelParam::Fixed(_)) || matches!(b, ModelParam::Fixed(_)) {
+            if a != b {
+                return "INVALID";
+            }
+            continue;
+        }
+        if param_enum_id(a) != param_enum_id(b) {
+            disjoint = true;
+            continue;
+        }
+        match (a, b) {
+            (ModelParam::Enum(_), ModelParam::Case(_, _)) => left_subset = false,
+            (ModelParam::Case(_, _), ModelParam::Enum(_)) => right_subset = false,
+            (ModelParam::Case(_, a_case), ModelParam::Case(_, b_case)) if a_case != b_case => {
+                disjoint = true;
+            }
+            _ => {}
+        }
+    }
+    if disjoint {
+        "DISJOINT"
+    } else if left_subset && right_subset {
+        "EQUAL"
+    } else if left_subset {
+        "LEFT_NARROWER"
+    } else if right_subset {
+        "RIGHT_NARROWER"
+    } else {
+        "INVALID"
+    }
+}
+
+type ModelValue = Vec<(String, Option<String>)>;
+
+fn denotation(signature: &[ModelParam]) -> BTreeSet<ModelValue> {
+    let mut result: BTreeSet<ModelValue> = BTreeSet::from([Vec::new()]);
+    for param in signature {
+        let values: Vec<(String, Option<String>)> = match param {
+            ModelParam::Fixed(name) => vec![(name.to_string(), None)],
+            ModelParam::Enum(id) => model_domain(id)
+                .iter()
+                .map(|case| (id.to_string(), Some((*case).to_string())))
+                .collect(),
+            ModelParam::Case(id, case) => vec![(id.to_string(), Some((*case).to_string()))],
+        };
+        let mut next = BTreeSet::new();
+        for prefix in &result {
+            for value in &values {
+                let mut tuple = prefix.clone();
+                tuple.push(value.clone());
+                next.insert(tuple);
+            }
+        }
+        result = next;
+    }
+    result
+}
+
+fn overlap_oracle(left: &[ModelParam], right: &[ModelParam]) -> &'static str {
+    for (a, b) in left.iter().zip(right) {
+        if (matches!(a, ModelParam::Fixed(_)) || matches!(b, ModelParam::Fixed(_))) && a != b {
+            return "INVALID";
+        }
+    }
+    let left_values = denotation(left);
+    let right_values = denotation(right);
+    if left_values.is_disjoint(&right_values) {
+        "DISJOINT"
+    } else if left_values == right_values {
+        "EQUAL"
+    } else if left_values.is_subset(&right_values) {
+        "LEFT_NARROWER"
+    } else if right_values.is_subset(&left_values) {
+        "RIGHT_NARROWER"
+    } else {
+        "INVALID"
+    }
+}
+
+fn verify_overlap_model() -> Result<(), String> {
+    let params = model_params();
+    let mut signatures = Vec::new();
+    for a in &params {
+        for b in &params {
+            signatures.push(vec![a.clone(), b.clone()]);
+        }
+    }
+    require(signatures.len() == 81, "overlap model signature inventory drift")?;
+    for left in &signatures {
+        for right in &signatures {
+            require(
+                overlap_algorithm(left, right) == overlap_oracle(left, right),
+                "overlap model disagrees with finite-domain oracle",
+            )?;
+        }
+    }
+    let crossed_left = vec![ModelParam::Case("root.Foo", "A"), ModelParam::Enum("root.Bar")];
+    let crossed_right = vec![ModelParam::Enum("root.Foo"), ModelParam::Case("root.Bar", "Y")];
+    require(
+        overlap_algorithm(&crossed_left, &crossed_right) == "INVALID",
+        "crossed specialization must reject",
+    )?;
+    let narrow = vec![ModelParam::Case("root.Foo", "A")];
+    let whole = vec![ModelParam::Enum("root.Foo")];
+    require(
+        overlap_algorithm(&narrow, &whole) == "LEFT_NARROWER"
+            && overlap_algorithm(&whole, &narrow) == "RIGHT_NARROWER",
+        "parent/case nesting drift",
+    )?;
+    Ok(())
+}
+
+fn verify_enum_v2(root: &Path) -> Result<(), String> {
+    verify_nullary_tag32(root)?;
+    verify_slot_abi(root)?;
+    verify_overlap_model()
+}
+
+#[cfg(not(test))]
 fn usage() -> ! {
-    eprintln!("usage: contract_gate <integration|serde|reactive> [repository-root]");
+    eprintln!("usage: contract_gate <integration|serde|reactive|enum-v2> [repository-root]");
     process::exit(2);
 }
 
@@ -598,6 +1042,7 @@ fn main() {
         "integration" => verify_integration_root(&root),
         "serde" => verify_serde(&root),
         "reactive" => verify_reactive(&root),
+        "enum-v2" => verify_enum_v2(&root),
         _ => usage(),
     };
     match result {
@@ -690,9 +1135,24 @@ mod tests {
     }
 
     #[test]
+    fn enum_overlap_exhaustive() {
+        verify_overlap_model().unwrap();
+    }
+
+    #[test]
+    fn enum_nominal_boundaries() {
+        assert!(qualified_nominal("root.Foo").is_ok());
+        assert!(qualified_nominal("root..Foo").is_err());
+        assert!(eos_encode("\u{00a0}").is_err());
+        assert!(eos_encode(&"A".repeat(512)).is_ok());
+        assert!(eos_encode(&"A".repeat(513)).is_err());
+    }
+
+    #[test]
     fn real_contracts_pass() {
         verify_serde(Path::new(".")).unwrap();
         verify_reactive(Path::new(".")).unwrap();
         verify_integration_root(Path::new(".")).unwrap();
+        verify_enum_v2(Path::new(".")).unwrap();
     }
 }
