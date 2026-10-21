@@ -1416,6 +1416,307 @@ fn verify_numeric(root: &Path) -> Result<(), String> {
     verify_numeric_source_i64(&source_raw, &source)
 }
 
+
+const ARENA_BACKENDS: [&str; 5] = ["java", "llvm", "net", "wasm", "forge"];
+const ARENA_INVARIANTS: [&str; 24] = [
+    "actor-private-by-default",
+    "actorref-never-grants-arena-access",
+    "persistent-outlives-turn-not-retirement",
+    "scratch-invalid-after-every-turn-exit",
+    "stale-generation-and-wrong-incarnation-rejected",
+    "no-guest-raw-pointer-or-memorysegment-exposure",
+    "logical-retirement-revokes-new-authority-before-quiescence",
+    "external-lifetime-pins-grant-no-memory-access",
+    "continuation-borrow-ffi-io-owners-must-register-lifetime-pins",
+    "physical-reclaim-waits-for-live-turns-borrows-and-external-pins",
+    "late-callbacks-cannot-resurrect-retired-authority",
+    "external-pin-release-is-idempotent",
+    "shared-domain-reclaim-waits-for-members-and-leases",
+    "reused-capacity-is-zeroized-before-admission",
+    "retirement-is-monotonic-and-idempotent",
+    "unsupported-shared-domain-or-general-lowering-fails-closed",
+    "quota-charge-precedes-allocation-and-failed-admission-is-accounting-neutral",
+    "rejected-construction-does-not-consume-capability-identity",
+    "nontrivial-values-drop-exactly-once-before-bulk-reclaim",
+    "identity-and-generation-counters-never-wrap-into-live-authority",
+    "double-release-and-retire-races-cannot-underflow-accounting",
+    "cross-actor-capability-transfer-never-grants-private-arena-authority",
+    "snapshot-restore-cannot-revive-retired-or-stale-authority",
+    "reclaim-failure-keeps-logical-retirement-and-dirty-capacity-unpublished",
+];
+
+fn arena_stage(backend: &str) -> &'static str {
+    match backend {
+        "java" => "candidate-host-runtime-ffm",
+        "llvm" => "candidate-compiled-i64-substrate",
+        "net" => "candidate-host-only-unmanaged",
+        "wasm" => "candidate-host-only-page-pool",
+        "forge" => "candidate-host-only-native-arena",
+        _ => "",
+    }
+}
+
+fn arena_pin_model(backend: &str) -> &'static str {
+    match backend {
+        "java" => "persistent-region-loan-prototype",
+        "llvm" => "native-loan-accounting-prototype",
+        "net" | "wasm" | "forge" => "external-lifetime-lease-prototype",
+        _ => "",
+    }
+}
+
+fn arena_shared_domain(backend: &str) -> &'static str {
+    match backend {
+        "llvm" => "host-prototype-unverified",
+        "java" | "net" | "wasm" | "forge" => "unsupported",
+        _ => "",
+    }
+}
+
+fn verify_actor_arena_doc(doc: &Json) -> Result<(), String> {
+    exact_keys(
+        doc,
+        &["contract", "version", "scope", "required_invariants", "backend_support"],
+    )?;
+    require(
+        string(field(doc, "contract")?)? == "oreslang-shared-actor-arenas-v1",
+        "contract identity/version mismatch",
+    )?;
+    require(
+        field(doc, "version")? == &Json::Number("1".into()),
+        "contract identity/version mismatch",
+    )?;
+    require(
+        string(field(doc, "scope")?)?
+            == "source-free lifecycle/capability declarations; not guest runtime, compiler, AOT, callback-wiring, or zero-GC certification",
+        "scope must not promote runtime certification",
+    )?;
+    require(
+        string_array(field(doc, "required_invariants")?)? == ARENA_INVARIANTS,
+        "actor-arena lifecycle invariants drifted",
+    )?;
+
+    let support = field(doc, "backend_support")?;
+    exact_keys(support, &ARENA_BACKENDS)?;
+    let required = [
+        "candidate_stage",
+        "general_guest_value_lowering",
+        "shared_domain_arena",
+        "lifetime_pin_model",
+        "continuation_ffi_io_wiring",
+        "zero_host_gc_certified",
+        "native_aot_certified",
+        "exact_head_ci_certified",
+    ];
+    for backend in ARENA_BACKENDS {
+        let row = field(support, backend)?;
+        exact_keys(row, &required)?;
+        require(
+            string(field(row, "candidate_stage")?)? == arena_stage(backend),
+            "candidate stage promotion/drift",
+        )?;
+        require(
+            string(field(row, "general_guest_value_lowering")?)? == "unsupported",
+            "general guest lowering promoted without proof",
+        )?;
+        require(
+            string(field(row, "shared_domain_arena")?)? == arena_shared_domain(backend),
+            "shared domain declaration drift",
+        )?;
+        require(
+            string(field(row, "lifetime_pin_model")?)? == arena_pin_model(backend),
+            "lifetime pin model drift",
+        )?;
+        require(
+            string(field(row, "continuation_ffi_io_wiring")?)? == "unverified",
+            "callback wiring promoted without proof",
+        )?;
+        for flag in [
+            "zero_host_gc_certified",
+            "native_aot_certified",
+            "exact_head_ci_certified",
+        ] {
+            require(
+                field(row, flag)? == &Json::Bool(false),
+                "unverified certification promoted",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn verify_actor_arena_raw(raw: &[u8]) -> Result<Json, String> {
+    require(
+        !raw.is_empty() && raw.len() <= 64 * 1024,
+        "invalid actor-arena contract bytes",
+    )?;
+    require(!raw.starts_with(&[0xef, 0xbb, 0xbf]), "BOM forbidden")?;
+    let doc = parse_json(raw).map_err(|_| "invalid canonical UTF-8 JSON".to_string())?;
+    verify_actor_arena_doc(&doc)?;
+    Ok(doc)
+}
+
+fn arena_backend_row_mut<'a>(doc: &'a mut Json, backend: &str) -> Result<&'a mut Json, String> {
+    field_mut(field_mut(doc, "backend_support")?, backend)
+}
+
+fn actor_arena_mutation_suite(base: &Json, raw: &[u8]) -> Result<usize, String> {
+    verify_actor_arena_doc(base)?;
+    let mut checks = 1usize;
+
+    require(
+        verify_actor_arena_raw(b"{\"contract\":\"x\",\"contract\":\"y\"}").is_err(),
+        "duplicate wire key accepted",
+    )?;
+    checks += 1;
+
+    let mut bom = vec![0xef, 0xbb, 0xbf];
+    bom.extend_from_slice(raw);
+    require(verify_actor_arena_raw(&bom).is_err(), "BOM accepted")?;
+    checks += 1;
+
+    let reject = |name: &str, candidate: Json| -> Result<(), String> {
+        require(
+            verify_actor_arena_doc(&candidate).is_err(),
+            &format!("actor arena mutation escaped: {name}"),
+        )
+    };
+
+    {
+        let mut d = base.clone();
+        let support = object_mut(field_mut(&mut d, "backend_support")?)?;
+        support.retain(|(key, _)| key != "forge");
+        reject("missing backend", d)?;
+    }
+    checks += 1;
+
+    {
+        let mut d = base.clone();
+        object_mut(field_mut(&mut d, "backend_support")?)?
+            .push(("other".into(), Json::Object(Vec::new())));
+        reject("unknown backend", d)?;
+    }
+    checks += 1;
+
+    {
+        let mut d = base.clone();
+        array_mut(field_mut(&mut d, "required_invariants")?)?.pop();
+        reject("invariant drop", d)?;
+    }
+    checks += 1;
+
+    {
+        let mut d = base.clone();
+        array_mut(field_mut(&mut d, "required_invariants")?)?.reverse();
+        reject("invariant reorder", d)?;
+    }
+    checks += 1;
+
+    for invariant in [
+        "actorref-never-grants-arena-access",
+        "scratch-invalid-after-every-turn-exit",
+        "logical-retirement-revokes-new-authority-before-quiescence",
+        "external-lifetime-pins-grant-no-memory-access",
+        "continuation-borrow-ffi-io-owners-must-register-lifetime-pins",
+        "physical-reclaim-waits-for-live-turns-borrows-and-external-pins",
+        "late-callbacks-cannot-resurrect-retired-authority",
+        "external-pin-release-is-idempotent",
+        "shared-domain-reclaim-waits-for-members-and-leases",
+        "quota-charge-precedes-allocation-and-failed-admission-is-accounting-neutral",
+        "rejected-construction-does-not-consume-capability-identity",
+        "nontrivial-values-drop-exactly-once-before-bulk-reclaim",
+        "identity-and-generation-counters-never-wrap-into-live-authority",
+        "double-release-and-retire-races-cannot-underflow-accounting",
+        "cross-actor-capability-transfer-never-grants-private-arena-authority",
+        "snapshot-restore-cannot-revive-retired-or-stale-authority",
+        "reclaim-failure-keeps-logical-retirement-and-dirty-capacity-unpublished",
+    ] {
+        let mut d = base.clone();
+        let invariants = array_mut(field_mut(&mut d, "required_invariants")?)?;
+        invariants.retain(|value| value != &Json::String(invariant.into()));
+        reject(invariant, d)?;
+        checks += 1;
+    }
+
+    for (backend, key, value, name) in [
+        ("java", "general_guest_value_lowering", "implemented", "java general lowering"),
+        ("llvm", "general_guest_value_lowering", "implemented", "llvm general lowering"),
+        ("java", "lifetime_pin_model", "external-lifetime-lease-prototype", "java pin model"),
+        ("llvm", "lifetime_pin_model", "external-lifetime-lease-prototype", "llvm pin model"),
+        ("net", "lifetime_pin_model", "none", "net pin model"),
+        ("wasm", "lifetime_pin_model", "none", "wasm pin model"),
+        ("forge", "lifetime_pin_model", "none", "forge pin model"),
+        ("llvm", "shared_domain_arena", "implemented", "llvm shared domain"),
+    ] {
+        let mut d = base.clone();
+        *field_mut(arena_backend_row_mut(&mut d, backend)?, key)? = Json::String(value.into());
+        reject(name, d)?;
+        checks += 1;
+    }
+
+    {
+        let mut all_rejected = true;
+        for backend in ["java", "net", "wasm", "forge"] {
+            let mut d = base.clone();
+            *field_mut(arena_backend_row_mut(&mut d, backend)?, "shared_domain_arena")? =
+                Json::String("implemented".into());
+            all_rejected &= verify_actor_arena_doc(&d).is_err();
+        }
+        require(all_rejected, "non-LLVM shared domain promotion escaped")?;
+    }
+    checks += 1;
+
+    for (key, value, name) in [
+        ("continuation_ffi_io_wiring", Json::String("implemented".into()), "callback wiring"),
+        ("zero_host_gc_certified", Json::Bool(true), "zero host GC"),
+        ("native_aot_certified", Json::Bool(true), "native AOT"),
+        ("exact_head_ci_certified", Json::Bool(true), "exact head CI"),
+    ] {
+        let mut all_rejected = true;
+        for backend in ARENA_BACKENDS {
+            let mut d = base.clone();
+            *field_mut(arena_backend_row_mut(&mut d, backend)?, key)? = value.clone();
+            all_rejected &= verify_actor_arena_doc(&d).is_err();
+        }
+        require(all_rejected, &format!("{name} promotion escaped"))?;
+        checks += 1;
+    }
+
+    {
+        let mut d = base.clone();
+        *field_mut(arena_backend_row_mut(&mut d, "llvm")?, "candidate_stage")? =
+            Json::String("candidate-host-only-native-arena".into());
+        reject("candidate stage drift", d)?;
+    }
+    checks += 1;
+
+    {
+        let mut d = base.clone();
+        object_mut(arena_backend_row_mut(&mut d, "net")?)?
+            .retain(|(key, _)| key != "lifetime_pin_model");
+        reject("missing pin model", d)?;
+    }
+    checks += 1;
+
+    {
+        let mut d = base.clone();
+        object_mut(arena_backend_row_mut(&mut d, "forge")?)?
+            .push(("callback_magic".into(), Json::Bool(true)));
+        reject("unknown backend field", d)?;
+    }
+    checks += 1;
+
+    require(checks == 40, "actor arena test inventory differs from pinned 40")?;
+    Ok(checks)
+}
+
+fn verify_actor_arena_lifecycle(root: &Path) -> Result<usize, String> {
+    let path = root.join("contracts/v1/actor_arena_lifecycle_v1.json");
+    let raw = fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let doc = verify_actor_arena_raw(&raw)?;
+    actor_arena_mutation_suite(&doc, &raw)
+}
+
 fn object_mut(value: &mut Json) -> Result<&mut Vec<(String, Json)>, String> {
     match value {
         Json::Object(v) => Ok(v),
@@ -2263,7 +2564,7 @@ fn verify_enum_v2(root: &Path) -> Result<(), String> {
 
 #[cfg(not(test))]
 fn usage() -> ! {
-    eprintln!("usage: contract_gate <integration|serde|reactive|actor-pipeline|structural-v2|numeric|enum-v2> [repository-root]");
+    eprintln!("usage: contract_gate <integration|serde|reactive|actor-pipeline|actor-arena-lifecycle|structural-v2|numeric|enum-v2> [repository-root]");
     process::exit(2);
 }
 
@@ -2280,6 +2581,9 @@ fn main() {
         "serde" => verify_serde(&root),
         "reactive" => verify_reactive(&root),
         "actor-pipeline" => verify_actor_pipeline(&root),
+        "actor-arena-lifecycle" => verify_actor_arena_lifecycle(&root).map(|count| {
+            println!("ACTOR_ARENA_LIFECYCLE_V1_PASS checks={count} source-free-policy-only");
+        }),
         "structural-v2" => verify_structural_v2(&root),
         "numeric" => verify_numeric(&root),
         "enum-v2" => verify_enum_v2(&root),
@@ -2404,6 +2708,11 @@ mod tests {
     #[test]
     fn structural_v2_self_test() {
         verify_structural_v2(Path::new(".")).unwrap();
+    }
+
+    #[test]
+    fn actor_arena_lifecycle_real_fixture() {
+        assert_eq!(verify_actor_arena_lifecycle(Path::new(".")).unwrap(), 40);
     }
 
     #[test]
