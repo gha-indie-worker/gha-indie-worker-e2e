@@ -62,8 +62,8 @@ jobs:
           grep -F 'SYNTHETIC JAVA CONTRACT: 42/42 invariants passed' <<<"$output"
           grep -F 'JAVA_SOURCE_SHA=8af1fd66d27197e1d38d97b710069ecf76f374f8' <<<"$output"
           grep -F 'JAVA_SOURCE_TREE=6ad8684e90dd9c027116b5ef8fa571fdc10d87b3' <<<"$output"
-          grep -F 'LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7' <<<"$output"
-          grep -F 'LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad' <<<"$output"
+          grep -F 'LLVM_SOURCE_SHA=9e28dcdd855b22fdfadb47978ebfcd2c918f703b' <<<"$output"
+          grep -F 'LLVM_SOURCE_TREE=e9bf402f802c0654ab602d1f12be4f10bfa58c50' <<<"$output"
 
       - name: Compile source-free native DONE model
         shell: bash
@@ -79,6 +79,23 @@ jobs:
           output="$(./synthetic-native-done)"
           printf '%s\n' "$output"
           grep -F 'SYNTHETIC NATIVE DONE CONTRACT: 2000/2000 passed' <<<"$output"
-          grep -F 'LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7' <<<"$output"
-          grep -F 'LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad' <<<"$output"
+          grep -F 'LLVM_SOURCE_SHA=9e28dcdd855b22fdfadb47978ebfcd2c918f703b' <<<"$output"
+          grep -F 'LLVM_SOURCE_TREE=e9bf402f802c0654ab602d1f12be4f10bfa58c50' <<<"$output"
+          grep -F 'NOTE=source-free model; no private Oreslang source copied' <<<"$output"
+
+      - name: Compile source-free native typed CONTROL model
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++20 -O2 -pthread synthetic/native_typed_control.cpp -o synthetic-native-typed-control
+
+      - name: Execute native typed supervisor CONTROL model
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$(./synthetic-native-typed-control)"
+          printf '%s\n' "$output"
+          grep -F 'SYNTHETIC NATIVE TYPED CONTROL: 8/8 invariants passed' <<<"$output"
+          grep -F 'LLVM_SOURCE_SHA=9e28dcdd855b22fdfadb47978ebfcd2c918f703b' <<<"$output"
+          grep -F 'LLVM_SOURCE_TREE=e9bf402f802c0654ab602d1f12be4f10bfa58c50' <<<"$output"
           grep -F 'NOTE=source-free model; no private Oreslang source copied' <<<"$output"
