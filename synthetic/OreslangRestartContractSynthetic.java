@@ -288,7 +288,7 @@ public final class OreslangRestartContractSynthetic {
         if (!condition) throw new AssertionError(message);
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         Registry registry = new Registry();
         Ref first = registry.spawnFresh("worker-A");
 
