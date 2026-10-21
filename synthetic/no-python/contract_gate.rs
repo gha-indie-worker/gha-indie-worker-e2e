@@ -802,6 +802,620 @@ fn verify_structural_v2(root: &Path) -> Result<(), String> {
     require(rejected == 14, "structural self-test count drift")
 }
 
+
+struct I64Expr<'a> {
+    bytes: &'a [u8],
+    at: usize,
+}
+
+impl<'a> I64Expr<'a> {
+    fn new(text: &'a str) -> Self {
+        Self { bytes: text.as_bytes(), at: 0 }
+    }
+
+    fn parse(mut self) -> Result<i64, String> {
+        let value = self.expr()?;
+        if self.at != self.bytes.len() {
+            return Err("unsupported source numeric expression".into());
+        }
+        Ok(value)
+    }
+
+    fn expr(&mut self) -> Result<i64, String> {
+        let mut value = self.term()?;
+        loop {
+            match self.bytes.get(self.at) {
+                Some(b'+') => {
+                    self.at += 1;
+                    value = value
+                        .checked_add(self.term()?)
+                        .ok_or_else(|| "i64 intermediate overflow".to_string())?;
+                }
+                Some(b'-') => {
+                    self.at += 1;
+                    value = value
+                        .checked_sub(self.term()?)
+                        .ok_or_else(|| "i64 intermediate overflow".to_string())?;
+                }
+                _ => return Ok(value),
+            }
+        }
+    }
+
+    fn term(&mut self) -> Result<i64, String> {
+        let mut value = self.unary()?;
+        while self.bytes.get(self.at) == Some(&b'*') {
+            self.at += 1;
+            value = value
+                .checked_mul(self.unary()?)
+                .ok_or_else(|| "i64 intermediate overflow".to_string())?;
+        }
+        Ok(value)
+    }
+
+    fn unary(&mut self) -> Result<i64, String> {
+        if self.bytes.get(self.at) == Some(&b'-') {
+            self.at += 1;
+            let start = self.at;
+            while matches!(self.bytes.get(self.at), Some(b'0'..=b'9')) {
+                self.at += 1;
+            }
+            if self.at > start {
+                let raw = std::str::from_utf8(&self.bytes[start..self.at])
+                    .map_err(|_| "invalid integer literal".to_string())?;
+                let magnitude: u128 = raw.parse().map_err(|_| "invalid integer literal".to_string())?;
+                if magnitude == (1u128 << 63) {
+                    return Ok(i64::MIN);
+                }
+                if magnitude > i64::MAX as u128 {
+                    return Err("out of literal bounds".into());
+                }
+                return (magnitude as i64)
+                    .checked_neg()
+                    .ok_or_else(|| "i64 intermediate overflow".to_string());
+            }
+            let value = self.unary()?;
+            return value
+                .checked_neg()
+                .ok_or_else(|| "i64 intermediate overflow".to_string());
+        }
+        self.primary()
+    }
+
+    fn primary(&mut self) -> Result<i64, String> {
+        if self.bytes.get(self.at) == Some(&b'(') {
+            self.at += 1;
+            let value = self.expr()?;
+            if self.bytes.get(self.at) != Some(&b')') {
+                return Err("unclosed numeric group".into());
+            }
+            self.at += 1;
+            return Ok(value);
+        }
+        let start = self.at;
+        while matches!(self.bytes.get(self.at), Some(b'0'..=b'9')) {
+            self.at += 1;
+        }
+        if self.at == start {
+            return Err("unsupported source numeric expression".into());
+        }
+        let raw = std::str::from_utf8(&self.bytes[start..self.at])
+            .map_err(|_| "invalid integer literal".to_string())?;
+        let magnitude: u128 = raw.parse().map_err(|_| "invalid integer literal".to_string())?;
+        if magnitude > i64::MAX as u128 {
+            return Err("out of literal bounds".into());
+        }
+        Ok(magnitude as i64)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DecimalExact {
+    negative: bool,
+    digits: Vec<u8>,
+    exponent10: i32,
+}
+
+impl DecimalExact {
+    fn zero() -> Self {
+        Self { negative: false, digits: vec![0], exponent10: 0 }
+    }
+
+    fn parse(text: &str) -> Result<Self, String> {
+        if text.is_empty() {
+            return Err("empty decimal".into());
+        }
+        let (negative, rest) = if let Some(value) = text.strip_prefix('-') {
+            (true, value)
+        } else if let Some(value) = text.strip_prefix('+') {
+            (false, value)
+        } else {
+            (false, text)
+        };
+        if rest.is_empty() {
+            return Err("invalid decimal".into());
+        }
+        let (mantissa, exponent_part) = match rest.find(['e', 'E']) {
+            Some(index) => (&rest[..index], Some(&rest[index + 1..])),
+            None => (rest, None),
+        };
+        let exponent: i32 = match exponent_part {
+            Some(value) if !value.is_empty() => value.parse().map_err(|_| "invalid decimal exponent".to_string())?,
+            Some(_) => return Err("invalid decimal exponent".into()),
+            None => 0,
+        };
+        let mut coefficient = String::new();
+        let mut fractional = 0i32;
+        let mut dot_seen = false;
+        for ch in mantissa.chars() {
+            match ch {
+                '0'..='9' => {
+                    coefficient.push(ch);
+                    if dot_seen {
+                        fractional += 1;
+                    }
+                }
+                '.' if !dot_seen => dot_seen = true,
+                _ => return Err("invalid exact decimal".into()),
+            }
+        }
+        if coefficient.is_empty() {
+            return Err("invalid exact decimal".into());
+        }
+        let trimmed = coefficient.trim_start_matches('0');
+        if trimmed.is_empty() {
+            return Ok(Self::zero());
+        }
+        let digits = trimmed.bytes().rev().map(|b| b - b'0').collect();
+        let mut value = Self {
+            negative,
+            digits,
+            exponent10: exponent - fractional,
+        };
+        value.normalize();
+        Ok(value)
+    }
+
+    fn normalize(&mut self) {
+        while self.digits.len() > 1 && self.digits.last() == Some(&0) {
+            self.digits.pop();
+        }
+        while self.digits.len() > 1 && self.digits.first() == Some(&0) {
+            self.digits.remove(0);
+            self.exponent10 += 1;
+        }
+        if self.digits.iter().all(|digit| *digit == 0) {
+            *self = Self::zero();
+        }
+    }
+
+    fn shifted_digits(&self, exponent: i32) -> Vec<u8> {
+        let shift = usize::try_from(self.exponent10 - exponent).expect("nonnegative decimal shift");
+        let mut out = vec![0; shift];
+        out.extend_from_slice(&self.digits);
+        out
+    }
+
+    fn cmp_abs_digits(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+        let mut a_len = a.len();
+        while a_len > 1 && a[a_len - 1] == 0 { a_len -= 1; }
+        let mut b_len = b.len();
+        while b_len > 1 && b[b_len - 1] == 0 { b_len -= 1; }
+        match a_len.cmp(&b_len) {
+            std::cmp::Ordering::Equal => {
+                for i in (0..a_len).rev() {
+                    match a[i].cmp(&b[i]) {
+                        std::cmp::Ordering::Equal => {}
+                        other => return other,
+                    }
+                }
+                std::cmp::Ordering::Equal
+            }
+            other => other,
+        }
+    }
+
+    fn add_abs(a: &[u8], b: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(a.len().max(b.len()) + 1);
+        let mut carry = 0u8;
+        for i in 0..a.len().max(b.len()) {
+            let sum = a.get(i).copied().unwrap_or(0) + b.get(i).copied().unwrap_or(0) + carry;
+            out.push(sum % 10);
+            carry = sum / 10;
+        }
+        if carry != 0 { out.push(carry); }
+        out
+    }
+
+    fn sub_abs(a: &[u8], b: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(a.len());
+        let mut borrow = 0i16;
+        for i in 0..a.len() {
+            let mut value = i16::from(a[i]) - borrow - i16::from(b.get(i).copied().unwrap_or(0));
+            if value < 0 {
+                value += 10;
+                borrow = 1;
+            } else {
+                borrow = 0;
+            }
+            out.push(value as u8);
+        }
+        while out.len() > 1 && out.last() == Some(&0) { out.pop(); }
+        out
+    }
+
+    fn add(&self, other: &Self) -> Self {
+        let exponent = self.exponent10.min(other.exponent10);
+        let a = self.shifted_digits(exponent);
+        let b = other.shifted_digits(exponent);
+        let (negative, digits) = if self.negative == other.negative {
+            (self.negative, Self::add_abs(&a, &b))
+        } else {
+            match Self::cmp_abs_digits(&a, &b) {
+                std::cmp::Ordering::Greater => (self.negative, Self::sub_abs(&a, &b)),
+                std::cmp::Ordering::Less => (other.negative, Self::sub_abs(&b, &a)),
+                std::cmp::Ordering::Equal => return Self::zero(),
+            }
+        };
+        let mut result = Self { negative, digits, exponent10: exponent };
+        result.normalize();
+        result
+    }
+
+    fn mul(&self, other: &Self) -> Self {
+        if self == &Self::zero() || other == &Self::zero() {
+            return Self::zero();
+        }
+        let mut accum = vec![0u16; self.digits.len() + other.digits.len()];
+        for (i, a) in self.digits.iter().enumerate() {
+            for (j, b) in other.digits.iter().enumerate() {
+                accum[i + j] += u16::from(*a) * u16::from(*b);
+            }
+        }
+        for i in 0..accum.len() - 1 {
+            let carry = accum[i] / 10;
+            accum[i] %= 10;
+            accum[i + 1] += carry;
+        }
+        while accum.last().is_some_and(|value| *value >= 10) {
+            let last = accum.len() - 1;
+            let carry = accum[last] / 10;
+            accum[last] %= 10;
+            accum.push(carry);
+        }
+        let digits = accum.into_iter().map(|value| value as u8).collect();
+        let mut result = Self {
+            negative: self.negative ^ other.negative,
+            digits,
+            exponent10: self.exponent10 + other.exponent10,
+        };
+        result.normalize();
+        result
+    }
+}
+
+#[derive(Clone, Copy)]
+enum NumericOperand {
+    Int(i64),
+    FloatBits(u64),
+}
+
+fn parse_hex_u64(text: &str) -> Result<u64, String> {
+    if text.len() != 16 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("binary64 bits must be 8 bytes".into());
+    }
+    u64::from_str_radix(text, 16).map_err(|_| "invalid binary64 bits".to_string())
+}
+
+fn numeric_operand(value: &Json) -> Result<NumericOperand, String> {
+    match string(field(value, "kind")?)? {
+        "int64" => {
+            let value: i64 = string(field(value, "decimal")?)?
+                .parse()
+                .map_err(|_| "int64 out of range".to_string())?;
+            Ok(NumericOperand::Int(value))
+        }
+        "bits" => Ok(NumericOperand::FloatBits(parse_hex_u64(string(field(value, "hex")?)?)?)),
+        _ => Err("unknown numeric operand kind".into()),
+    }
+}
+
+fn float_is_nan(bits: u64) -> bool {
+    ((bits >> 52) & 0x7ff) == 0x7ff && (bits & ((1u64 << 52) - 1)) != 0
+}
+
+fn compare_abs_int_float(integer: u64, bits: u64) -> std::cmp::Ordering {
+    let exponent_bits = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1u64 << 52) - 1);
+    if exponent_bits == 0x7ff {
+        return std::cmp::Ordering::Less;
+    }
+    if exponent_bits == 0 && fraction == 0 {
+        return integer.cmp(&0);
+    }
+    let (mantissa, exponent2) = if exponent_bits == 0 {
+        (fraction, -1074)
+    } else {
+        ((1u64 << 52) | fraction, exponent_bits - 1023 - 52)
+    };
+    if exponent2 >= 0 {
+        match (mantissa as u128).checked_shl(exponent2 as u32) {
+            Some(float_integer) => (integer as u128).cmp(&float_integer),
+            None => std::cmp::Ordering::Less,
+        }
+    } else {
+        let shift = (-exponent2) as u32;
+        match (integer as u128).checked_shl(shift) {
+            Some(scaled_integer) => scaled_integer.cmp(&(mantissa as u128)),
+            None => std::cmp::Ordering::Greater,
+        }
+    }
+}
+
+fn compare_int_float(integer: i64, bits: u64) -> Option<std::cmp::Ordering> {
+    if float_is_nan(bits) {
+        return None;
+    }
+    let negative_float = (bits >> 63) != 0;
+    let exponent_bits = (bits >> 52) & 0x7ff;
+    let fraction = bits & ((1u64 << 52) - 1);
+    if exponent_bits == 0x7ff && fraction == 0 {
+        return Some(if negative_float {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Less
+        });
+    }
+    if integer < 0 && !negative_float {
+        return Some(std::cmp::Ordering::Less);
+    }
+    if integer >= 0 && negative_float && (bits & 0x7fff_ffff_ffff_ffff) != 0 {
+        return Some(std::cmp::Ordering::Greater);
+    }
+    let abs_cmp = compare_abs_int_float(integer.unsigned_abs(), bits & 0x7fff_ffff_ffff_ffff);
+    Some(if integer < 0 && negative_float { abs_cmp.reverse() } else { abs_cmp })
+}
+
+fn compare_numeric(left: NumericOperand, right: NumericOperand) -> Option<std::cmp::Ordering> {
+    match (left, right) {
+        (NumericOperand::Int(a), NumericOperand::Int(b)) => Some(a.cmp(&b)),
+        (NumericOperand::Int(a), NumericOperand::FloatBits(b)) => compare_int_float(a, b),
+        (NumericOperand::FloatBits(a), NumericOperand::Int(b)) => compare_int_float(b, a).map(|o| o.reverse()),
+        (NumericOperand::FloatBits(a), NumericOperand::FloatBits(b)) => {
+            f64::from_bits(a).partial_cmp(&f64::from_bits(b))
+        }
+    }
+}
+
+fn json_bool(value: &Json) -> Result<bool, String> {
+    match value {
+        Json::Bool(value) => Ok(*value),
+        _ => Err("expected JSON boolean".into()),
+    }
+}
+
+fn shape(value: &Json, explicit: Option<&Json>) -> Result<(usize, usize), String> {
+    let rows = array(value)?;
+    let row_count = rows.len();
+    let column_count = if let Some(first) = rows.first() {
+        array(first)?.len()
+    } else if let Some(explicit) = explicit {
+        let dims = array(explicit)?;
+        if dims.len() != 2 { return Err("shape must have two dimensions".into()); }
+        let Json::Number(columns) = &dims[1] else { return Err("shape dimension must be integer".into()); };
+        columns.parse::<usize>().map_err(|_| "invalid shape dimension".to_string())?
+    } else {
+        0
+    };
+    for row in rows {
+        require(array(row)?.len() == column_count, "ragged matrix")?;
+    }
+    if let Some(explicit) = explicit {
+        let dims = array(explicit)?;
+        if dims.len() != 2 { return Err("shape must have two dimensions".into()); }
+        let parse_dim = |value: &Json| -> Result<usize, String> {
+            let Json::Number(raw) = value else { return Err("shape dimension must be integer".into()); };
+            raw.parse().map_err(|_| "invalid shape dimension".to_string())
+        };
+        require(
+            parse_dim(&dims[0])? == row_count && parse_dim(&dims[1])? == column_count,
+            "declared shape differs from data",
+        )?;
+    }
+    Ok((row_count, column_count))
+}
+
+fn explicit_field<'a>(value: &'a Json, key: &str) -> Option<&'a Json> {
+    object(value).ok()?.iter().find(|(name, _)| name == key).map(|(_, value)| value)
+}
+
+fn matrix_values(value: &Json) -> Result<Vec<Vec<DecimalExact>>, String> {
+    array(value)?
+        .iter()
+        .map(|row| {
+            array(row)?
+                .iter()
+                .map(|entry| DecimalExact::parse(string(entry)?))
+                .collect::<Result<Vec<_>, String>>()
+        })
+        .collect()
+}
+
+fn exact_matrix_product(case: &Json) -> Result<(Vec<Vec<DecimalExact>>, (usize, usize)), String> {
+    let lhs_json = field(case, "lhs")?;
+    let rhs_json = field(case, "rhs")?;
+    let (m, k) = shape(lhs_json, explicit_field(case, "lhs_shape"))?;
+    let (n_rows, n) = shape(rhs_json, explicit_field(case, "rhs_shape"))?;
+    require(k == n_rows, "shape_mismatch")?;
+    let lhs = matrix_values(lhs_json)?;
+    let rhs = matrix_values(rhs_json)?;
+    let mut product = vec![vec![DecimalExact::zero(); n]; m];
+    for i in 0..m {
+        for j in 0..n {
+            let mut total = DecimalExact::zero();
+            for p in 0..k {
+                total = total.add(&lhs[i][p].mul(&rhs[p][j]));
+            }
+            product[i][j] = total;
+        }
+    }
+    Ok((product, (m, n)))
+}
+
+fn verify_numeric_precision(doc: &Json) -> Result<(), String> {
+    require(string(field(doc, "schema_version")?)? == "1.0.0", "numeric schema version drift")?;
+    require(
+        string(field(doc, "status")?)? == "reference-only-not-guest-execution",
+        "numeric reference status drift",
+    )?;
+    for case in array(field(doc, "binary64_comparisons")?)? {
+        let ordering = compare_numeric(numeric_operand(field(case, "lhs")?)?, numeric_operand(field(case, "rhs")?)?);
+        let actual = [
+            ("eq", ordering == Some(std::cmp::Ordering::Equal)),
+            ("lt", ordering == Some(std::cmp::Ordering::Less)),
+            ("le", matches!(ordering, Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal))),
+            ("gt", ordering == Some(std::cmp::Ordering::Greater)),
+            ("ge", matches!(ordering, Some(std::cmp::Ordering::Greater | std::cmp::Ordering::Equal))),
+        ];
+        for (key, value) in actual {
+            require(json_bool(field(case, key)?)? == value, "binary64 comparison vector drift")?;
+        }
+    }
+    for case in array(field(doc, "decimal_matrices")?)? {
+        let expected_error = explicit_field(case, "error").map(string).transpose()?;
+        if expected_error == Some("shape_mismatch") {
+            require(exact_matrix_product(case).is_err(), "shape mismatch matrix unexpectedly accepted")?;
+            continue;
+        }
+        let (actual, actual_shape) = exact_matrix_product(case)?;
+        let expected_json = field(case, "expected")?;
+        let expected_shape = shape(expected_json, explicit_field(case, "expected_shape"))?;
+        require(actual_shape == expected_shape, "matrix result shape drift")?;
+        let expected = matrix_values(expected_json)?;
+        require(actual == expected, "exact decimal matrix vector drift")?;
+    }
+    Ok(())
+}
+
+fn verify_numeric_source_i64(raw: &[u8], doc: &Json) -> Result<(), String> {
+    require(
+        git_blob_sha1(raw) == "bbc319c19ecd007109d33592e210091eb267e5a2",
+        "source i64 fixture Git blob drift",
+    )?;
+    require(string(field(doc, "schema_version")?)? == "1.0.0", "source i64 schema drift")?;
+    require(
+        string(field(doc, "status")?)? == "reference-only-not-compiled-execution",
+        "source i64 status drift",
+    )?;
+    let cases = array(field(doc, "cases")?)?;
+    require(cases.len() == 7, "source i64 case inventory drift")?;
+    let mut ids = BTreeSet::new();
+    for case in cases {
+        require(ids.insert(string(field(case, "id")?)?), "duplicate source i64 case id")?;
+        let expression = string(field(case, "expression")?)?;
+        let expected: i64 = string(field(case, "expected")?)?
+            .parse()
+            .map_err(|_| "invalid expected i64".to_string())?;
+        require(I64Expr::new(expression).parse()? == expected, "source i64 oracle drift")?;
+    }
+    for (expression, expected) in [
+        ("-9223372036854775808", i64::MIN),
+        ("-9223372036854775808+1", i64::MIN + 1),
+        ("-9223372036854775807-1", i64::MIN),
+    ] {
+        require(I64Expr::new(expression).parse()? == expected, "i64 minimum handling drift")?;
+    }
+    for expression in [
+        "9223372036854775808",
+        "9223372036854775808-1",
+        "(9223372036854775808)-1",
+        "0-9223372036854775808",
+        "9223372036854775807+1",
+        "-9223372036854775808-1",
+        "-(-9223372036854775808)",
+        "--9223372036854775808",
+        "-9223372036854775808*-1",
+        "3037000500*3037000500",
+        "+1",
+        "1/2",
+        "True",
+        "1.0",
+    ] {
+        require(I64Expr::new(expression).parse().is_err(), "invalid i64 source expression admitted")?;
+    }
+    Ok(())
+}
+
+fn verify_numeric_backend(root: &Path, precision_raw: &[u8], precision: &Json) -> Result<(), String> {
+    require(
+        git_blob_sha1(precision_raw) == "cb28b5678d380f02c5e4e43bd763da04bdb996fe",
+        "reference vectors changed without cross-backend review",
+    )?;
+    verify_numeric_precision(precision)?;
+    let backend_path = root.join("contracts/v1/numeric-parity/backend.json");
+    let backend_raw = fs::read(&backend_path).map_err(|e| format!("read {}: {e}", backend_path.display()))?;
+    let backend = parse_json(&backend_raw)?;
+    require(string(field(&backend, "schema_version")?)? == "1.0.0", "numeric backend schema drift")?;
+    require(string(field(&backend, "backend")?)? == "wasm", "numeric backend identity drift")?;
+    require(
+        string(field(&backend, "reference_fixture_git_blob_sha")?)?
+            == "cb28b5678d380f02c5e4e43bd763da04bdb996fe",
+        "numeric precision fixture pin drift",
+    )?;
+    require(
+        string(field(&backend, "source_i64_fixture_git_blob_sha")?)?
+            == "bbc319c19ecd007109d33592e210091eb267e5a2",
+        "source i64 fixture pin drift",
+    )?;
+    let features = [
+        "source_i64",
+        "checked_i64_overflow",
+        "binary64_ordering",
+        "binary32_arithmetic",
+        "bigint_exact",
+        "decimal_exact",
+        "complex_binary64",
+        "decimal_matrix",
+        "source_division_to_float",
+    ];
+    let capabilities = field(&backend, "capabilities")?;
+    let evidence = field(&backend, "evidence")?;
+    exact_keys(capabilities, &features)?;
+    exact_keys(evidence, &features)?;
+    let statuses = BTreeSet::from([
+        "unsupported_explicit",
+        "delegated_unverified",
+        "implemented_unverified",
+        "reference_only",
+        "blocked_unsound",
+        "needs_audit",
+        "verified_compiled",
+    ]);
+    for feature in features {
+        let status = string(field(capabilities, feature)?)?;
+        require(statuses.contains(status), "unknown numeric capability status")?;
+        require(status != "verified_compiled", "compiled parity requires independently verified protected CI evidence")?;
+        require(object(field(evidence, feature)?)?.is_empty(), "unverified feature cannot attach self-reported test evidence")?;
+    }
+    require(
+        string(field(capabilities, "source_i64")?)? == "delegated_unverified",
+        "Wasm source_i64 capability scope drift",
+    )?;
+    Ok(())
+}
+
+fn verify_numeric(root: &Path) -> Result<(), String> {
+    let precision_path = root.join("contracts/v1/numeric-precision/cases.json");
+    let precision_raw = fs::read(&precision_path).map_err(|e| format!("read {}: {e}", precision_path.display()))?;
+    let precision = parse_json(&precision_raw)?;
+    verify_numeric_backend(root, &precision_raw, &precision)?;
+
+    let source_path = root.join("contracts/v1/numeric-parity/source-i64-cases.json");
+    let source_raw = fs::read(&source_path).map_err(|e| format!("read {}: {e}", source_path.display()))?;
+    let source = parse_json(&source_raw)?;
+    verify_numeric_source_i64(&source_raw, &source)
+}
+
 fn object_mut(value: &mut Json) -> Result<&mut Vec<(String, Json)>, String> {
     match value {
         Json::Object(v) => Ok(v),
@@ -1649,7 +2263,7 @@ fn verify_enum_v2(root: &Path) -> Result<(), String> {
 
 #[cfg(not(test))]
 fn usage() -> ! {
-    eprintln!("usage: contract_gate <integration|serde|reactive|actor-pipeline|structural-v2|enum-v2> [repository-root]");
+    eprintln!("usage: contract_gate <integration|serde|reactive|actor-pipeline|structural-v2|numeric|enum-v2> [repository-root]");
     process::exit(2);
 }
 
@@ -1667,6 +2281,7 @@ fn main() {
         "reactive" => verify_reactive(&root),
         "actor-pipeline" => verify_actor_pipeline(&root),
         "structural-v2" => verify_structural_v2(&root),
+        "numeric" => verify_numeric(&root),
         "enum-v2" => verify_enum_v2(&root),
         _ => usage(),
     };
@@ -1763,6 +2378,27 @@ mod tests {
     fn sha1_known_vector() {
         assert_eq!(hex(&sha1(b"abc")), "a9993e364706816aba3e25717850c26c9cd0d89d");
         assert_eq!(git_blob_sha1(b"test\n"), "9daeafb9864cf43055ae93beb0afd6c7d144bfa4");
+    }
+
+    #[test]
+    fn exact_decimal_arithmetic() {
+        let a = DecimalExact::parse("1e80").unwrap();
+        let b = DecimalExact::parse("-1e80").unwrap();
+        assert_eq!(a.add(&DecimalExact::parse("1").unwrap()).add(&b), DecimalExact::parse("1").unwrap());
+        assert_eq!(DecimalExact::parse("0.1").unwrap().mul(&DecimalExact::parse("0.3").unwrap()), DecimalExact::parse("0.03").unwrap());
+    }
+
+    #[test]
+    fn checked_i64_parser_rejects_overflow() {
+        assert_eq!(I64Expr::new("2+3*4").parse().unwrap(), 14);
+        assert_eq!(I64Expr::new("-9223372036854775808").parse().unwrap(), i64::MIN);
+        assert!(I64Expr::new("9223372036854775807+1").parse().is_err());
+        assert!(I64Expr::new("1/2").parse().is_err());
+    }
+
+    #[test]
+    fn numeric_real_vectors() {
+        verify_numeric(Path::new(".")).unwrap();
     }
 
     #[test]
