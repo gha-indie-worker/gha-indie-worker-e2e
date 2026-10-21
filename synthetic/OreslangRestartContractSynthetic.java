@@ -557,8 +557,8 @@ public final class OreslangRestartContractSynthetic {
         System.out.println("SYNTHETIC JAVA CONTRACT: 42/42 invariants passed");
         System.out.println("JAVA_SOURCE_SHA=8af1fd66d27197e1d38d97b710069ecf76f374f8");
         System.out.println("JAVA_SOURCE_TREE=6ad8684e90dd9c027116b5ef8fa571fdc10d87b3");
-        System.out.println("LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7");
-        System.out.println("LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad");
+        System.out.println("LLVM_SOURCE_SHA=9e28dcdd855b22fdfadb47978ebfcd2c918f703b");
+        System.out.println("LLVM_SOURCE_TREE=e9bf402f802c0654ab602d1f12be4f10bfa58c50");
         System.out.println("NOTE=source-free model; no private Oreslang source copied");
     }
 }
