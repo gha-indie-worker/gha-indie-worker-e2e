@@ -273,8 +273,8 @@ public final class OreslangRestartContractSynthetic {
         check(retryRejected, "30 failed admission still consumes one-shot restart permit");
 
         System.out.println("SYNTHETIC JAVA CONTRACT: 30/30 invariants passed");
-        System.out.println("JAVA_SOURCE_SHA=1ff422eec7f69d2e35e29d96d1169c67681ab324");
-        System.out.println("JAVA_SOURCE_TREE=3158d933b37b0500dc18015de2fc8ed76659855b");
+        System.out.println("JAVA_SOURCE_SHA=4ad3136bca62a210160280122f7140d0a217329d");
+        System.out.println("JAVA_SOURCE_TREE=c4ec071b27277ec9925428d81216b1a6a039e793");
         System.out.println("LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7");
         System.out.println("LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad");
         System.out.println("NOTE=source-free model; no private Oreslang source copied");
