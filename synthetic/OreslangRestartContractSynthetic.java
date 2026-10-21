@@ -159,6 +159,16 @@ public final class OreslangRestartContractSynthetic {
         void tick(long delta) { now += delta; }
     }
 
+    private static final class RestartPermit {
+        private boolean consumed;
+
+        void attempt(boolean admissionSucceeds) {
+            if (consumed) throw new IllegalStateException("already consumed");
+            consumed = true;
+            if (!admissionSucceeds) throw new IllegalStateException("admission failed");
+        }
+    }
+
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
     }
@@ -245,9 +255,26 @@ public final class OreslangRestartContractSynthetic {
         catch (IllegalArgumentException expected) { staleForgetRejected = true; }
         check(staleForgetRejected, "28 stale generation cannot erase newer policy state");
 
-        System.out.println("SYNTHETIC JAVA CONTRACT: 28/28 invariants passed");
-        System.out.println("JAVA_SOURCE_SHA=25652ce5fb6803557e849ef7b608f61a75bb6ee5");
-        System.out.println("JAVA_SOURCE_TREE=460564ecfc9b9e0b190fad7e722b39b5f894cc46");
+        RestartPermit permit = new RestartPermit();
+        boolean firstAdmissionFailed = false;
+        try {
+            permit.attempt(false);
+        } catch (IllegalStateException expected) {
+            firstAdmissionFailed = true;
+        }
+        check(firstAdmissionFailed, "29 failed restart admission is surfaced");
+
+        boolean retryRejected = false;
+        try {
+            permit.attempt(true);
+        } catch (IllegalStateException expected) {
+            retryRejected = true;
+        }
+        check(retryRejected, "30 failed admission still consumes one-shot restart permit");
+
+        System.out.println("SYNTHETIC JAVA CONTRACT: 30/30 invariants passed");
+        System.out.println("JAVA_SOURCE_SHA=1ff422eec7f69d2e35e29d96d1169c67681ab324");
+        System.out.println("JAVA_SOURCE_TREE=3158d933b37b0500dc18015de2fc8ed76659855b");
         System.out.println("LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7");
         System.out.println("LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad");
         System.out.println("NOTE=source-free model; no private Oreslang source copied");
