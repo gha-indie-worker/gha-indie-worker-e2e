@@ -38,11 +38,14 @@ jobs:
         run: |
           set -euo pipefail
           test -f synthetic/OreslangRestartContractSynthetic.java
+          test -f synthetic/native_done_order.cpp
           test ! -e private-oreslang-source
           test ! -e oreslang-source.java
+          test ! -e oreslang-source.llvm
           grep -F 'source-free model; no private Oreslang source copied' synthetic/OreslangRestartContractSynthetic.java
+          grep -F 'source-free model; no private Oreslang source copied' synthetic/native_done_order.cpp
 
-      - name: Compile source-free contract model
+      - name: Compile source-free Java contract model
         shell: bash
         run: |
           set -euo pipefail
@@ -50,13 +53,32 @@ jobs:
           mkdir synthetic-classes
           javac -d synthetic-classes synthetic/OreslangRestartContractSynthetic.java
 
-      - name: Execute generation and restart invariants
+      - name: Execute Java restart and policy invariants
         shell: bash
         run: |
           set -euo pipefail
           output="$(java -ea -cp synthetic-classes synthetic.OreslangRestartContractSynthetic)"
           printf '%s\n' "$output"
-          grep -F 'SYNTHETIC CONTRACT: 12/12 invariants passed' <<<"$output"
-          grep -F 'SOURCE_SHA=0343527520a5e2f2e160ce42894537daab48324b' <<<"$output"
-          grep -F 'SOURCE_TREE=f7d57bc61c9d5210b7acff48fa05670271777c2f' <<<"$output"
+          grep -F 'SYNTHETIC JAVA CONTRACT: 21/21 invariants passed' <<<"$output"
+          grep -F 'JAVA_SOURCE_SHA=2b4288a03e108359c4d9ed936fd57a5f03556b66' <<<"$output"
+          grep -F 'JAVA_SOURCE_TREE=a962d1e89d2091bfc62e74d89aff42c1472c46e5' <<<"$output"
+          grep -F 'LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7' <<<"$output"
+          grep -F 'LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad' <<<"$output"
+
+      - name: Compile source-free native DONE model
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ --version
+          g++ -std=c++20 -O2 -pthread synthetic/native_done_order.cpp -o synthetic-native-done
+
+      - name: Execute native DONE and reincarnation stress
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$(./synthetic-native-done)"
+          printf '%s\n' "$output"
+          grep -F 'SYNTHETIC NATIVE DONE CONTRACT: 2000/2000 passed' <<<"$output"
+          grep -F 'LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7' <<<"$output"
+          grep -F 'LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad' <<<"$output"
           grep -F 'NOTE=source-free model; no private Oreslang source copied' <<<"$output"
