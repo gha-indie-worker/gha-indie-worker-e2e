@@ -1,0 +1,32 @@
+name: Synthetic Rust no-Python helper
+on:
+  push:
+    branches:
+      - synthetic/no-python-rust-helper-20261021
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Compile and test Rust helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          rustc --edition=2021 -D warnings --test synthetic/no-python/aot_fixture.rs -o /tmp/aot-fixture-tests
+          /tmp/aot-fixture-tests
+          rustc --edition=2021 -D warnings synthetic/no-python/aot_fixture.rs -o /tmp/aot-fixture
+          mkdir -p /tmp/aot-fixtures
+          /tmp/aot-fixture make-negative /tmp/aot-fixtures
+          test -s /tmp/aot-fixtures/valid.wasm
+          test -s /tmp/aot-fixtures/start.wasm
+          cp /tmp/aot-fixtures/valid.wasm /tmp/aot-fixtures/corrupt.wasm
+          before="$(sha256sum /tmp/aot-fixtures/corrupt.wasm | cut -d ' ' -f 1)"
+          /tmp/aot-fixture corrupt /tmp/aot-fixtures/corrupt.wasm
+          after="$(sha256sum /tmp/aot-fixtures/corrupt.wasm | cut -d ' ' -f 1)"
+          test "$before" != "$after"
