@@ -44,6 +44,18 @@ jobs:
           rustc --edition=2021 -D warnings --test synthetic/no-python/shared_domain_receipt.rs -o /tmp/shared-domain-receipt-tests
           /tmp/shared-domain-receipt-tests
           rustc --edition=2021 -D warnings synthetic/no-python/shared_domain_receipt.rs -o /tmp/shared-domain-receipt
+          rustc --edition=2021 -D warnings synthetic/no-python/verify_ci_run.rs -o /tmp/verify-ci-run
+          /tmp/verify-ci-run --self-test | tee /tmp/verify-ci-run-selftest.txt
+          grep -Eq 'CI_EVIDENCE_REGRESSIONS=([9][5-9]|[1-9][0-9]{2,})          mkdir -p /tmp/aot-fixtures
+          /tmp/aot-fixture make-negative /tmp/aot-fixtures
+          test -s /tmp/aot-fixtures/valid.wasm
+          test -s /tmp/aot-fixtures/start.wasm
+          cp /tmp/aot-fixtures/valid.wasm /tmp/aot-fixtures/corrupt.wasm
+          before="$(sha256sum /tmp/aot-fixtures/corrupt.wasm | cut -d ' ' -f 1)"
+          /tmp/aot-fixture corrupt /tmp/aot-fixtures/corrupt.wasm
+          after="$(sha256sum /tmp/aot-fixtures/corrupt.wasm | cut -d ' ' -f 1)"
+          test "$before" != "$after"
+ /tmp/verify-ci-run-selftest.txt
           mkdir -p /tmp/aot-fixtures
           /tmp/aot-fixture make-negative /tmp/aot-fixtures
           test -s /tmp/aot-fixtures/valid.wasm
