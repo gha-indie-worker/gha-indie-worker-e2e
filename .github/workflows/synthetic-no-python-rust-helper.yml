@@ -38,6 +38,9 @@ jobs:
           /tmp/scalar-run-tests diagnostics_fail_closed
           /tmp/scalar-run-tests symlink_and_hardlink_rejected
           rustc --edition=2021 -D warnings synthetic/no-python/scalar_run.rs -o /tmp/scalar-run
+          rustc --edition=2021 -D warnings --test synthetic/no-python/actor_arena_receipt.rs -o /tmp/arena-receipt-tests
+          /tmp/arena-receipt-tests
+          rustc --edition=2021 -D warnings synthetic/no-python/actor_arena_receipt.rs -o /tmp/arena-receipt
           mkdir -p /tmp/aot-fixtures
           /tmp/aot-fixture make-negative /tmp/aot-fixtures
           test -s /tmp/aot-fixtures/valid.wasm
