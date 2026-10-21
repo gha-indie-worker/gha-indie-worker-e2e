@@ -552,11 +552,22 @@ fn run_case(command:&[String],source:&Path,case:&Case,mode:&str,timeout:Duration
 }
 
 fn valid_revision(value:&str)->bool{value.len()==40&&value.bytes().all(|b|b.is_ascii_hexdigit()&&!b.is_ascii_uppercase())}
-fn json_escape(value:&str)->String{
-    let mut out=String::new();
-    for ch in value.chars(){match ch{'\\'=>out.push_str("\\\\"),'"'=>out.push_str("\\""),'\n'=>out.push_str("\\n"),'\r'=>out.push_str("\\r"),'\t'=>out.push_str("\\t"),c if c<' '=>out.push_str(&format!("\\u{:04x}",c as u32)),c=>out.push(c)}}
+fn json_escape(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c < ' ' => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
     out
 }
+
 fn write_report(path:&Path,backend:&str,mode:&str,revision:&str,digest:&str,records:&[(String,bool)])->Result<(),String>{
     if let Some(parent)=path.parent(){fs::create_dir_all(parent).map_err(|e|format!("report directory: {e}"))?;}
     let level=if mode=="stdout-i64"{"source-executed-scalar"}else{"compiler-admission-only"};
