@@ -667,6 +667,7 @@ struct Inputs {
     job_step_pairs: Vec<(String, String)>,
 }
 
+#[derive(Debug)]
 struct Summary {
     backend: String,
     repository: String,
