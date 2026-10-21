@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeSet,
     env,
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
@@ -297,7 +297,7 @@ fn read_bounded_regular(path: &Path) -> Result<Vec<u8>, String> {
     if !unique_regular(&opened) { return Err("fixture replaced by nonregular file".into()); }
     if !same_identity(&original,&opened) { return Err("fixture changed before read".into()); }
     let mut data=Vec::new();
-    file.by_ref().take(MAX_FIXTURE_BYTES+1).read_to_end(&mut data).map_err(|e|format!("read {}: {e}",path.display()))?;
+    std::io::Read::by_ref(&mut file).take(MAX_FIXTURE_BYTES+1).read_to_end(&mut data).map_err(|e|format!("read {}: {e}",path.display()))?;
     let after=file.metadata().map_err(|e|format!("fstat after {}: {e}",path.display()))?;
     if !same_identity(&opened,&after) { return Err("fixture changed during read".into()); }
     let final_meta=fs::symlink_metadata(path).map_err(|e|format!("final lstat {}: {e}",path.display()))?;
@@ -462,11 +462,11 @@ fn capture_bounded(argv:&[String],timeout:Duration)->Result<Captured,CaptureErro
     let out_thread=reader(Box::new(stdout),overflow.clone());
     let err_thread=reader(Box::new(stderr),overflow.clone());
     let deadline=Instant::now()+timeout;
-    let status;
     loop{
         if overflow.load(AtomicOrdering::SeqCst){kill_group(&mut child);break;}
-        if let Some(s)=child.try_wait().map_err(|e|CaptureError::Io(e.to_string()))?{
-            if out_thread.is_finished()&&err_thread.is_finished(){status=s;break;}
+        if child.try_wait().map_err(|e|CaptureError::Io(e.to_string()))?.is_some()
+            && out_thread.is_finished() && err_thread.is_finished() {
+            break;
         }
         if Instant::now()>=deadline{kill_group(&mut child);let _=child.wait();return Err(CaptureError::Timeout);}
         thread::sleep(Duration::from_millis(10));
