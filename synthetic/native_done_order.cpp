@@ -72,7 +72,7 @@ int main() {
     }
 
     std::cout << "SYNTHETIC NATIVE DONE CONTRACT: 2000/2000 passed\n";
-    std::cout << "LLVM_SOURCE_SHA=910a4b4cd1822192e8ab793e760dc6763b270ec7\n";
-    std::cout << "LLVM_SOURCE_TREE=107219a9d147c8edf61042df799d3da50cdb17ad\n";
+    std::cout << "LLVM_SOURCE_SHA=9e28dcdd855b22fdfadb47978ebfcd2c918f703b\n";
+    std::cout << "LLVM_SOURCE_TREE=e9bf402f802c0654ab602d1f12be4f10bfa58c50\n";
     std::cout << "NOTE=source-free model; no private Oreslang source copied\n";
 }
