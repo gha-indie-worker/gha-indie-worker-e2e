@@ -26,6 +26,8 @@ jobs:
           /tmp/contract-gate-tests parser_rejects_duplicate_keys_and_non_json_constants
           /tmp/contract-gate-tests integration_all_backends
           /tmp/contract-gate-tests integration_adversarial_inputs_fail_closed
+          /tmp/contract-gate-tests enum_overlap_exhaustive
+          /tmp/contract-gate-tests enum_nominal_boundaries
           rustc --edition=2021 -D warnings synthetic/no-python/contract_gate.rs -o /tmp/contract-gate
           mkdir -p /tmp/aot-fixtures
           /tmp/aot-fixture make-negative /tmp/aot-fixtures
