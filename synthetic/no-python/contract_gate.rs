@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{collections::{BTreeMap, BTreeSet}, fs, path::Path};
 
 #[cfg(not(test))]
 use std::{env, path::PathBuf, process};
@@ -580,7 +580,408 @@ fn verify_reactive(root: &Path) -> Result<(), String> {
     verify_reactive_doc(&doc)
 }
 
-#[cfg(not(test))]
+fn object_mut(value: &mut Json) -> Result<&mut Vec<(String, Json)>, String> {
+    match value {
+        Json::Object(v) => Ok(v),
+        _ => Err("expected mutable JSON object".into()),
+    }
+}
+
+fn array_mut(value: &mut Json) -> Result<&mut Vec<Json>, String> {
+    match value {
+        Json::Array(v) => Ok(v),
+        _ => Err("expected mutable JSON array".into()),
+    }
+}
+
+fn field_mut<'a>(value: &'a mut Json, key: &str) -> Result<&'a mut Json, String> {
+    object_mut(value)?
+        .iter_mut()
+        .find(|(name, _)| name == key)
+        .map(|(_, value)| value)
+        .ok_or_else(|| format!("missing mutable field: {key}"))
+}
+
+#[derive(Clone)]
+struct ActorStage {
+    role: String,
+    inbound: String,
+    outbound: String,
+}
+
+fn actor_text(value: &Json, allow_empty: bool) -> Result<String, String> {
+    let text = string(value)?;
+    if (!allow_empty && text.is_empty()) || text.contains('\0') {
+        return Err("empty or NUL actor graph component".into());
+    }
+    if text.len() > 256 {
+        return Err("actor graph UTF-8 byte limit".into());
+    }
+    Ok(text.to_string())
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for &byte in bytes {
+        hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn verify_actor_pipeline_doc(data: &Json) -> Result<(), String> {
+    require(
+        string(field(data, "schema")?)? == "oreslang.actor-pipeline-routing.v1",
+        "wrong routing fixture schema",
+    )?;
+    let operations = field(data, "operations")?;
+    let forward_all = string_array(field(operations, "forward_all")?)?;
+    require(
+        forward_all == ["worker-a", "worker-b", "worker-c"],
+        "canonical three-worker fan-out order",
+    )?;
+    let round_robin = string_array(field(operations, "forward_round_robin")?)?;
+    require(
+        round_robin
+            == ["worker-a", "worker-b", "worker-c", "worker-a", "worker-b", "worker-c"],
+        "canonical six-step RR vector",
+    )?;
+
+    let by_key = array(field(operations, "by_key")?)?;
+    let expected_keys = ["customer-7", "alpha", "beta", "🌍", "", "\0"];
+    require(by_key.len() == expected_keys.len(), "missing/reordered six canonical routing keys")?;
+    for (entry, expected_key) in by_key.iter().zip(expected_keys) {
+        let key = string(field(entry, "key")?)?;
+        require(key == expected_key, "missing/reordered six canonical routing keys")?;
+        require(key.len() <= 4096, "routing key byte budget exceeded")?;
+        let hash = fnv1a64(key.as_bytes());
+        require(
+            string(field(entry, "fnv1a64_hex")?)? == format!("{hash:016x}"),
+            "routing key hash mismatch",
+        )?;
+        let index = (hash % 3) as usize;
+        require(
+            forward_all[index] == string(field(entry, "target")?)?,
+            "routing key target mismatch",
+        )?;
+    }
+
+    let graph = field(data, "graph")?;
+    let stages = array(field(graph, "stages")?)?;
+    let edges = array(field(graph, "connections")?)?;
+    require((2..=1024).contains(&stages.len()), "graph stage budget violated")?;
+    require((1..=4096).contains(&edges.len()), "graph edge budget violated")?;
+
+    let mut ids: BTreeMap<String, ActorStage> = BTreeMap::new();
+    for stage in stages {
+        let id = actor_text(field(stage, "id")?, false)?;
+        let _actor_type = actor_text(field(stage, "actor_type")?, false)?;
+        let inbound = actor_text(field(stage, "inbound")?, true)?;
+        let outbound = actor_text(field(stage, "outbound")?, true)?;
+        let role = string(field(stage, "role")?)?.to_string();
+        let valid_role = match role.as_str() {
+            "readable" => inbound.is_empty() && !outbound.is_empty(),
+            "writable" => !inbound.is_empty() && outbound.is_empty(),
+            "transform" | "duplex" => !inbound.is_empty() && !outbound.is_empty(),
+            _ => false,
+        };
+        require(valid_role && !ids.contains_key(&id), "invalid role or duplicate graph instance")?;
+        ids.insert(id, ActorStage { role, inbound, outbound });
+    }
+
+    let mut degrees: BTreeMap<String, usize> = ids.keys().map(|id| (id.clone(), 0)).collect();
+    let mut adjacency: BTreeMap<String, Vec<String>> =
+        ids.keys().map(|id| (id.clone(), Vec::new())).collect();
+    let mut pairs = BTreeSet::new();
+    for edge in edges {
+        let source = actor_text(field(edge, "source")?, false)?;
+        let target = actor_text(field(edge, "target")?, false)?;
+        let payload = actor_text(field(edge, "payload")?, false)?;
+        let source_stage = ids.get(&source).ok_or_else(|| "unknown graph source".to_string())?;
+        let target_stage = ids.get(&target).ok_or_else(|| "unknown graph target".to_string())?;
+        require(source != target, "self graph edge")?;
+        require(
+            pairs.insert((source.clone(), target.clone())),
+            "duplicate endpoint pair",
+        )?;
+        require(
+            source_stage.outbound == payload
+                && target_stage.inbound == payload
+                && source_stage.role != "writable"
+                && target_stage.role != "readable",
+            "invalid graph edge or payload/role mismatch",
+        )?;
+        *degrees.get_mut(&target).ok_or_else(|| "target degree missing".to_string())? += 1;
+        adjacency
+            .get_mut(&source)
+            .ok_or_else(|| "source adjacency missing".to_string())?
+            .push(target);
+    }
+
+    for (id, stage) in &ids {
+        let inbound = *degrees.get(id).ok_or_else(|| "degree missing".to_string())?;
+        let outbound = adjacency.get(id).ok_or_else(|| "adjacency missing".to_string())?.len();
+        let connected = !(inbound == 0 && outbound == 0)
+            && match stage.role.as_str() {
+                "readable" => outbound > 0,
+                "writable" => inbound > 0,
+                "transform" => inbound > 0 && outbound > 0,
+                "duplex" => true,
+                _ => false,
+            };
+        require(connected, "pipeline actor missing connected role port")?;
+    }
+
+    let roots: Vec<String> = degrees
+        .iter()
+        .filter(|(_, count)| **count == 0)
+        .map(|(id, _)| id.clone())
+        .collect();
+    require(
+        roots.iter().any(|id| ids.get(id).is_some_and(|stage| matches!(stage.role.as_str(), "readable" | "duplex"))),
+        "no authorized ingress root",
+    )?;
+
+    let mut topo_degrees = degrees.clone();
+    let mut ready = roots.clone();
+    let mut pos = 0usize;
+    let mut visited = 0usize;
+    while pos < ready.len() {
+        let source = ready[pos].clone();
+        pos += 1;
+        visited += 1;
+        for target in adjacency.get(&source).ok_or_else(|| "adjacency missing".to_string())? {
+            let degree = topo_degrees
+                .get_mut(target)
+                .ok_or_else(|| "topology degree missing".to_string())?;
+            *degree = degree.checked_sub(1).ok_or_else(|| "topology degree underflow".to_string())?;
+            if *degree == 0 {
+                ready.push(target.clone());
+            }
+        }
+    }
+    require(visited == stages.len(), "cyclic actor graph")?;
+    for id in ids.keys() {
+        let outbound = !adjacency.get(id).ok_or_else(|| "adjacency missing".to_string())?.is_empty();
+        let inbound = adjacency.values().any(|targets| targets.contains(id));
+        require(outbound || inbound, "isolated graph actor")?;
+    }
+
+    let producer = adjacency
+        .get("producer-1")
+        .ok_or_else(|| "producer-1 missing".to_string())?;
+    require(
+        producer.iter().map(String::as_str).collect::<Vec<_>>() == forward_all,
+        "fan-out order does not match published graph",
+    )?;
+    require(
+        producer.len() != 1
+            && string(field(field(operations, "forward")?, "error")?)? == "ambiguous forward",
+        "ambiguous one-to-many forward not rejected",
+    )?;
+    let forward_to = field(operations, "forward_to")?;
+    let target = string(field(forward_to, "target")?)?;
+    require(
+        producer.iter().any(|candidate| candidate == target)
+            && string(field(forward_to, "expected")?)? == target,
+        "explicit target route is not connected",
+    )?;
+    let invalid_target = string(field(field(operations, "invalid_target")?, "target")?)?;
+    require(
+        !producer.iter().any(|candidate| candidate == invalid_target),
+        "invalid target unexpectedly connected",
+    )?;
+    for (index, target) in round_robin.iter().enumerate() {
+        require(
+            *target == producer[index % producer.len()],
+            "published RR not deterministic",
+        )?;
+    }
+    require("🌍".len() == 4, "UTF-8 scalar width drift")?;
+    Ok(())
+}
+
+fn actor_mutation_suite(good: &Json) -> Result<usize, String> {
+    let mut rejected = 0usize;
+    let check = |name: &str, candidate: Json, rejected: &mut usize| -> Result<(), String> {
+        if verify_actor_pipeline_doc(&candidate).is_ok() {
+            Err(format!("unsafe actor fixture accepted: {name}"))
+        } else {
+            *rejected += 1;
+            Ok(())
+        }
+    };
+
+    {
+        let mut d = good.clone();
+        array_mut(field_mut(field_mut(&mut d, "operations")?, "by_key")?)?.pop();
+        check("missing NUL golden vector", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let entries = array_mut(field_mut(field_mut(&mut d, "operations")?, "by_key")?)?;
+        *field_mut(&mut entries[0], "target")? = Json::String("worker-b".into());
+        check("forged key destination", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let entries = array_mut(field_mut(field_mut(&mut d, "operations")?, "by_key")?)?;
+        *field_mut(&mut entries[1], "fnv1a64_hex")? = Json::String("0000000000000000".into());
+        check("forged FNV hash", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let entries = array_mut(field_mut(field_mut(&mut d, "operations")?, "by_key")?)?;
+        *field_mut(&mut entries[0], "key")? = Json::String("x".repeat(4097));
+        check("oversized routing key", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        array_mut(field_mut(field_mut(&mut d, "operations")?, "forward_round_robin")?)?.reverse();
+        check("altered RR sequence", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        *field_mut(field_mut(field_mut(&mut d, "operations")?, "forward_to")?, "target")? =
+            Json::String("other".into());
+        check("unknown supposedly connected target", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        *field_mut(field_mut(field_mut(&mut d, "operations")?, "invalid_target")?, "target")? =
+            Json::String("worker-a".into());
+        check("invalid target suddenly connected", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        *field_mut(field_mut(field_mut(&mut d, "operations")?, "forward")?, "error")? =
+            Json::String("choose first".into());
+        check("silent default forward", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let stages = array_mut(field_mut(field_mut(&mut d, "graph")?, "stages")?)?;
+        *field_mut(&mut stages[2], "id")? = Json::String("worker-a".into());
+        check("duplicate worker instance", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let stages = array_mut(field_mut(field_mut(&mut d, "graph")?, "stages")?)?;
+        *field_mut(&mut stages[1], "id")? = Json::String("worker\0x".into());
+        check("NUL actor instance", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let stages = array_mut(field_mut(field_mut(&mut d, "graph")?, "stages")?)?;
+        *field_mut(&mut stages[1], "id")? = Json::String("🌍".repeat(65));
+        check("overlong UTF-8 instance", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let stages = array_mut(field_mut(field_mut(&mut d, "graph")?, "stages")?)?;
+        *field_mut(&mut stages[1], "role")? = Json::String("supervisor".into());
+        check("invalid actor role", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let stages = array_mut(field_mut(field_mut(&mut d, "graph")?, "stages")?)?;
+        *field_mut(&mut stages[1], "role")? = Json::String("transform".into());
+        *field_mut(&mut stages[1], "outbound")? = Json::String("Event".into());
+        check("terminal transform", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let graph = field_mut(&mut d, "graph")?;
+        {
+            let stages = array_mut(field_mut(graph, "stages")?)?;
+            for index in [1usize, 2usize] {
+                *field_mut(&mut stages[index], "role")? = Json::String("transform".into());
+                *field_mut(&mut stages[index], "outbound")? = Json::String("Event".into());
+            }
+        }
+        let edges = array_mut(field_mut(graph, "connections")?)?;
+        edges.push(Json::Object(vec![
+            ("source".into(), Json::String("worker-a".into())),
+            ("target".into(), Json::String("worker-b".into())),
+            ("payload".into(), Json::String("Event".into())),
+        ]));
+        edges.push(Json::Object(vec![
+            ("source".into(), Json::String("worker-b".into())),
+            ("target".into(), Json::String("worker-a".into())),
+            ("payload".into(), Json::String("Event".into())),
+        ]));
+        check("genuine transform cycle", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let edges = array_mut(field_mut(field_mut(&mut d, "graph")?, "connections")?)?;
+        *field_mut(&mut edges[0], "payload")? = Json::String("Wrong".into());
+        check("nominal payload mismatch", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let edges = array_mut(field_mut(field_mut(&mut d, "graph")?, "connections")?)?;
+        edges.push(edges[0].clone());
+        check("duplicate endpoint pair", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let edges = array_mut(field_mut(field_mut(&mut d, "graph")?, "connections")?)?;
+        *field_mut(&mut edges[0], "target")? = Json::String("unknown".into());
+        check("unknown destination", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let edges = array_mut(field_mut(field_mut(&mut d, "graph")?, "connections")?)?;
+        *field_mut(&mut edges[0], "target")? = Json::String("producer-1".into());
+        check("self edge", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let stages = array_mut(field_mut(field_mut(&mut d, "graph")?, "stages")?)?;
+        stages.push(Json::Object(vec![
+            ("id".into(), Json::String("orphan".into())),
+            ("actor_type".into(), Json::String("T".into())),
+            ("role".into(), Json::String("readable".into())),
+            ("inbound".into(), Json::String(String::new())),
+            ("outbound".into(), Json::String("Event".into())),
+        ]));
+        check("isolated extra actor", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let stages = array_mut(field_mut(field_mut(&mut d, "graph")?, "stages")?)?;
+        let sample = stages[0].clone();
+        for _ in 0..1022 {
+            stages.push(sample.clone());
+        }
+        check("vertex quota exceeded", d, &mut rejected)?;
+    }
+    {
+        let mut d = good.clone();
+        let edges = array_mut(field_mut(field_mut(&mut d, "graph")?, "connections")?)?;
+        let sample = edges[0].clone();
+        for _ in 0..4094 {
+            edges.push(sample.clone());
+        }
+        check("edge quota exceeded", d, &mut rejected)?;
+    }
+    require(rejected == 21, "actor mutation inventory drift")?;
+    Ok(rejected)
+}
+
+fn verify_actor_pipeline(root: &Path) -> Result<(), String> {
+    let path = root.join("contracts/v1/actor-pipeline-routing-v1.json");
+    let raw = fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let doc = parse_json(&raw)?;
+    verify_actor_pipeline_doc(&doc)?;
+    let rejected = actor_mutation_suite(&doc)?;
+    require(rejected == 21, "actor mutation suite incomplete")?;
+    require(
+        parse_json(b"{\"key\":\"\\ud800\"}").is_err(),
+        "invalid Unicode routing key accepted by JSON parser",
+    )?;
+    Ok(())
+}
 
 fn push_field(out: &mut Vec<u8>, text: &str) -> Result<(), String> {
     let raw = text.as_bytes();
@@ -1026,7 +1427,7 @@ fn verify_enum_v2(root: &Path) -> Result<(), String> {
 
 #[cfg(not(test))]
 fn usage() -> ! {
-    eprintln!("usage: contract_gate <integration|serde|reactive|enum-v2> [repository-root]");
+    eprintln!("usage: contract_gate <integration|serde|reactive|actor-pipeline|enum-v2> [repository-root]");
     process::exit(2);
 }
 
@@ -1042,6 +1443,7 @@ fn main() {
         "integration" => verify_integration_root(&root),
         "serde" => verify_serde(&root),
         "reactive" => verify_reactive(&root),
+        "actor-pipeline" => verify_actor_pipeline(&root),
         "enum-v2" => verify_enum_v2(&root),
         _ => usage(),
     };
@@ -1132,6 +1534,11 @@ mod tests {
         items.iter_mut().find(|(k, _)| k == "observable").expect("observable").1 =
             Json::String("implemented".into());
         assert!(verify_reactive_doc(&forged).is_err());
+    }
+
+    #[test]
+    fn actor_pipeline_mutations() {
+        verify_actor_pipeline(Path::new(".")).unwrap();
     }
 
     #[test]
