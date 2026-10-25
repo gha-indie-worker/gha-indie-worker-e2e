@@ -1,0 +1,75 @@
+name: Oreslang source-free carrier parser canary
+on:
+  push:
+    branches:
+      - 'ci/oreslang-source-free-carrier-20261025'
+permissions:
+  contents: read
+jobs:
+  strict-json:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Strict authorization JSON regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I - <<'PY'
+          import json
+
+          SHA = "a" * 40
+          REF = "refs/heads/ci/authorized-" + SHA
+
+          def parse(raw):
+              if not raw or len(raw) > 1024*1024 or raw.startswith(b"\xef\xbb\xbf"):
+                  raise ValueError("invalid authorization recheck response")
+              def unique(pairs):
+                  out = {}
+                  for key, value in pairs:
+                      if key in out:
+                          raise ValueError("duplicate authorization recheck key")
+                      out[key] = value
+                  return out
+              doc = json.loads(
+                  raw.decode("utf-8"),
+                  object_pairs_hook=unique,
+                  parse_constant=lambda _: (_ for _ in ()).throw(ValueError("nonfinite JSON")),
+              )
+              if type(doc) is not dict:
+                  raise ValueError("invalid authorization recheck document")
+              obj = doc.get("object")
+              if (doc.get("ref") != REF
+                      or type(obj) is not dict
+                      or obj.get("type") != "commit"
+                      or obj.get("sha") != SHA):
+                  raise ValueError("dispatcher authorization revoked or changed")
+              return True
+
+          good = ('{"ref":"' + REF + '","object":{"type":"commit","sha":"' + SHA + '"}}').encode()
+          cases = [
+              ("valid", good, True),
+              ("duplicate-top-level",
+               ('{"ref":"' + REF + '","ref":"forged","object":{"type":"commit","sha":"' + SHA + '"}}').encode(),
+               False),
+              ("duplicate-nested",
+               ('{"ref":"' + REF + '","object":{"type":"commit","type":"tag","sha":"' + SHA + '"}}').encode(),
+               False),
+              ("nonfinite",
+               ('{"ref":"' + REF + '","object":{"type":NaN,"sha":"' + SHA + '"}}').encode(),
+               False),
+              ("malformed", good[:-1], False),
+              ("mismatch",
+               ('{"ref":"' + REF + '","object":{"type":"commit","sha":"' + ("b"*40) + '"}}').encode(),
+               False),
+              ("bom", b"\xef\xbb\xbf" + good, False),
+          ]
+          for name, raw, expected in cases:
+              try:
+                  observed = parse(raw)
+              except (ValueError, UnicodeError, RecursionError):
+                  observed = False
+              if observed != expected:
+                  raise SystemExit("FAIL " + name)
+              print("PASS " + name)
+          print("SOURCE_FREE_STRICT_JSON_PASS cases=7")
+          PY
