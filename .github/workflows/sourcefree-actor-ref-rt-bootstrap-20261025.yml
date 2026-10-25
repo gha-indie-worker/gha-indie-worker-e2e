@@ -1,0 +1,210 @@
+name: Source-free actor identity and RT bootstrap
+
+on:
+  push:
+    branches:
+      - audit/source-free-actor-ref-rt-bootstrap-20261025
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actor-ref-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Install JDK 25
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          java-version: '25'
+          distribution: temurin
+      - name: No private Oreslang payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e private-oreslang-source
+          echo "private_source_bytes=0"
+          echo "model_for_java_head=749c3b87a3cb20d7079321f4c3eb27c857654479"
+      - name: Compile and run exact-incarnation model
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/sourcefree-actor-ref"
+          mkdir -p "$work"
+          cat > "$work/ActorRefModel.java" <<'JAVA'
+          public final class ActorRefModel {
+              record Id(long value) {}
+              static final class Ref {
+                  final Object runtime;
+                  final Id id;
+                  final long generation;
+                  Ref(Object runtime, long id, long generation) {
+                      this.runtime = runtime;
+                      this.id = new Id(id);
+                      this.generation = generation;
+                  }
+              }
+              static final class Lease {
+                  final Object runtime;
+                  final Ref owner;
+                  Lease(Object runtime, Ref owner) {
+                      this.runtime = runtime;
+                      this.owner = owner;
+                  }
+                  boolean ownedBy(Object candidateRuntime, Ref candidate) {
+                      return runtime == candidateRuntime && owner == candidate;
+                  }
+              }
+              private static void require(boolean value, String message) {
+                  if (!value) throw new AssertionError(message);
+              }
+              public static void main(String[] args) {
+                  Object runtime = new Object();
+                  Object foreignRuntime = new Object();
+                  Ref owner = new Ref(runtime, 7, 41);
+                  Ref restarted = new Ref(runtime, 7, 42);
+                  Ref forgedSameFields = new Ref(runtime, 7, 41);
+                  Ref foreign = new Ref(foreignRuntime, 7, 41);
+                  Lease lease = new Lease(runtime, owner);
+                  require(lease.ownedBy(runtime, owner), "exact owner rejected");
+                  require(!lease.ownedBy(runtime, restarted), "new generation accepted by logical id");
+                  require(!lease.ownedBy(runtime, forgedSameFields), "forged same fields accepted");
+                  require(!lease.ownedBy(foreignRuntime, foreign), "foreign runtime accepted");
+                  require(!lease.ownedBy(runtime, null), "null owner accepted");
+                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=5 private_source_bytes=0");
+              }
+          }
+          JAVA
+          javac --release 25 -Xlint:all -Werror "$work/ActorRefModel.java"
+          java -cp "$work" ActorRefModel
+
+  rt-bootstrap-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: No private Oreslang payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e private-oreslang-source
+          echo "private_source_bytes=0"
+          echo "model_for_llvm_head=a59e187155da94cbcfba3fa1ff3844a3f4bae226"
+      - name: Build and run C11 state model with GCC Clang and sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/sourcefree-rt-bootstrap"
+          mkdir -p "$work"
+          cat > "$work/model.c" <<'C'
+          #include <stddef.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+
+          typedef struct {
+              size_t worker_count;
+              size_t started_workers;
+              size_t accepted;
+              size_t outstanding;
+              size_t runnable_lanes;
+              int retired;
+              int rt_preallocated;
+              int rt_failed;
+              long fail_after;
+              long create_attempts;
+          } Scheduler;
+
+          static void require(int value, const char *message) {
+              if (!value) {
+                  fprintf(stderr, "FAIL: %s\n", message);
+                  exit(1);
+              }
+          }
+
+          static int create_worker(Scheduler *s) {
+              if (s->fail_after >= 0 && s->create_attempts++ >= s->fail_after) return 0;
+              ++s->started_workers;
+              return 1;
+          }
+
+          static int ensure_workers(Scheduler *s, size_t required) {
+              if (required > s->worker_count) required = s->worker_count;
+              if (s->rt_failed) return 0;
+              if (s->rt_preallocated) return s->started_workers >= required;
+              while (s->started_workers < required) {
+                  if (!create_worker(s)) break;
+              }
+              return s->started_workers >= required;
+          }
+
+          static int prestart_throughput(Scheduler *s) {
+              if (s->retired || s->accepted != 0 || s->outstanding != 0 || s->runnable_lanes != 0)
+                  return 0;
+              return ensure_workers(s, s->worker_count);
+          }
+
+          static int prestart_rt(Scheduler *s) {
+              if (s->retired || s->rt_preallocated || s->rt_failed
+                      || s->started_workers != 0 || s->accepted != 0
+                      || s->outstanding != 0 || s->runnable_lanes != 0)
+                  return 0;
+              if (ensure_workers(s, s->worker_count)) {
+                  s->rt_preallocated = 1;
+                  return 1;
+              }
+              s->rt_failed = 1;
+              return 0;
+          }
+
+          static int admit_lane(Scheduler *s) {
+              size_t required = s->runnable_lanes + 1;
+              if (!ensure_workers(s, required)) return 0;
+              ++s->runnable_lanes;
+              ++s->accepted;
+              ++s->outstanding;
+              return 1;
+          }
+
+          int main(void) {
+              Scheduler promoted = {.worker_count=1, .fail_after=-1};
+              require(prestart_throughput(&promoted), "throughput prestart failed");
+              require(promoted.started_workers == 1, "wrong throughput worker count");
+              require(!prestart_rt(&promoted), "throughput scheduler promoted to RT");
+
+              Scheduler partial = {.worker_count=2, .fail_after=1};
+              require(!prestart_throughput(&partial), "partial throughput unexpectedly complete");
+              require(partial.started_workers == 1, "partial throughput did not retain one worker");
+              require(!prestart_rt(&partial), "partial throughput promoted to RT");
+              require(!partial.rt_failed, "RT rejection poisoned throughput retry");
+              partial.fail_after = -1;
+              require(prestart_throughput(&partial), "throughput retry failed");
+              require(partial.started_workers == 2, "throughput retry did not finish");
+
+              Scheduler poisoned = {.worker_count=2, .fail_after=1};
+              require(!prestart_rt(&poisoned), "partial RT unexpectedly succeeded");
+              require(poisoned.rt_failed, "failed RT did not poison scheduler");
+              require(poisoned.started_workers == 1, "failed RT partial worker count wrong");
+              poisoned.fail_after = -1;
+              require(!prestart_rt(&poisoned), "poisoned RT retried");
+              require(!prestart_throughput(&poisoned), "poisoned scheduler healed via throughput");
+              require(!admit_lane(&poisoned), "poisoned scheduler admitted live work");
+
+              Scheduler clean = {.worker_count=2, .fail_after=-1};
+              require(prestart_rt(&clean), "clean RT bootstrap failed");
+              require(clean.rt_preallocated, "RT success flag missing");
+              require(clean.started_workers == 2, "RT did not prestart full carrier set");
+              require(admit_lane(&clean), "RT could not reuse prestarted carrier");
+              require(clean.started_workers == 2, "RT live admission created a carrier");
+              require(!prestart_rt(&clean), "second RT bootstrap succeeded");
+
+              puts("RT_BOOTSTRAP_MODEL_OK cases=4 private_source_bytes=0");
+              return 0;
+          }
+          C
+          gcc -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror "$work/model.c" -o "$work/model-gcc"
+          "$work/model-gcc"
+          clang -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror "$work/model.c" -o "$work/model-clang"
+          "$work/model-clang"
+          clang -std=c11 -O1 -g -Wall -Wextra -Wpedantic -Werror             -fsanitize=address,undefined -fno-omit-frame-pointer             "$work/model.c" -o "$work/model-sanitize"
+          "$work/model-sanitize"
+          echo "SOURCE_FREE_RT_MODEL_PASS compilers=3 private_source_bytes=0"
