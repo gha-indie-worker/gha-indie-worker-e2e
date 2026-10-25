@@ -1,0 +1,119 @@
+name: Source-free Task cancellation model
+on:
+  push:
+    branches:
+      - audit/source-free-task-cancel-20261018
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify independent cancellation state model (no private Oreslang source)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=commonjs <<'NODE'
+          const assert = require('node:assert/strict');
+
+          // Independently authored state-model oracle, not Oreslang code,
+          // a source mirror, compiler execution or guest runtime test.
+          function scope(parent = null) {
+            const s = {parent, children: [], tasks: [], cancelled: false};
+            if (parent) {
+              assert.equal(parent.cancelled, false);
+              parent.children.push(s);
+            }
+            return s;
+          }
+          function spawn(owner) {
+            assert.equal(owner.cancelled, false);
+            const t = {cancelled:false, completed:false, exited:false, observers:[]};
+            owner.tasks.push(t);
+            return t;
+          }
+          function observe(t, onCancel) {
+            const o = {active:true};
+            t.observers.push(() => { if (o.active) onCancel(); });
+            return () => { o.active = false; };
+          }
+          function cancel(root) {
+            const pending = [root];
+            const deferred = [];
+            let count = 0;
+            while (pending.length) {
+              const s = pending.pop();
+              if (s.cancelled) continue;
+              s.cancelled = true;
+              for (const child of s.children) pending.push(child);
+              for (const task of s.tasks) {
+                if (task.completed) continue;
+                task.cancelled = true;
+                task.completed = true;
+                count++;
+                deferred.push(...task.observers);
+              }
+            }
+            // No callback is notified until the entire visited tree was
+            // revoked. A blocking callback cannot starve sibling cancellation.
+            for (const notify of deferred) notify();
+            return count;
+          }
+          function exit(t) { t.exited = true; }
+          function physicalJoin(t) {
+            if (!t.exited) throw new Error('not physically quiescent');
+          }
+          let assertions = 0;
+          function ok(cond) { assert.ok(cond); assertions++; }
+
+          const top = scope(), sibling = scope();
+          let p = top;
+          for (let n=0;n<4096;n++) p=scope(p);
+          const leaf=spawn(p), other=spawn(sibling);
+          ok(cancel(top)===1);
+          ok(top.cancelled && p.cancelled && leaf.cancelled);
+          ok(!other.cancelled);
+          assert.throws(()=>spawn(p)); assertions++;
+          assert.throws(()=>physicalJoin(leaf),/not physically/); assertions++;
+          exit(leaf);
+          physicalJoin(leaf); assertions++;
+
+          const batch = scope();
+          const t1=spawn(batch),t2=spawn(batch),t3=spawn(batch);
+          let callbacks=0;
+          for(const t of [t1,t2,t3]){
+            observe(t,()=>{
+              ok(t1.cancelled && t2.cancelled && t3.cancelled);
+              callbacks++;
+            });
+          }
+          cancel(batch);
+          ok(callbacks===3);
+
+          const observed=scope(), producer=spawn(observed);
+          const drop=observe(producer,()=>assert.fail('dropped observer invoked'));
+          drop();
+          cancel(observed);
+          ok(producer.cancelled);
+
+          // Deterministic permutations: completion/cancel competition is
+          // first-winner-only, and notification is exactly once at most.
+          for (let i=0;i<10000;i++) {
+            const root=scope(), t=spawn(root);
+            let notifications=0;
+            observe(t,()=>{notifications++;});
+            const seed=(i*1103515245+12345)>>>0;
+            if(seed%2===0){t.completed=true; exit(t);}
+            cancel(root);
+            ok(notifications===(t.cancelled?1:0));
+            ok(t.cancelled!==(!t.cancelled && t.completed));
+            if(t.cancelled) assert.throws(()=>physicalJoin(t));
+          }
+          process.stdout.write(
+            'SOURCE_FREE_TASK_MODEL_PASS assertions='+assertions+
+            ' schedules=10000 depth=4096 source_export=false\n');
+          NODE
