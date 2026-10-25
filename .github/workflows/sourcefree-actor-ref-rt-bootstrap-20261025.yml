@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - audit/source-free-actor-ref-rt-bootstrap-20261025
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
