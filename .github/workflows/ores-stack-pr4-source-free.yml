@@ -1,0 +1,49 @@
+name: Ores Stack PR4 exact source-free tests
+on:
+  push:
+    branches:
+      - 'audit/ores-stack-infra-pr4-source-free-ce2c28b'
+permissions:
+  contents: read
+jobs:
+  exact-source-free:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify mirrored Git blob identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          expected = {
+              "verify-oreslang-private-carrier.py": "9acdb571a8bba4efb99461e4455666d277b31138",
+              "test-oreslang-private-carrier.py": "5100f23d383190800526123debfc2600febc5fb2",
+              "run-oreslang-test-plan.py": "dad2623b3a68bed709f3298bbe6c4fe700fe0da2",
+              "test-run-oreslang-test-plan.py": "c7841f6c5aa1b63c20fa731530d53685b97d0b66",
+              "verify-oreslang-authorization-ref.py": "811ce276ebc5268ace2aeb337b34f0a865d7951c",
+              "test-verify-oreslang-authorization-ref.py": "7de07987f3e10fcdc03445c9c3e136fb98a77cf5",
+          }
+          root = Path("ores-stack-pr4/scripts")
+          for name, wanted in expected.items():
+              data = (root / name).read_bytes()
+              actual = hashlib.sha1(
+                  b"blob " + str(len(data)).encode("ascii") + b"\0" + data
+              ).hexdigest()
+              if actual != wanted:
+                  raise SystemExit(f"BLOB_MISMATCH {name} {actual} != {wanted}")
+              print(f"BLOB_MATCH {name} {actual}")
+          print("SOURCE_FREE_BLOB_IDENTITY_PASS")
+          PY
+      - name: Compile Python sources
+        run: python3 -m py_compile ores-stack-pr4/scripts/*.py
+      - name: Carrier verifier regressions
+        run: python3 ores-stack-pr4/scripts/test-oreslang-private-carrier.py
+      - name: Trusted plan runner regressions
+        run: python3 ores-stack-pr4/scripts/test-run-oreslang-test-plan.py
+      - name: Authorization ref regressions
+        run: python3 ores-stack-pr4/scripts/test-verify-oreslang-authorization-ref.py
