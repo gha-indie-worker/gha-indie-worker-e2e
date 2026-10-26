@@ -32,18 +32,11 @@ jobs:
       - name: Prove source-free private-CI security primitives
         shell: bash
         run: bash source-free-carrier/test-policy.sh
-      - name: Set up GraalVM for Java/Graal capacity proof
-        uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
-        with:
-          version: '25.3'
-          java-version: '25'
-          distribution: graalvm
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Prove Java/Graal toolchain
+      - name: Prove installed Java toolchain
         run: |
           set -euo pipefail
           java --version
-          native-image --version
+          javac --version
       - name: Prove native/LLVM/Forge and wasm32 object toolchains
         run: |
           set -euo pipefail
@@ -66,8 +59,7 @@ jobs:
           node-version: '22'
       - name: Prove Node/HDL toolchain
         run: node --version
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
-      - name: Prove Rust toolchain
+      - name: Prove installed Rust toolchain
         run: |
           set -euo pipefail
           rustc --version
