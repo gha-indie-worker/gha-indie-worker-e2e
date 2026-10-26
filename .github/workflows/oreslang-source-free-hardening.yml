@@ -69,6 +69,36 @@ jobs:
           set -euo pipefail
           rustc --version
           cargo --version
+      - name: Prove source-free HDL simulation and synthesis toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y iverilog yosys
+          iverilog -V | head -n 2
+          yosys -V
+          cat >/tmp/source_free_add.sv <<'SV'
+          module source_free_add(input logic [7:0] a, input logic [7:0] b, output logic [7:0] y);
+            assign y = a + b;
+          endmodule
+          module tb;
+            logic [7:0] a, b;
+            wire [7:0] y;
+            integer i;
+            source_free_add dut(.a(a), .b(b), .y(y));
+            initial begin
+              for (i = 0; i < 256; i = i + 1) begin
+                a = i[7:0]; b = (255-i); #1;
+                if (y !== 8'hff) $fatal(1, "mismatch");
+              end
+              $display("SOURCE_FREE_RTL_PASS");
+              $finish;
+            end
+          endmodule
+          SV
+          iverilog -g2012 -s tb -o /tmp/source_free_tb /tmp/source_free_add.sv
+          vvp /tmp/source_free_tb | grep -Fx SOURCE_FREE_RTL_PASS
+          yosys -Q -T -p 'read_verilog -sv /tmp/source_free_add.sv; hierarchy -check -top source_free_add; proc; opt; synth -top source_free_add; check -assert'
       - name: Prove source-free semantic hardening invariants
         shell: bash
         run: bash source-free-carrier/semantic-invariants.sh
