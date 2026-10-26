@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           test ! -e private-oreslang-source
           echo "private_source_bytes=0"
-          echo "model_for_java_head=44f73f06656d11f95591afe44eda58a876e9bd54"
+          echo "model_for_java_head=561998f15e3f804f8d1ced30f55510a425f6dbf3"
       - name: Compile and run exact-incarnation model
         shell: bash
         run: |
@@ -67,6 +67,28 @@ jobs:
                               && ownedBy(candidateRuntime, current);
                   }
               }
+              static final class Exchange {
+                  Object stateOwner;
+                  long stateGeneration;
+                  final Object owner;
+                  final long generation;
+                  Exchange(Object stateOwner, long stateGeneration) {
+                      this.stateOwner = stateOwner;
+                      this.stateGeneration = stateGeneration;
+                      this.owner = stateOwner;
+                      this.generation = stateGeneration;
+                  }
+                  boolean accessibleBy(Object currentOwner) {
+                      return generation == stateGeneration
+                              && owner == stateOwner
+                              && owner == currentOwner;
+                  }
+                  Exchange moveTo(Ref destination) {
+                      stateGeneration++;
+                      stateOwner = destination;
+                      return new Exchange(stateOwner, stateGeneration);
+                  }
+              }
               private static void require(boolean value, String message) {
                   if (!value) throw new AssertionError(message);
               }
@@ -99,7 +121,17 @@ jobs:
                   require(!lease.ownedBy(runtime, new Id(7)),
                           "ambient host gained legacy ActorId authority");
 
-                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=7 private_source_bytes=0");
+                  Object host = new Object();
+                  Exchange hostExchange = new Exchange(host, 0);
+                  require(hostExchange.accessibleBy(host), "host exchange owner rejected");
+                  Exchange moved = hostExchange.moveTo(owner);
+                  require(moved.accessibleBy(owner), "exact HTTP actor owner rejected");
+                  require(!moved.accessibleBy(restarted),
+                          "same-id restarted actor inherited HTTP exchange authority");
+                  require(!moved.accessibleBy(forgedSameFields),
+                          "forged same-fields ref inherited HTTP exchange authority");
+
+                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=11 private_source_bytes=0");
               }
           }
           JAVA
