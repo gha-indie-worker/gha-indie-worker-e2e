@@ -1,4 +1,4 @@
 source-free semantic models only
 private_source_bytes=0
-java_source_head=561998f15e3f804f8d1ced30f55510a425f6dbf3
+java_source_head=844bb0851cb6335f05a376345495054fb445846f
 llvm_source_head=a59e187155da94cbcfba3fa1ff3844a3f4bae226
