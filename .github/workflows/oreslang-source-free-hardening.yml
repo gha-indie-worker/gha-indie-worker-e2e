@@ -81,6 +81,8 @@ jobs:
           module source_free_add(input logic [7:0] a, input logic [7:0] b, output logic [7:0] y);
             assign y = a + b;
           endmodule
+          SV
+          cat >/tmp/source_free_tb.sv <<'SV'
           module tb;
             logic [7:0] a, b;
             wire [7:0] y;
@@ -96,7 +98,7 @@ jobs:
             end
           endmodule
           SV
-          iverilog -g2012 -s tb -o /tmp/source_free_tb /tmp/source_free_add.sv
+          iverilog -g2012 -s tb -o /tmp/source_free_tb /tmp/source_free_add.sv /tmp/source_free_tb.sv
           vvp /tmp/source_free_tb | grep -Fx SOURCE_FREE_RTL_PASS
           yosys -Q -T -p 'read_verilog -sv /tmp/source_free_add.sv; hierarchy -check -top source_free_add; proc; opt; synth -top source_free_add; check -assert'
       - name: Prove source-free semantic hardening invariants
