@@ -25,7 +25,7 @@ jobs:
           echo "private_source_bytes=0"
           echo "model_for_llvm_nio_head=c8f8b1f9c8cc90affd439dfaac83978df722f731"
           echo "model_for_llvm_http_head=a78ab3b5c5b022be3fa442af0b1d583c893f778d"
-          echo "model_for_llvm_envelope_head=cdb60a1bcdbb9dbec2ec8b898277f4b4391c7ff0"
+          echo "model_for_llvm_envelope_head=0fa71cd8bc5ddef2ba70f5d697bbd4a46bdf9019"
           echo "model_for_llvm_cleanup_head=a7559f3a9bd8eb1547cdee96724d99c5bec97cbf"
           echo "model_for_llvm_send_stop_head=8f787a6d034b402aba325c099330902c92ac7927"
       - name: Build and run scheduler identity model
@@ -130,6 +130,22 @@ jobs:
                   && scheduler->domain == actor.scheduler_domain;
           }
 
+          static bool valid_scheduler_binding(
+                  std::uint64_t control_generation,
+                  Scheduler* scheduler,
+                  ActorRef actor) {
+              const bool has_actor = actor.scheduler_domain != 0
+                  || actor.actor_slot != 0
+                  || actor.generation != 0;
+              if ((scheduler == nullptr) != !has_actor) return false;
+              if (!scheduler) return true;
+              return actor.scheduler_domain != 0
+                  && actor.generation != 0
+                  && actor.generation == control_generation
+                  && scheduler->actor_live
+                  && scheduler->domain == actor.scheduler_domain;
+          }
+
           struct HttpExchange {
               ActorRef owner{};
               bool queued{};
@@ -199,6 +215,19 @@ jobs:
               ActorRef stale_generation{41, 7, 8};
               ActorRef foreign_same_slot_generation{42, 7, 9};
               Ticket exact{&original, owner};
+
+              require(valid_scheduler_binding(owner.generation, &original, owner),
+                      "exact scheduler binding rejected before publication");
+              require(!valid_scheduler_binding(owner.generation + 1, &original, owner),
+                      "split control/scheduler generation published");
+              require(!valid_scheduler_binding(owner.generation, &original,
+                                               foreign_same_slot_generation),
+                      "foreign complete scheduler ref published");
+              require(!valid_scheduler_binding(owner.generation, nullptr, owner),
+                      "complete scheduler actor accepted without scheduler");
+              ActorRef incomplete{0, owner.actor_slot, owner.generation};
+              require(!valid_scheduler_binding(owner.generation, &original, incomplete),
+                      "incomplete scheduler actor accepted before publication");
 
               require(matches_scheduler_incarnation(exact, owner.generation, &original, owner),
                       "exact scheduler incarnation rejected");
@@ -280,7 +309,7 @@ jobs:
                       "post-stop send allocated a new async descriptor");
 
               std::cout
-                  << "NATIVE_IDENTITY_FENCE_MODEL_OK cases=29 private_source_bytes=0\n";
+                  << "NATIVE_IDENTITY_FENCE_MODEL_OK cases=34 private_source_bytes=0\n";
               return 0;
           }
           CPP
