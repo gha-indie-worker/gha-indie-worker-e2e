@@ -61,6 +61,44 @@ jobs:
           clang++ -std=c++17 -fexceptions             -I"$ROOT/src/main/cpp" "${LLVM_CXX[@]}" "${ARGS[@]}"             $("$LLVM_CONFIG" --ldflags --system-libs --libs core support)             -o /tmp/oreslang-llvmc
           test -x /tmp/oreslang-llvmc
 
+      - name: Build sanitized exact native compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/ci/oreslang-llvm1041/repo"
+          LLVM_CONFIG="$(command -v llvm-config-18 || command -v llvm-config)"
+          mapfile -t SOURCES <<'EOF'
+          src/main/cpp/oreslang/main.cpp
+          src/main/cpp/oreslang/frontend/Parser.cpp
+          src/main/cpp/oreslang/frontend/ModuleLoader.cpp
+          src/main/cpp/oreslang/frontend/MethodResolver.cpp
+          src/main/cpp/oreslang/types/NativeScalarTypes.cpp
+          src/main/cpp/oreslang/types/OwnershipChecker.cpp
+          src/main/cpp/oreslang/backend/LlvmCodegen.cpp
+          src/main/cpp/oreslang/backend/ScalarLoopLowering.cpp
+          EOF
+          ARGS=()
+          for src in "${SOURCES[@]}"; do ARGS+=("$ROOT/$src"); done
+          read -r -a LLVM_CXX <<< "$("$LLVM_CONFIG" --cxxflags | sed -E 's/-std=c\+\+[^ ]+//g; s/-fno-exceptions//g; s/-fno-rtti//g')"
+          clang++ -std=c++17 -fexceptions             -fsanitize=address,undefined -fno-omit-frame-pointer -g             -I"$ROOT/src/main/cpp" "${LLVM_CXX[@]}" "${ARGS[@]}"             $("$LLVM_CONFIG" --ldflags --system-libs --libs core support)             -o /tmp/oreslang-llvmc-sanitized
+
+      - name: Probe sanitized compiler crash
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1:abort_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -uo pipefail
+          ROOT="$PWD/ci/oreslang-llvm1041/repo"
+          set +e
+          /tmp/oreslang-llvmc-sanitized "$ROOT/tests/fixtures/source-future-pipeline-i64.ores"             >/tmp/future-sanitized.ll 2>/tmp/future-sanitized.err
+          status=$?
+          set -e
+          echo "sanitized_compiler_status=$status"
+          cat /tmp/future-sanitized.err
+          test "$status" -eq 0
+          test -s /tmp/future-sanitized.ll
+
       - name: Probe canonical Future pipeline compiler exit
         shell: bash
         run: |
