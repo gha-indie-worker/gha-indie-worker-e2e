@@ -79,3 +79,24 @@ CPP
 clang++ -std=c++20 -Wall -Wextra -Werror /tmp/prepublication_binding.cpp -o /tmp/prepublication_binding
 /tmp/prepublication_binding
 echo "pre-publication scheduler binding: PASS"
+
+
+cat >/tmp/ref32_overflow.rs <<'RS'
+fn old_checked_shift(slot: u32, shift: u32) -> Option<u32> {
+    (slot - 1).checked_shl(shift)
+}
+fn checked_scale(slot: u32, shift: u32) -> Option<u32> {
+    (slot - 1).checked_mul(1u32.checked_shl(shift)?)
+}
+fn main() {
+    let raw = u32::MAX;
+    let shift = 15;
+    let old = old_checked_shift(raw, shift)
+        .expect("checked_shl accepts the count even when value bits are discarded");
+    assert_ne!(old, 0);
+    assert_eq!(checked_scale(raw, shift), None);
+    println!("compressed32 arithmetic overflow rejection: PASS");
+}
+RS
+rustc -D warnings /tmp/ref32_overflow.rs -o /tmp/ref32_overflow
+/tmp/ref32_overflow
