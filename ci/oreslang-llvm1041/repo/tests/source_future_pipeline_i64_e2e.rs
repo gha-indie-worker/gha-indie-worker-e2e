@@ -159,7 +159,7 @@ pub fnc main(): int {
     let int result = await pending;
     return result;
 }
-"#, "unknown parameter 'missing'");
+"#, "body may reference only its exact value-int parameter");
 
     rejected(&compiler, &dir.0, "extra-stage-arg.ores",
         r#"async fnc source(): int { return 21; }
