@@ -24,7 +24,7 @@ jobs:
           test ! -e private-oreslang-source
           echo "private_source_bytes=0"
           echo "model_for_llvm_nio_head=5024875f2acafe0ca2822107775efacaf4363eb5"
-          echo "model_for_llvm_envelope_head=e1d0f8977509369ce531c954eedeff50dfd72d37"
+          echo "model_for_llvm_envelope_head=bffa0291f30c67ae0859f542f06019fe095bd371"
       - name: Build and run scheduler identity model
         shell: bash
         run: |
