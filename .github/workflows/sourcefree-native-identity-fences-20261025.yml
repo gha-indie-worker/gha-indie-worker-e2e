@@ -23,8 +23,8 @@ jobs:
           set -euo pipefail
           test ! -e private-oreslang-source
           echo "private_source_bytes=0"
-          echo "model_for_llvm_nio_head=459c46b084462f427bbb66bb7599473b1bc7e897"
-          echo "model_for_llvm_envelope_head=2396e289d585854ac1dc8c9f7c44062ca723b833"
+          echo "model_for_llvm_nio_head=5024875f2acafe0ca2822107775efacaf4363eb5"
+          echo "model_for_llvm_envelope_head=e1d0f8977509369ce531c954eedeff50dfd72d37"
       - name: Build and run scheduler identity model
         shell: bash
         run: |
