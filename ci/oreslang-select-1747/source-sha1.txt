@@ -6,7 +6,7 @@ f78c8478d946b757795011ea1511072161ef0acc src/main/c/oresmailbox.h
 3c422288127f2376d99c46ee8e0370a93890f29b src/main/c/oresthread.c
 94ba6c570da9db19444b3e91b008121c8b0b67e6 src/main/java/dev/oreslang/OresLanguage.java
 55ccefa62ce2afe5f6861351718376e39c67d272 src/main/java/dev/oreslang/ast/AnnotationExpander.java
-aec118769a2b7b75ff0fec7be2e85d132d696eab src/main/java/dev/oreslang/ast/Ast.java
+8dda8b0aecb15b729f7a7229f0c6f77dede3c384 src/main/java/dev/oreslang/ast/Ast.java
 caee2e21bd7c5f001a57d996315de62576643c9b src/main/java/dev/oreslang/ast/CallableSelector.java
 f31484d1327495495d1497b47b042c9894ff2638 src/main/java/dev/oreslang/ast/TypedOverloadResolver.java
 ee355dd00b19988be25415c37c4bc3d407e65081 src/main/java/dev/oreslang/compiler/BuildOptions.java
@@ -101,7 +101,7 @@ c3f48622469bb860cdb9d16eca16d7436d69aece src/main/java/dev/oreslang/types/Effect
 13b099b24f780601e88045efd4ea5b6a6b3dccea src/main/java/dev/oreslang/types/ReturnCleanupChecker.java
 41da9b0677b4dda813ab34027769c700b704e5c1 src/main/java/dev/oreslang/types/TypeAutoTraits.java
 448b0add530e84adb0161b3f2bcf2def10a4d409 src/main/java/dev/oreslang/types/TypeclassRegistry.java
-1d3ab21946e0da136e6acc89af1029b2b3c721e7 src/main/java/dev/oreslang/types/Types.java
+71dce151c2348e69bec42ae8b80111a355eb2b08 src/main/java/dev/oreslang/types/Types.java
 44e23c91c50f034ca3c7f4fc315b97f45c7c1eac src/main/java/module-info.java
 b7d162e2377f6c75c883fdcbbee71b7ccfeb892a src/main/resources/META-INF/native-image/dev.oreslang/oreslang/native-image.properties
 fe79bd59fe84643d6ff8dc3c4415b36d9d0721e4 src/main/resources/META-INF/native-image/dev.oreslang/oreslang/reachability-metadata.json
@@ -132,3 +132,4 @@ bff7ed59bad105e2b0548921600caec7bb724dbe src/main/java/dev/oreslang/runtime/Exec
 e1829ca69dd5aac7fd45fe0d0e47f5bdbe2d7cd8 src/test/java/dev/oreslang/runtime/TaskPipelineTest.java
 dab18b2284478606f23ceece35bdc4446cd28342 src/test/java/dev/oreslang/parser/FuturePipelineProvenanceTest.java
 b955e41c44c30d2e58a52ce6b91918ee5beb1591 src/test/java/dev/oreslang/parser/FuturePipelineProvenanceCheck.java
+ba75f73878d3b2cda58240e53c4446fa67e45907 src/main/java/dev/oreslang/ast/TaskCaptureNames.java

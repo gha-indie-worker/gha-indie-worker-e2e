@@ -259,6 +259,29 @@ public final class Ast {
         }
     }
 
+    /** Immutable, category-distinct declarations; effects are may-sets, not handlers. */
+    public record EffectSpec(List<TypeRef> throwsTypes, List<TypeRef> raisesTypes,
+                             List<TypeRef> panicsTypes) {
+        public EffectSpec {
+            throwsTypes = List.copyOf(throwsTypes);
+            raisesTypes = List.copyOf(raisesTypes);
+            panicsTypes = List.copyOf(panicsTypes);
+            if (new HashSet<>(throwsTypes).size() != throwsTypes.size()
+                    || new HashSet<>(raisesTypes).size() != raisesTypes.size()
+                    || new HashSet<>(panicsTypes).size() != panicsTypes.size()) {
+                throw new IllegalArgumentException("duplicate declared checked effect type");
+            }
+        }
+
+        public static EffectSpec none() {
+            return new EffectSpec(List.of(), List.of(), List.of());
+        }
+
+        public boolean isEmpty() {
+            return throwsTypes.isEmpty() && raisesTypes.isEmpty() && panicsTypes.isEmpty();
+        }
+    }
+
     public record FunctionDecl(
             String name,
             CallableKind kind,
@@ -275,7 +298,20 @@ public final class Ast {
             TypeRef returnType,
             List<Annotation> annotations,
             List<Stmt> body,
-            List<GenericParameter> genericSpecs) implements Decl {
+            List<GenericParameter> genericSpecs,
+            EffectSpec effects) implements Decl {
+        /** Keep the existing generic-default-aware AST constructor ABI. */
+        public FunctionDecl(String name, CallableKind kind, Visibility visibility, boolean async,
+                            boolean suspends, boolean generator, boolean structural,
+                            boolean nonLexical, boolean trapped, ActorKind actorKind,
+                            List<String> genericParameters, List<Param> parameters,
+                            TypeRef returnType, List<Annotation> annotations,
+                            List<Stmt> body, List<GenericParameter> genericSpecs) {
+            this(name, kind, visibility, async, suspends, generator, structural,
+                    nonLexical, trapped, actorKind, genericParameters, parameters,
+                    returnType, annotations, body, genericSpecs, EffectSpec.none());
+        }
+
         /** Preserve the pre-default FunctionDecl constructor ABI. */
         public FunctionDecl(String name, CallableKind kind, Visibility visibility, boolean async,
                             boolean suspends, boolean generator, boolean structural,
@@ -311,6 +347,7 @@ public final class Ast {
             parameters = List.copyOf(parameters);
             annotations = List.copyOf(annotations);
             body = List.copyOf(body);
+            java.util.Objects.requireNonNull(effects, "function checked effects");
         }
 
         public FunctionDecl(String name, CallableKind kind, Visibility visibility, boolean async,
@@ -361,6 +398,27 @@ public final class Ast {
         }
     }
 
+    /** Connection-oriented actors have two distinct admission dimensions. */
+    public enum ActorTransport { GENERIC, HTTP, TCP, WEBSOCKET }
+
+    /**
+     * Declarative admission limits are VM policy, NOT mutable actor fields.
+     * The legacy actor scheduler currently implements precisely (1,1).
+     */
+    public record ActorConcurrency(
+            ActorTransport transport, int requestConcurrency, int messageConcurrency) {
+        public ActorConcurrency {
+            java.util.Objects.requireNonNull(transport, "actor transport");
+            if (requestConcurrency < 1 || messageConcurrency < 1) {
+                throw new IllegalArgumentException(
+                        "actor concurrency limits must be positive");
+            }
+        }
+        public static ActorConcurrency serial(ActorTransport transport) {
+            return new ActorConcurrency(transport, 1, 1);
+        }
+    }
+
     public record ClassDecl(
             String name,
             Visibility visibility,
@@ -371,13 +429,28 @@ public final class Ast {
             List<TypeRef> interfaces,
             List<FieldDecl> fields,
             ConstructorDecl constructor,
-            List<MethodDecl> methods) implements Decl {
+            List<MethodDecl> methods,
+            ActorConcurrency actorConcurrency) implements Decl {
         public ClassDecl {
+            actorConcurrency = java.util.Objects.requireNonNull(actorConcurrency);
+            if (actorKind == ActorKind.NONE && actorConcurrency.transport() != ActorTransport.GENERIC)
+                throw new IllegalArgumentException("ordinary classes cannot carry actor transport policy");
             genericParameters = List.copyOf(genericParameters);
             parents = List.copyOf(parents);
             interfaces = List.copyOf(interfaces);
             fields = List.copyOf(fields);
             methods = List.copyOf(methods);
+        }
+
+        /** Compatibility constructor for all existing AST/JIT compiler clients. */
+        public ClassDecl(String name, Visibility visibility, boolean isAbstract,
+                         ActorKind actorKind, List<String> genericParameters,
+                         List<TypeRef> parents, List<TypeRef> interfaces,
+                         List<FieldDecl> fields, ConstructorDecl constructor,
+                         List<MethodDecl> methods) {
+            this(name, visibility, isAbstract, actorKind, genericParameters,
+                    parents, interfaces, fields, constructor, methods,
+                    ActorConcurrency.serial(ActorTransport.GENERIC));
         }
 
         /** Compatibility constructor for pre-constructor AST producers. */
@@ -424,10 +497,18 @@ public final class Ast {
             boolean structural,
             List<String> genericParameters,
             List<Param> parameters,
-            TypeRef returnType) implements InterfaceMember {
+            TypeRef returnType,
+            EffectSpec effects) implements InterfaceMember {
         public InterfaceFunctionDecl {
             genericParameters = List.copyOf(genericParameters);
             parameters = List.copyOf(parameters);
+            java.util.Objects.requireNonNull(effects, "interface checked effects");
+        }
+
+        public InterfaceFunctionDecl(String name, boolean structural,
+                                     List<String> genericParameters,
+                                     List<Param> parameters, TypeRef returnType) {
+            this(name, structural, genericParameters, parameters, returnType, EffectSpec.none());
         }
 
         /** Compatibility constructor for nominal interface callable contracts. */
@@ -505,7 +586,20 @@ public final class Ast {
             List<Param> parameters,
             TypeRef returnType,
             List<Annotation> annotations,
-            List<Stmt> body) {
+            List<Stmt> body,
+            EffectSpec effects) {
+        /** Existing methods retain empty effects until declared by source. */
+        public MethodDecl(String name, Visibility visibility, boolean isStatic,
+                          boolean isAbstract, boolean async, boolean suspends,
+                          boolean structural, TypeRef explicitReceiverType,
+                          List<String> genericParameters, List<Param> parameters,
+                          TypeRef returnType, List<Annotation> annotations,
+                          List<Stmt> body) {
+            this(name, visibility, isStatic, isAbstract, async, suspends, structural,
+                    explicitReceiverType, genericParameters, parameters,
+                    returnType, annotations, body, EffectSpec.none());
+        }
+
         /** Preserve all existing AST construction sites without an explicit effect. */
         public MethodDecl(String name, Visibility visibility, boolean isStatic,
                           boolean isAbstract, boolean async, boolean structural,
@@ -521,6 +615,7 @@ public final class Ast {
             parameters = List.copyOf(parameters);
             annotations = List.copyOf(annotations);
             body = List.copyOf(body);
+            java.util.Objects.requireNonNull(effects, "method checked effects");
         }
 
         /** Compatibility constructor for methods that do not use declaration-level structural matching. */
@@ -574,7 +669,7 @@ public final class Ast {
     public enum BindingKind { CONST, VAL, LET }
 
     public sealed interface Stmt permits BindingStmt, DestructureStmt, ReturnStmt, YieldStmt, ExprStmt, DeferStmt,
-            BlockStmt, BreakStmt, ContinueStmt, IfStmt, MatchStmt, SwitchStmt, TryStmt,
+            BlockStmt, TaskScopeStmt, UsingBorrowStmt, BreakStmt, ContinueStmt, IfStmt, MatchStmt, SwitchStmt, TryStmt,
             ForOfStmt, ForOfDestructureStmt, ForStmt, DoWhileStmt, LoopStmt, SelectStmt { }
 
     /**
@@ -664,6 +759,33 @@ public final class Ast {
 
     public record BlockStmt(List<Stmt> body) implements Stmt {
         public BlockStmt { body = List.copyOf(body); }
+    }
+
+    /**
+     * Lexical structured Task scope. Scope exit is an asynchronous
+     * physical-quiescence barrier; children may not outlive this statement.
+     * Borrowed captures remain separately gated by compiler-issued scoped
+     * READ authority.
+     */
+    public record TaskScopeStmt(List<Stmt> body) implements Stmt {
+        public TaskScopeStmt { body = List.copyOf(body); }
+    }
+    /**
+     * Scoped transport/resource loan syntax. Keeping it as a distinct AST node
+     * prevents a generic call/block rewrite from accidentally extending a
+     * borrow lifetime across returns, exceptions or suspension.
+     *
+     * The execution and ownership admission gates remain CLOSED until
+     * authenticated transport handles, loan fencing, and unwind cleanup are
+     * implemented across all applicable backends.
+     */
+    public record UsingBorrowStmt(Expr resource, String binding, List<Stmt> body) implements Stmt {
+        public UsingBorrowStmt {
+            if (resource == null || binding == null || binding.isBlank() || body == null) {
+                throw new IllegalArgumentException("using borrowed scope needs resource, alias and body");
+            }
+            body = List.copyOf(body);
+        }
     }
     public record BreakStmt() implements Stmt { }
     public record ContinueStmt() implements Stmt { }
@@ -917,7 +1039,7 @@ public final class Ast {
 
     public sealed interface Expr permits LiteralExpr, NameExpr, BinaryExpr, UnaryExpr, AssignExpr, ConditionalExpr,
             MatchExpr, TypeTestExpr, PatternTestExpr, CastExpr, SpreadExpr,
-            CallExpr, RuntimeCallExpr, MemberExpr, IndexExpr, NewExpr, AwaitExpr, TrapExpr, ChannelOpExpr, DynamicSelectExpr,
+            CallExpr, RuntimeCallExpr, MemberExpr, IndexExpr, NewExpr, AwaitExpr, TaskExpr, TrapExpr, ChannelOpExpr, DynamicSelectExpr,
             ListExpr, TupleExpr, ObjectExpr, LambdaExpr { }
 
     public record LiteralExpr(Object value) implements Expr { }
@@ -968,23 +1090,56 @@ public final class Ast {
     /** Argument-list spread. The parser only constructs this inside call argument lists. */
     public record SpreadExpr(Expr expression) implements Expr { }
 
+    /** Syntax provenance, not proof that asynchronous pipeline lowering exists. */
+    public enum CallOrigin {
+        DIRECT,
+        /** The upstream value occupies argument zero: value |> stage(args). */
+        VALUE_PIPE_ARGUMENT,
+        /** Option/Result namespace combinators use the upstream as receiver. */
+        VALUE_PIPE_RECEIVER
+    }
+
     public record CallExpr(
             Expr callee,
             List<TypeRef> typeArguments,
             boolean typeArgumentsPresent,
-            List<Expr> arguments) implements Expr {
+            List<Expr> arguments,
+            CallOrigin origin) implements Expr {
         public CallExpr {
+            java.util.Objects.requireNonNull(callee, "call callee");
             typeArguments = List.copyOf(typeArguments);
             arguments = List.copyOf(arguments);
+            java.util.Objects.requireNonNull(origin, "call origin");
+            if (origin == CallOrigin.VALUE_PIPE_ARGUMENT && arguments.isEmpty()) {
+                throw new IllegalArgumentException("value pipeline requires an upstream argument");
+            }
+            if (origin == CallOrigin.VALUE_PIPE_RECEIVER && !(callee instanceof MemberExpr)) {
+                throw new IllegalArgumentException("receiver pipeline requires a member callee");
+            }
             if (!typeArgumentsPresent && !typeArguments.isEmpty()) {
                 throw new IllegalArgumentException("call type arguments require an explicit <...> marker");
             }
+        }
+        public CallExpr(Expr callee, List<TypeRef> typeArguments,
+                        boolean typeArgumentsPresent, List<Expr> arguments) {
+            this(callee, typeArguments, typeArgumentsPresent, arguments, CallOrigin.DIRECT);
         }
         public CallExpr(Expr callee, List<Expr> arguments) {
             this(callee, List.of(), false, arguments);
         }
         public CallExpr(Expr callee, List<TypeRef> typeArguments, List<Expr> arguments) {
             this(callee, typeArguments, true, arguments);
+        }
+
+        /**
+         * Rebuild a call without erasing syntax origin. The replacement must
+         * be checked again: identity-bound type/ownership proofs do not follow
+         * arbitrary changes to its callee or arguments.
+         */
+        public CallExpr rewrite(Expr newCallee, List<TypeRef> newTypeArguments,
+                                boolean newTypeArgumentsPresent, List<Expr> newArguments) {
+            return new CallExpr(newCallee, newTypeArguments,
+                    newTypeArgumentsPresent, newArguments, origin);
         }
     }
 
@@ -1253,6 +1408,11 @@ public final class Ast {
     public static void copyCheckedMetadata(Expr source, Expr target) {
         java.util.Objects.requireNonNull(source, "source expression");
         java.util.Objects.requireNonNull(target, "target expression");
+        if (source instanceof CallExpr sourceCall && target instanceof CallExpr targetCall
+                && sourceCall.origin() != targetCall.origin()) {
+            throw new IllegalArgumentException(
+                    "call rewrites must preserve syntax origin; use CallExpr.rewrite");
+        }
         for (CheckedMetadataTransfer transfer : CheckedMetadataTransfer.values()) {
             transfer.copy(source, target);
         }
@@ -1277,6 +1437,317 @@ public final class Ast {
     }
 
     public record AwaitExpr(Expr expression) implements Expr { }
+
+    /** CPU/GPU task expression. Legacy nb spelling is normalized here for diagnostics/formatting only. */
+    public enum ExecutionDomain { CPU, GPU }
+    public enum TaskCaptureTransfer { COPY, MOVE }
+    public record TaskExpr(ExecutionDomain domain, List<Stmt> body, boolean legacyNb) implements Expr {
+        public TaskExpr {
+            java.util.Objects.requireNonNull(domain, "task execution domain");
+            body = List.copyOf(body);
+        }
+        public TaskExpr(ExecutionDomain domain, List<Stmt> body) {
+            this(domain, body, false);
+        }
+    }
+
+    /**
+     * Ownership-checker admission for the exact TaskExpr that may execute.
+     *
+     * <p>The capture set is published only after the complete ownership pass
+     * succeeds. Runtime consumers must require this identity-bound proof
+     * instead of re-deriving authority from source spelling. It is
+     * intentionally absent from {@link #copyCheckedMetadata(Expr, Expr)}:
+     * optimizer/rewrite clones must be rechecked rather than inheriting Task
+     * execution authority from a structurally similar node.
+     */
+    public record TaskCaptureAdmission(
+            long checkEpoch,
+            ExecutionDomain domain,
+            java.util.Map<String, TaskCaptureTransfer> captureTransfers) {
+        public TaskCaptureAdmission {
+            if (checkEpoch <= 0) {
+                throw new IllegalArgumentException(
+                        "Task capture check epoch must be positive");
+            }
+            java.util.Objects.requireNonNull(
+                    domain, "Task capture execution domain");
+            java.util.Objects.requireNonNull(
+                    captureTransfers, "Task capture transfers");
+            captureTransfers = java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(captureTransfers));
+        }
+    }
+
+    /**
+     * Identity-bound ownership admission for executable TaskExpr nodes.
+     *
+     * <p>Authority is keyed by both the exact checked Program and exact
+     * TaskExpr. A monotonic check epoch distinguishes successful rechecks of
+     * the same immutable AST under different linked/imported ownership
+     * metadata. Evaluators capture an epoch at construction and must keep
+     * using that exact epoch.
+     */
+    public static final class CheckedTaskCaptures {
+        private CheckedTaskCaptures() { }
+
+        private static final java.util.concurrent.atomic.AtomicLong NEXT_CHECK_EPOCH =
+                new java.util.concurrent.atomic.AtomicLong();
+        private static final java.lang.ref.ReferenceQueue<TaskExpr> CLEARED_TASKS =
+                new java.lang.ref.ReferenceQueue<>();
+        private static final java.lang.ref.ReferenceQueue<Program> CLEARED_PROGRAMS =
+                new java.lang.ref.ReferenceQueue<>();
+
+        private static final java.util.Map<PairIdentityKey, TaskCaptureAdmission> CAPTURES =
+                new java.util.HashMap<>();
+        private static final java.util.Map<ProgramIdentityKey, Long> PROGRAM_EPOCHS =
+                new java.util.HashMap<>();
+
+        private static final class PairIdentityKey
+                extends java.lang.ref.WeakReference<TaskExpr> {
+            private final java.lang.ref.WeakReference<Program> program;
+            private final int hash;
+
+            private PairIdentityKey(
+                    Program program,
+                    TaskExpr task,
+                    java.lang.ref.ReferenceQueue<TaskExpr> queue) {
+                super(task, queue);
+                this.program = new java.lang.ref.WeakReference<>(
+                        java.util.Objects.requireNonNull(
+                                program, "checked Task program"));
+                java.util.Objects.requireNonNull(task, "checked Task expression");
+                hash = 31 * System.identityHashCode(program)
+                        + System.identityHashCode(task);
+            }
+
+            private Program program() {
+                return program.get();
+            }
+
+            @Override public int hashCode() { return hash; }
+
+            @Override public boolean equals(Object other) {
+                if (this == other) return true;
+                if (!(other instanceof PairIdentityKey key)) return false;
+                Program leftProgram = program();
+                Program rightProgram = key.program();
+                TaskExpr leftTask = get();
+                TaskExpr rightTask = key.get();
+                return leftProgram != null
+                        && leftProgram == rightProgram
+                        && leftTask != null
+                        && leftTask == rightTask;
+            }
+        }
+
+        private static final class ProgramIdentityKey
+                extends java.lang.ref.WeakReference<Program> {
+            private final int hash;
+
+            private ProgramIdentityKey(
+                    Program program,
+                    java.lang.ref.ReferenceQueue<Program> queue) {
+                super(java.util.Objects.requireNonNull(
+                        program, "checked Task program"), queue);
+                hash = System.identityHashCode(program);
+            }
+
+            @Override public int hashCode() { return hash; }
+
+            @Override public boolean equals(Object other) {
+                if (this == other) return true;
+                if (!(other instanceof ProgramIdentityKey key)) return false;
+                Program value = get();
+                return value != null && value == key.get();
+            }
+        }
+
+        private static void expunge() {
+            java.lang.ref.Reference<? extends TaskExpr> clearedTask;
+            while ((clearedTask = CLEARED_TASKS.poll()) != null) {
+                CAPTURES.remove(clearedTask);
+            }
+            java.lang.ref.Reference<? extends Program> clearedProgram;
+            while ((clearedProgram = CLEARED_PROGRAMS.poll()) != null) {
+                PROGRAM_EPOCHS.remove(clearedProgram);
+            }
+            // Pair keys are queued by TaskExpr lifetime. A deliberately shared
+            // TaskExpr can outlive one Program, so opportunistically retire
+            // pair entries whose weak Program side has cleared.
+            CAPTURES.keySet().removeIf(key ->
+                    key.program() == null || key.get() == null);
+        }
+
+        public static long newCheckEpoch() {
+            long epoch = NEXT_CHECK_EPOCH.incrementAndGet();
+            if (epoch <= 0) {
+                throw new IllegalStateException(
+                        "Task ownership check epoch space exhausted");
+            }
+            return epoch;
+        }
+
+        /**
+         * A new ownership check revokes every older Task execution proof for
+         * the same exact Program before validation begins. Failed rechecks
+         * must not leave previously admitted Tasks executable. The negative
+         * epoch records an in-progress attempt and prevents a slower,
+         * superseded concurrent checker from publishing stale authority.
+         */
+        public static synchronized void beginCheck(
+                Program program, long checkEpoch) {
+            java.util.Objects.requireNonNull(program, "Task program");
+            if (checkEpoch <= 0) {
+                throw new IllegalArgumentException(
+                        "Task ownership check epoch must be positive");
+            }
+            expunge();
+            Long existing = PROGRAM_EPOCHS.get(
+                    new ProgramIdentityKey(program, null));
+            if (existing != null
+                    && Math.abs(existing) >= checkEpoch) {
+                throw new IllegalStateException(
+                        "Task ownership check epoch is not newer than the latest attempt");
+            }
+            CAPTURES.keySet().removeIf(key -> key.program() == program);
+            PROGRAM_EPOCHS.put(
+                    new ProgramIdentityKey(program, CLEARED_PROGRAMS),
+                    -checkEpoch);
+        }
+
+        public static synchronized void publish(
+                Program program,
+                long checkEpoch,
+                java.util.Map<
+                        TaskExpr,
+                        java.util.Map<String, TaskCaptureTransfer>> staged) {
+            java.util.Objects.requireNonNull(program, "checked Task program");
+            java.util.Objects.requireNonNull(staged, "staged Task admissions");
+            if (checkEpoch <= 0) {
+                throw new IllegalArgumentException(
+                        "Task ownership check epoch must be positive");
+            }
+
+            java.util.IdentityHashMap<TaskExpr, TaskCaptureAdmission> normalized =
+                    new java.util.IdentityHashMap<>();
+            for (java.util.Map.Entry<
+                    TaskExpr,
+                    java.util.Map<String, TaskCaptureTransfer>> entry
+                    : staged.entrySet()) {
+                TaskExpr task = java.util.Objects.requireNonNull(
+                        entry.getKey(), "checked Task expression");
+                java.util.Map<String, TaskCaptureTransfer> transfers =
+                        validateTransfers(entry.getValue());
+                // An admission may name only free variables actually used
+                // by this exact Task. Extra staged captures would otherwise
+                // grant MOVE/COPY authority to unrelated parent bindings.
+                java.util.Set<String> referenced =
+                        TaskCaptureNames.referencedIn(task.body());
+                if (!referenced.containsAll(transfers.keySet())) {
+                    throw new IllegalArgumentException(
+                            "Task capture admission includes unreferenced bindings");
+                }
+                normalized.put(
+                        task,
+                        new TaskCaptureAdmission(
+                                checkEpoch,
+                                task.domain(),
+                                transfers));
+            }
+
+            expunge();
+            Long currentAttempt = PROGRAM_EPOCHS.get(
+                    new ProgramIdentityKey(program, null));
+            if (currentAttempt == null
+                    || currentAttempt.longValue() != -checkEpoch) {
+                throw new IllegalStateException(
+                        "Task ownership check was superseded before publication");
+            }
+
+            // Only the current successful ownership attempt can publish
+            // execution authority for this exact Program identity.
+            CAPTURES.keySet().removeIf(key -> key.program() == program);
+            for (java.util.Map.Entry<TaskExpr, TaskCaptureAdmission> entry
+                    : normalized.entrySet()) {
+                CAPTURES.put(
+                        new PairIdentityKey(
+                                program, entry.getKey(), CLEARED_TASKS),
+                        entry.getValue());
+            }
+            PROGRAM_EPOCHS.put(
+                    new ProgramIdentityKey(program, CLEARED_PROGRAMS),
+                    checkEpoch);
+        }
+
+        private static java.util.Map<String, TaskCaptureTransfer> validateTransfers(
+                java.util.Map<String, TaskCaptureTransfer> captureTransfers) {
+            java.util.Objects.requireNonNull(
+                    captureTransfers, "checked Task capture transfers");
+            java.util.LinkedHashMap<String, TaskCaptureTransfer> checked =
+                    new java.util.LinkedHashMap<>();
+            for (java.util.Map.Entry<String, TaskCaptureTransfer> entry
+                    : captureTransfers.entrySet()) {
+                String name = entry.getKey();
+                TaskCaptureTransfer transfer = entry.getValue();
+                if (name == null || name.isBlank() || transfer == null) {
+                    throw new IllegalArgumentException(
+                            "checked Task capture admission requires non-blank names and transfer modes");
+                }
+                if (checked.putIfAbsent(name, transfer) != null) {
+                    throw new IllegalArgumentException(
+                            "checked Task capture set contains duplicate '"
+                                    + name + "'");
+                }
+            }
+            return java.util.Collections.unmodifiableMap(checked);
+        }
+
+        public static synchronized long requireProgramEpoch(Program program) {
+            java.util.Objects.requireNonNull(program, "Task program");
+            expunge();
+            Long epoch = PROGRAM_EPOCHS.get(
+                    new ProgramIdentityKey(program, null));
+            if (epoch == null || epoch <= 0) {
+                throw new IllegalStateException(
+                        "Task execution requires the latest successfully ownership-checked Program");
+            }
+            return epoch;
+        }
+
+        public static synchronized TaskCaptureAdmission require(
+                Program program,
+                TaskExpr task,
+                long expectedCheckEpoch) {
+            java.util.Objects.requireNonNull(program, "Task program");
+            java.util.Objects.requireNonNull(task, "Task expression");
+            if (expectedCheckEpoch <= 0) {
+                throw new IllegalArgumentException(
+                        "expected Task ownership check epoch must be positive");
+            }
+            expunge();
+
+            Long currentProgramEpoch = PROGRAM_EPOCHS.get(
+                    new ProgramIdentityKey(program, null));
+            if (currentProgramEpoch == null
+                    || currentProgramEpoch.longValue() != expectedCheckEpoch) {
+                throw new IllegalStateException(
+                        "Task Program ownership admission is stale or was superseded by a recheck");
+            }
+
+            TaskCaptureAdmission admission = CAPTURES.get(
+                    new PairIdentityKey(program, task, null));
+            if (admission == null
+                    || admission.checkEpoch() != expectedCheckEpoch
+                    || admission.domain() != task.domain()) {
+                throw new IllegalStateException(
+                        "Task execution requires the exact Program/TaskExpr ownership admission; "
+                                + "reparsed, cloned, unchecked, or stale Tasks are not executable");
+            }
+            return admission;
+        }
+    }
+
     /** Evaluate one expression into Option<T>; only ordinary guest failures become None. */
     public record TrapExpr(Expr expression) implements Expr { }
 
@@ -1462,3 +1933,4 @@ public final class Ast {
         }
     }
 }
+
