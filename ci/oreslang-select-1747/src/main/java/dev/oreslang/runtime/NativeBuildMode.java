@@ -5,7 +5,11 @@ import org.graalvm.nativeimage.ImageInfo;
 /** Native capability captured during image generation, never from launch-time flags. */
 public final class NativeBuildMode {
     public enum Kind { JVM, AOT, HYBRID }
+    public enum ManagedReferenceMode { JVM_MANAGED, COMPRESSED32, NATIVE64 }
+
     private static final Kind KIND = imageBuildKind();
+    private static final ManagedReferenceMode MANAGED_REFERENCE_MODE =
+            imageManagedReferenceMode();
 
     private NativeBuildMode() { }
 
@@ -17,7 +21,24 @@ public final class NativeBuildMode {
         throw new IllegalStateException("Native builds require -Dores.native.build-mode=aot|hybrid");
     }
 
+    private static ManagedReferenceMode imageManagedReferenceMode() {
+        return parseManagedReferenceMode(
+                ImageInfo.inImageBuildtimeCode(),
+                System.getProperty("ores.native.ref-mode"));
+    }
+
+    static ManagedReferenceMode parseManagedReferenceMode(boolean nativeImageBuild, String selected) {
+        if (!nativeImageBuild) return ManagedReferenceMode.JVM_MANAGED;
+        if ("compressed32".equals(selected)) return ManagedReferenceMode.COMPRESSED32;
+        if ("native64".equals(selected)) return ManagedReferenceMode.NATIVE64;
+        throw new IllegalStateException(
+                "Native builds require -Dores.native.ref-mode=compressed32|native64");
+    }
+
     public static Kind kind() { return KIND; }
+    public static ManagedReferenceMode managedReferenceMode() {
+        return MANAGED_REFERENCE_MODE;
+    }
     public static String defaultExecutionMode() {
         return switch (KIND) {
             case JVM -> "jit";

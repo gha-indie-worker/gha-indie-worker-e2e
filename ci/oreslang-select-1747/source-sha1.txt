@@ -63,7 +63,7 @@ eed5519d815855603cefc241b34dc5f2f4ba6ece src/main/java/dev/oreslang/runtime/Http
 4c4ddab0c0e1147d658dbf9c127573260f33e054 src/main/java/dev/oreslang/runtime/HungryActor.java
 9b80455a29bf42a0e58292c5e94e9d6d791462d9 src/main/java/dev/oreslang/runtime/IsolatePolicy.java
 73042059985080698cbfd47f7a4bfeff2d944b14 src/main/java/dev/oreslang/runtime/LinkedProgramRunner.java
-78c572b9680446689f7fa619b2d211c11b610c70 src/main/java/dev/oreslang/runtime/NativeBuildMode.java
+f0ace869fd67d1d2cf705d2c5f040ae94f8d74dd src/main/java/dev/oreslang/runtime/NativeBuildMode.java
 41e1940367ead5881b08db96e8821c4f4587d4f6 src/main/java/dev/oreslang/runtime/NativeCarrierExecutor.java
 66515ecf221bacace934d0b7022bebe299ee5126 src/main/java/dev/oreslang/runtime/NativeHttp.java
 b3c720a3a63676bfdfa6336d722827185350e3aa src/main/java/dev/oreslang/runtime/NativeIo.java
