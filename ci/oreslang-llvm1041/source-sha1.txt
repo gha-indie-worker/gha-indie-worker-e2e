@@ -1,5 +1,5 @@
 # exact source blobs from ores-truffle-oreslang/oreslang-source.llvm
-# source commit 127dd07b020ec509c53a4f6259fec4e766dcc14a
+# source commit 48eed22271d008181109657067d6bc4251efddeb
 b6965740cf101240cdb0f322843d5fa4fd5a8e70 docs/FUTURE_PIPELINE_OWNERSHIP_CONTRACT.md
 ab138a3304655384072c73f6595f84d907ab8fb9 src/main/cpp/oreslang/backend/LlvmCodegen.cpp
 d6b888fd32e912c15acf5c20015f59af7acfacef src/main/cpp/oreslang/backend/LlvmCodegen.hpp
@@ -11,11 +11,11 @@ dec82f3b4b87c1ba832727194b1aa4844c535ce0 src/main/cpp/oreslang/backend/ScalarLoo
 9f277e305de03127c54af29c8e1b28b056c1ed9d src/main/cpp/oreslang/frontend/MethodResolver.hpp
 07aba8d22ae24a076087a1bad9896e82453548e4 src/main/cpp/oreslang/frontend/ModuleLoader.cpp
 022330bc32edc116ea5673b73b05b03d27695dc0 src/main/cpp/oreslang/frontend/ModuleLoader.hpp
-cdf5223d034b45746b13d5cdcb9883d8c6929486 src/main/cpp/oreslang/frontend/Parser.cpp
+27ac3e2935b6b07066f80869d4db34bb512a37a4 src/main/cpp/oreslang/frontend/Parser.cpp
 7063a2285db4ce11b259561125b65f7aee0d5296 src/main/cpp/oreslang/frontend/Parser.hpp
 cdcd18ac33be684003326cc16c344beac7cd1b06 src/main/cpp/oreslang/frontend/ProjectRootImport.hpp
 d7dbd6a6b57209c43b73a8830c8c7e8773267bb5 src/main/cpp/oreslang/frontend/SourceInput.hpp
-256a44a01466e6523d35791ffe6aea04878fbdef src/main/cpp/oreslang/main.cpp
+df0e1a0aad12ae7ecc44cd33f5d08442bd513aa6 src/main/cpp/oreslang/main.cpp
 c74a3f15ec6f494703a8c65c526cec3887870a5b src/main/cpp/oreslang/runtime/CoreLog.hpp
 4b7cab067a3e5980f4a000a14e0682cef21b6daa src/main/cpp/oreslang/runtime/NativeActorScheduler.c
 a25dcdf9000b52886d48fcfcba5a44329bd2f606 src/main/cpp/oreslang/runtime/NativeActorScheduler.h
@@ -38,5 +38,6 @@ b5b77c169c8426ac26f3877f7e62bbf1b2db851b src/main/cpp/oreslang/types/NativeScala
 fd34c7177737c85f791fbcb324875468bc562cbb src/main/cpp/oreslang/types/OwnershipChecker.hpp
 b9e269598fb55c51f30d1ee4c365c0015beae459 src/main/cpp/oreslang/types/RealtimeAnalysis.hpp
 d8552624e30ebcd995c2f8397c7fa33330a494af tests/fixtures/source-future-pipeline-i64.ores
-1e63a1607c6666cff874b5fa2bd6313ce8a7f0c2 tests/source_future_pipeline_i64_e2e.rs
+ed9c69abfb6e4838895b81ffa34df7047c13186e tests/fixtures/source-future-pipeline-async-stage-i64.ores
+ad4f54636f3a25bd5b5460e1894f7c9ad191c4f5 tests/source_future_pipeline_i64_e2e.rs
 bf83f359fa3f6ec0821b2b928b29547e5ab6796b tests/source_task_i64_runtime_test.c
