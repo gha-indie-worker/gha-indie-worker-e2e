@@ -1,0 +1,64 @@
+name: Source-free carrier resource ceilings
+on:
+  push:
+    branches:
+      - audit/source-free-carrier-resource-limits-20261026
+
+permissions:
+  contents: read
+
+jobs:
+  resource-ceilings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prove no private source checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$GITHUB_WORKSPACE"
+          if find "$GITHUB_WORKSPACE" -type f -print -quit | grep -q .; then
+            echo "unexpected workspace payload" >&2
+            exit 1
+          fi
+          echo "private_source_bytes=0"
+      - name: Validate non-raiseable sandbox resource ceilings
+        shell: bash
+        run: |
+          set -euo pipefail
+          ulimit -S -c 0
+          ulimit -H -c 0
+          ulimit -S -n 4096
+          ulimit -H -n 4096
+          ulimit -S -u 512
+          ulimit -H -u 512
+          umask 077
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import resource
+          import tempfile
+
+          assert resource.getrlimit(resource.RLIMIT_CORE) == (0, 0)
+          assert resource.getrlimit(resource.RLIMIT_NOFILE) == (4096, 4096)
+          assert resource.getrlimit(resource.RLIMIT_NPROC) == (512, 512)
+
+          for which, target in (
+              (resource.RLIMIT_NOFILE, (4097, 4097)),
+              (resource.RLIMIT_NPROC, (513, 513)),
+          ):
+              try:
+                  resource.setrlimit(which, target)
+              except (ValueError, PermissionError):
+                  pass
+              else:
+                  raise AssertionError("hard resource ceiling was raiseable")
+
+          old = os.umask(0o077)
+          assert old == 0o077
+          with tempfile.TemporaryDirectory() as td:
+              p = pathlib.Path(td) / "probe"
+              p.write_text("x", encoding="utf-8")
+              assert (p.stat().st_mode & 0o777) == 0o600
+          print("SOURCE_FREE_CARRIER_RESOURCE_LIMITS_PASS private_source_bytes=0")
+          PY
