@@ -140,3 +140,4 @@ f6f3656bcd59c16d76137ab30c436af9769b634e src/main/java/dev/oreslang/runtime/Supe
 a50bde284f055290dffeb9a2a86a55e9cd9bab1e src/main/java/dev/oreslang/runtime/ActorProxyRequestSlab.java
 9219f0bc093434f1f3cc4aac31c19ac0d3ec0994 src/main/java/dev/oreslang/runtime/OresKeyedMap.java
 74b84e6efc3c23a73ac6e20c8058eddb6e7131e5 src/main/java/dev/oreslang/runtime/ManagedReferencePolicy.java
+1f01e71ae5ca15f82ef86582915ef39ec520281c src/main/java/dev/oreslang/runtime/SymbolPropertyKeyCodec.java
