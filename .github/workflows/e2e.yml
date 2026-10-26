@@ -36,8 +36,12 @@ jobs:
             test "$(git hash-object "$file")" = "$expected"
             n=$((n+1))
           done < source-sha1.txt
-          test "$n" -eq 130
+          test "$n" -eq 134
           echo "verified $n source blob SHAs"
+      - name: Verify hardened TaskPipeline derived blob
+        shell: bash
+        run: |
+          test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/runtime/TaskPipeline.java)" = "87be82c4dfbf6231d70aad9197f9fcaf255cd74d"
       - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
           java-version: '25'
@@ -45,4 +49,4 @@ jobs:
       - name: Exact-head select-plan regression suite
         run: |
           mvn -B -ntp -f ci/oreslang-select-1747/pom.xml \
-            -Dtest=SelectLoopDescriptorHoistTest,StaticSelectTicketTest,DynamicSelectPlanGenerationTest,ChannelRuntimeTest,FutureChannelSelectTest,ChannelSelectArmBudgetTest,ChannelPendingAdmissionTest,ChannelFutureSelectQuotaTest,ChannelSelectFairAdmissionRaceTest,FutureSelectAttachmentPublicationBarrierTest,FutureSelectLateDetachBarrierTest,ChannelMappedSelectionCancellationTest,ActorSelectFairnessIsolationTest,SelectPeerFutureAliasReadinessTest,FutureSelectAdditionalRegressionTest,ChannelMappedCancellationStressTest test
+            -Dtest=SelectLoopDescriptorHoistTest,StaticSelectTicketTest,DynamicSelectPlanGenerationTest,ChannelRuntimeTest,FutureChannelSelectTest,ChannelSelectArmBudgetTest,ChannelPendingAdmissionTest,ChannelFutureSelectQuotaTest,ChannelSelectFairAdmissionRaceTest,FutureSelectAttachmentPublicationBarrierTest,FutureSelectLateDetachBarrierTest,ChannelMappedSelectionCancellationTest,ActorSelectFairnessIsolationTest,SelectPeerFutureAliasReadinessTest,FutureSelectAdditionalRegressionTest,ChannelMappedCancellationStressTest,TaskPipelineTest test

@@ -288,8 +288,9 @@ public final class TaskPipeline {
                                     "pipeline cannot await its own exposed completion Future");
                         }
                         if (child == input) {
-                            throw new IllegalArgumentException(
-                                    "pipeline cannot reuse its input Future as stage-owned work");
+                            throw new IllegalArgumentException(ownsInput
+                                    ? "pipeline cannot re-register its owned input Future as stage-owned work"
+                                    : "pipeline cannot claim ownership of its borrowed input Future");
                         }
                         if (!ownedStage.compareAndSet(null, child)) {
                             throw new IllegalStateException(

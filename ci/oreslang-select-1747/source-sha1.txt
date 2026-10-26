@@ -129,3 +129,7 @@ d2cd9b8e0cd3e3bb3ee6a5f9cebf9ab3312c44f4 stdlib/core.ores
 f4ff35b10683880e42e3151b34fc140d52704dba stdlib/trace.ores
 5f72bfa6dd02bdc3004bc78b902b152f909259ca src/test/java/dev/oreslang/SelectLoopDescriptorHoistTest.java
 7883ac184c44624c4ea2f3e3153757b0501260e5 src/test/java/dev/oreslang/runtime/StaticSelectTicketTest.java
+bff7ed59bad105e2b0548921600caec7bb724dbe src/main/java/dev/oreslang/runtime/ExecutionContext.java
+4550b0a7de6d288a47b37fcc866fd51d1b869c15 src/main/java/dev/oreslang/runtime/TaskOwnedLeases.java
+942aa675dee819911a08b4fac39465a37bb75459 src/main/java/dev/oreslang/runtime/UntrappableTaskFailure.java
+20859e02b1e68b977e39fa47ef479c65aef54cc7 src/test/java/dev/oreslang/runtime/TaskPipelineTest.java
