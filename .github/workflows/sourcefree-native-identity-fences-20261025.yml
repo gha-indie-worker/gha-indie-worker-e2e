@@ -1,0 +1,149 @@
+name: Source-free native identity fences
+
+on:
+  push:
+    branches:
+      - audit/source-free-actor-ref-rt-bootstrap-20261025
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-identity-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: No private Oreslang payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e private-oreslang-source
+          echo "private_source_bytes=0"
+          echo "model_for_llvm_nio_head=459c46b084462f427bbb66bb7599473b1bc7e897"
+          echo "model_for_llvm_envelope_head=ecd1b9883b8363d07da559aa02d8701cb3f3f8d6"
+      - name: Build and run scheduler identity model
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/sourcefree-native-identity"
+          mkdir -p "$work"
+          cat > "$work/model.cpp" <<'CPP'
+          #include <atomic>
+          #include <cstdint>
+          #include <cstdlib>
+          #include <iostream>
+          #include <limits>
+          #include <memory>
+
+          struct ActorRef {
+              std::uint64_t scheduler_domain{};
+              std::uint64_t actor_slot{};
+              std::uint64_t generation{};
+          };
+
+          struct Scheduler {
+              std::uint64_t domain{};
+              bool actor_live{true};
+          };
+
+          struct Ticket {
+              Scheduler* scheduler{};
+              ActorRef scheduler_actor{};
+          };
+
+          static std::atomic<std::uint64_t> next_domain{1};
+
+          static std::uint64_t allocate_domain() {
+              auto candidate = next_domain.load(std::memory_order_relaxed);
+              while (candidate != 0 && candidate != std::numeric_limits<std::uint64_t>::max()) {
+                  if (next_domain.compare_exchange_weak(
+                          candidate, candidate + 1,
+                          std::memory_order_relaxed,
+                          std::memory_order_relaxed))
+                      return candidate;
+              }
+              return 0;
+          }
+
+          static bool same_actor(ActorRef a, ActorRef b) {
+              return a.scheduler_domain != 0
+                  && a.scheduler_domain == b.scheduler_domain
+                  && a.actor_slot == b.actor_slot
+                  && a.generation == b.generation;
+          }
+
+          static bool matches_scheduler_incarnation(
+                  const Ticket& ticket, Scheduler* scheduler, ActorRef actor) {
+              return scheduler != nullptr
+                  && ticket.scheduler == scheduler
+                  && same_actor(ticket.scheduler_actor, actor)
+                  && scheduler->actor_live
+                  && scheduler->domain == actor.scheduler_domain;
+          }
+
+          static void require(bool value, const char* message) {
+              if (!value) {
+                  std::cerr << "FAIL: " << message << '\n';
+                  std::exit(1);
+              }
+          }
+
+          int main() {
+              next_domain.store(std::numeric_limits<std::uint64_t>::max() - 1,
+                                std::memory_order_relaxed);
+              const auto final_valid = allocate_domain();
+              const auto exhausted = allocate_domain();
+              const auto still_exhausted = allocate_domain();
+              require(final_valid == std::numeric_limits<std::uint64_t>::max() - 1,
+                      "last valid domain was not allocated");
+              require(exhausted == 0 && still_exhausted == 0,
+                      "scheduler-domain allocator wrapped after exhaustion");
+
+              Scheduler original{41, true};
+              Scheduler foreign{42, true};
+              ActorRef owner{41, 7, 9};
+              ActorRef same_fields{41, 7, 9};
+              ActorRef stale_generation{41, 7, 8};
+              ActorRef foreign_same_slot_generation{42, 7, 9};
+              Ticket exact{&original, owner};
+
+              require(matches_scheduler_incarnation(exact, &original, owner),
+                      "exact scheduler incarnation rejected");
+              require(matches_scheduler_incarnation(exact, &original, same_fields),
+                      "value-equivalent exact native actor ref rejected");
+              require(!matches_scheduler_incarnation(exact, &original, stale_generation),
+                      "stale generation accepted");
+              require(!matches_scheduler_incarnation(exact, &foreign, foreign_same_slot_generation),
+                      "foreign scheduler accepted same slot/generation");
+              require(!matches_scheduler_incarnation(exact, &foreign, owner),
+                      "wrong scheduler pointer accepted original numeric actor");
+              original.actor_live = false;
+              require(!matches_scheduler_incarnation(exact, &original, owner),
+                      "retired actor accepted");
+
+              Scheduler replacement_same_numeric_domain{41, true};
+              require(!matches_scheduler_incarnation(
+                          exact, &replacement_same_numeric_domain, owner),
+                      "replacement scheduler object accepted old opaque ticket");
+
+              Ticket replacement_ticket{&replacement_same_numeric_domain, owner};
+              require(matches_scheduler_incarnation(
+                          replacement_ticket, &replacement_same_numeric_domain, owner),
+                      "fresh replacement ticket rejected");
+
+              std::cout
+                  << "NATIVE_IDENTITY_FENCE_MODEL_OK cases=10 private_source_bytes=0\n";
+              return 0;
+          }
+          CPP
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror "$work/model.cpp" -o "$work/model-gcc"
+          "$work/model-gcc"
+          clang++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror "$work/model.cpp" -o "$work/model-clang"
+          "$work/model-clang"
+          clang++ -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror             -fsanitize=address,undefined -fno-omit-frame-pointer             "$work/model.cpp" -o "$work/model-sanitize"
+          "$work/model-sanitize"
+          echo "SOURCE_FREE_NATIVE_IDENTITY_PASS compilers=3 private_source_bytes=0"
