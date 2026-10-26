@@ -59,15 +59,57 @@ for(let i=0;i<2000;i++){
   assert(s.drained(),"cancelled scope failed to drain after physical retirement");
 }
 
-// Scoped generator policy is fail-closed until producer lifetime participates.
-function activateGenerator(scope){
-  if(scope) throw new Error("generator activation inside TaskScope disabled");
-  return "generator";
+// Structured generator model: activation is lazy. The producer becomes a
+// scope child on first pull, normal scope close requests graceful stop, and
+// terminal state cannot drain until the producer carrier is physically gone.
+class GeneratorModel {
+  constructor(scope,parent=null){
+    this.scope=scope; this.parent=parent; this.reg=null;
+    this.started=false; this.closed=false; this.terminal=false; this.quiescent=false;
+  }
+  pull(){
+    if(this.closed) return "done";
+    if(!this.started){
+      this.reg=this.scope ? this.scope.reserve(this.parent) : null;
+      if(this.reg) this.reg.beganExecution();
+      this.started=true;
+    }
+    return "yield";
+  }
+  scopeCloseSignal(){
+    this.closed=true;
+  }
+  producerTerminal(){
+    this.terminal=true;
+    if(this.reg) this.reg.terminalReady();
+  }
+  producerQuiescent(){
+    this.quiescent=true;
+    if(this.reg) this.reg.physicallyQuiescent();
+  }
 }
 for(let i=0;i<1000;i++){
-  let denied=false; try{activateGenerator(new Scope());}catch(e){denied=e.message.includes("TaskScope");}
-  assert(denied,"scoped generator activation was not denied");
+  const s=new Scope();
+  const g=new GeneratorModel(s);
+  assert(g.pull()==="yield","generator did not start on first pull");
+  s.close();
+  g.scopeCloseSignal();
+  g.producerTerminal();
+  assert(!s.drained(),"generator terminal forged physical retirement");
+  g.producerQuiescent();
+  assert(s.drained(),"structured generator did not drain after quiescence");
+  assert(g.pull()==="done","closed generator resumed after scope close");
+}
+
+// An unused lazy generator is not a child and cannot pin lexical exit.
+for(let i=0;i<1000;i++){
+  const s=new Scope();
+  const g=new GeneratorModel(s);
+  s.close();
+  assert(s.drained(),"unused lazy generator pinned scope close");
+  g.scopeCloseSignal();
 }
 
 console.log("ORESLANG_SOURCE_FREE_CONTINUATION_STRESS_PASS " +
-  "rounds=7000 callback_race=sealed cancellation=sealed generator_scope=denied private_source_bytes=0");
+  "rounds=8000 callback_race=sealed cancellation=sealed generator_scope=structured " +
+  "generator_terminal_ne_quiescence=proven lazy_unused=nonchild private_source_bytes=0");
