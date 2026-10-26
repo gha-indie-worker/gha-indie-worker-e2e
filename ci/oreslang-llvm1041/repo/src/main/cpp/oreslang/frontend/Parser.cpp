@@ -1906,16 +1906,21 @@ private:
             pipeline.name = identifier();
             require("=");
 
+            bool parenthesized_take = false;
             if (accept("rt")) {
                 require("take");
                 pipeline.root_consumed = true;
-                if (token_.text == "(")
-                    fail("taking an already-lifted pipeline is not yet supported");
+                parenthesized_take = accept("(");
             }
 
             pipeline.producer_function = identifier();
             require("(");
             require(")");
+            if (parenthesized_take) {
+                if (token_.text == "|>")
+                    fail("taking an already-lifted pipeline is not yet supported");
+                require(")");
+            }
             if (token_.text != "|>")
                 fail("native Future<int> pipeline v1 requires at least one |> stage");
             while (accept("|>")) {
