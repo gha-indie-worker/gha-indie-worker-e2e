@@ -25,7 +25,7 @@ jobs:
           echo "private_source_bytes=0"
           echo "model_for_llvm_nio_head=c8f8b1f9c8cc90affd439dfaac83978df722f731"
           echo "model_for_llvm_http_head=a78ab3b5c5b022be3fa442af0b1d583c893f778d"
-          echo "model_for_llvm_envelope_head=a0ddf7216bccfc2be95dbd438e0ee36e03a84b79"
+          echo "model_for_llvm_envelope_head=cdb60a1bcdbb9dbec2ec8b898277f4b4391c7ff0"
           echo "model_for_llvm_cleanup_head=a7559f3a9bd8eb1547cdee96724d99c5bec97cbf"
           echo "model_for_llvm_send_stop_head=8f787a6d034b402aba325c099330902c92ac7927"
       - name: Build and run scheduler identity model
@@ -120,8 +120,10 @@ jobs:
           }
 
           static bool matches_scheduler_incarnation(
-                  const Ticket& ticket, Scheduler* scheduler, ActorRef actor) {
-              return scheduler != nullptr
+                  const Ticket& ticket, std::uint64_t control_generation,
+                  Scheduler* scheduler, ActorRef actor) {
+              return control_generation == actor.generation
+                  && scheduler != nullptr
                   && ticket.scheduler == scheduler
                   && same_actor(ticket.scheduler_actor, actor)
                   && scheduler->actor_live
@@ -198,28 +200,33 @@ jobs:
               ActorRef foreign_same_slot_generation{42, 7, 9};
               Ticket exact{&original, owner};
 
-              require(matches_scheduler_incarnation(exact, &original, owner),
+              require(matches_scheduler_incarnation(exact, owner.generation, &original, owner),
                       "exact scheduler incarnation rejected");
-              require(matches_scheduler_incarnation(exact, &original, same_fields),
+              require(matches_scheduler_incarnation(exact, owner.generation, &original, same_fields),
                       "value-equivalent exact native actor ref rejected");
-              require(!matches_scheduler_incarnation(exact, &original, stale_generation),
+              require(!matches_scheduler_incarnation(exact, owner.generation, &original, stale_generation),
                       "stale generation accepted");
-              require(!matches_scheduler_incarnation(exact, &foreign, foreign_same_slot_generation),
+              require(!matches_scheduler_incarnation(
+                          exact, owner.generation + 1, &original, owner),
+                      "split control/scheduler generation accepted");
+              require(!matches_scheduler_incarnation(exact, owner.generation, &foreign, foreign_same_slot_generation),
                       "foreign scheduler accepted same slot/generation");
-              require(!matches_scheduler_incarnation(exact, &foreign, owner),
+              require(!matches_scheduler_incarnation(exact, owner.generation, &foreign, owner),
                       "wrong scheduler pointer accepted original numeric actor");
               original.actor_live = false;
-              require(!matches_scheduler_incarnation(exact, &original, owner),
+              require(!matches_scheduler_incarnation(exact, owner.generation, &original, owner),
                       "retired actor accepted");
 
               Scheduler replacement_same_numeric_domain{41, true};
               require(!matches_scheduler_incarnation(
-                          exact, &replacement_same_numeric_domain, owner),
+                          exact, owner.generation,
+                          &replacement_same_numeric_domain, owner),
                       "replacement scheduler object accepted old opaque ticket");
 
               Ticket replacement_ticket{&replacement_same_numeric_domain, owner};
               require(matches_scheduler_incarnation(
-                          replacement_ticket, &replacement_same_numeric_domain, owner),
+                          replacement_ticket, owner.generation,
+                          &replacement_same_numeric_domain, owner),
                       "fresh replacement ticket rejected");
 
               OwnerRegistry registry;
@@ -273,7 +280,7 @@ jobs:
                       "post-stop send allocated a new async descriptor");
 
               std::cout
-                  << "NATIVE_IDENTITY_FENCE_MODEL_OK cases=28 private_source_bytes=0\n";
+                  << "NATIVE_IDENTITY_FENCE_MODEL_OK cases=29 private_source_bytes=0\n";
               return 0;
           }
           CPP
