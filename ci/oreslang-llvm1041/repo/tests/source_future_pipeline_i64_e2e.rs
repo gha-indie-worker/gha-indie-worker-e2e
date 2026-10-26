@@ -102,6 +102,52 @@ fn main() {
     }
     link_and_run(&clang, &root, &dir.0, "consumed", &output.stdout);
 
+    let async_stage = r#"async fnc source(): int { return 20; }
+async fnc plus_one(int value): int { return value + 1; }
+fnc twice(int value): int { return value * 2; }
+pub fnc main(): int {
+    let Future<int> pending = rt take source() |> plus_one() |> twice();
+    let int result = await pending;
+    return result;
+}
+"#;
+    let async_output = compile(
+        &compiler, &dir.0, "async-stage.ores", async_stage);
+    assert!(async_output.status.success(),
+        "async-stage Future source compile failed: {}",
+        String::from_utf8_lossy(&async_output.stderr));
+    let async_ir = String::from_utf8_lossy(&async_output.stdout);
+    for needle in [
+        ".future.pending.consumed.producer",
+        "pending.plus_one.value",
+        "pending.twice.value",
+    ] {
+        assert!(async_ir.contains(needle),
+            "missing async-stage pipeline IR marker {needle}");
+    }
+    link_and_run(
+        &clang, &root, &dir.0, "async-stage", &async_output.stdout);
+
+    let async_stage = fs::read_to_string(
+        root.join("tests/fixtures/source-future-pipeline-async-stage-i64.ores"))
+        .expect("read async-stage Future pipeline fixture");
+    let async_output = compile(
+        &compiler, &dir.0, "async-stage.ores", &async_stage);
+    assert!(async_output.status.success(),
+        "async-stage Future source compile failed: {}",
+        String::from_utf8_lossy(&async_output.stderr));
+    let async_ir = String::from_utf8_lossy(&async_output.stdout);
+    for needle in [
+        ".future.pending.consumed.producer",
+        "pending.plus_one_async.value",
+        "pending.twice.value",
+    ] {
+        assert!(async_ir.contains(needle),
+            "missing async-stage Future pipeline IR marker {needle}");
+    }
+    link_and_run(
+        &clang, &root, &dir.0, "async-stage", &async_output.stdout);
+
     let borrowed = consumed.replace("rt take source()", "source()");
     rejected(&compiler, &dir.0, "borrowed.ores", &borrowed,
         "pipeline v1 execution requires an explicit rt take root");
@@ -111,15 +157,15 @@ fn main() {
 pub fnc main(): int { return source(); }
 "#, "async source call requires checked Future<int> pipeline lowering");
 
-    rejected(&compiler, &dir.0, "capturing-producer.ores",
-        r#"async fnc source(int value): int { return value; }
-fnc keep(int value): int { return value; }
+    rejected(&compiler, &dir.0, "bad-async-stage-param.ores",
+        r#"async fnc source(): int { return 21; }
+async fnc bad(bool value): int { return value; }
 pub fnc main(): int {
-    let Future<int> pending = rt take source() |> keep();
+    let Future<int> pending = rt take source() |> bad();
     let int result = await pending;
     return result;
 }
-"#, "async Future<int> producer v1 must be capture-free");
+"#, "native async Future<int> v1 callable must be capture-free");
 
     rejected(&compiler, &dir.0, "impure-stage.ores",
         r#"async fnc source(): int { return 21; }
@@ -129,7 +175,17 @@ pub fnc main(): int {
     let int result = await pending;
     return result;
 }
-"#, "pipeline stage v1 requires one pure sync int -> int function");
+"#, "pipeline stage v1 requires one pure int -> int callable");
+
+    rejected(&compiler, &dir.0, "async-stage-capture.ores",
+        r#"async fnc source(): int { return 21; }
+async fnc keep(int value): int { return value + missing; }
+pub fnc main(): int {
+    let Future<int> pending = rt take source() |> keep();
+    let int result = await pending;
+    return result;
+}
+"#, "unknown parameter 'missing'");
 
     rejected(&compiler, &dir.0, "extra-stage-arg.ores",
         r#"async fnc source(): int { return 21; }
@@ -166,5 +222,22 @@ pub fnc main(): int {
     rejected(&compiler, &dir.0, "too-many.ores", &too_many,
         "Future pipeline exceeds 128 stages");
 
-    println!("PASS: source Future<int> async producer -> checked |> -> scheduler carrier -> await -> native 42");
+    let tree_source = dir.0.join("tree-shake.ores");
+    fs::write(&tree_source, &consumed).expect("write tree-shake source");
+    let tree = Command::new(&compiler)
+        .arg("--tree-shake")
+        .arg(&tree_source)
+        .current_dir(&dir.0)
+        .output()
+        .expect("run tree-shake Future compiler");
+    assert!(!tree.status.success(),
+        "Future pipeline unexpectedly entered metadata-unaware tree shaking");
+    assert!(tree.stdout.iter().all(u8::is_ascii_whitespace),
+        "tree-shake rejection emitted LLVM IR");
+    let tree_stderr = String::from_utf8_lossy(&tree.stderr);
+    assert!(tree_stderr.contains(
+        "tree shaking currently rejects Task/Future pipeline metadata edges"),
+        "wrong tree-shake Future diagnostic: {tree_stderr}");
+
+    println!("PASS: source Future<int> producer/async-stage -> checked |> -> scheduler carrier -> await -> native 42");
 }
