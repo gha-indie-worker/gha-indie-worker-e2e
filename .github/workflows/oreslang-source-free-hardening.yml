@@ -12,7 +12,7 @@ permissions:
 jobs:
   security-primitives:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -32,11 +32,16 @@ jobs:
       - name: Prove source-free private-CI security primitives
         shell: bash
         run: bash source-free-carrier/test-policy.sh
-      - name: Prove installed Java toolchain
+      - uses: actions/setup-java@816722acf8fd27c9d1e9ae6ee6085da07e0d44c1
+        with:
+          distribution: graalvm
+          java-version: '25'
+      - name: Prove Java/Graal Native Image toolchain
         run: |
           set -euo pipefail
           java --version
           javac --version
+          native-image --version
       - name: Prove native/LLVM/Forge and wasm32 object toolchains
         run: |
           set -euo pipefail
