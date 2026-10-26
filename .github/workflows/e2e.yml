@@ -50,3 +50,60 @@ jobs:
         run: |
           mvn -B -ntp -f ci/oreslang-select-1747/pom.xml \
             -Dtest=SelectLoopDescriptorHoistTest,StaticSelectTicketTest,DynamicSelectPlanGenerationTest,ChannelRuntimeTest,FutureChannelSelectTest,ChannelSelectArmBudgetTest,ChannelPendingAdmissionTest,ChannelFutureSelectQuotaTest,ChannelSelectFairAdmissionRaceTest,FutureSelectAttachmentPublicationBarrierTest,FutureSelectLateDetachBarrierTest,ChannelMappedSelectionCancellationTest,ActorSelectFairnessIsolationTest,SelectPeerFutureAliasReadinessTest,FutureSelectAdditionalRegressionTest,ChannelMappedCancellationStressTest,TaskPipelineTest test
+      - name: Probe consuming Future input ownership
+        shell: bash
+        run: |
+          cat > /tmp/OwnedInputProbe.java <<'JAVA'
+          package dev.oreslang.runtime;
+          import java.util.List;
+          import java.util.concurrent.TimeUnit;
+          public final class OwnedInputProbe {
+            private static void awaitInput(OresFuture<?> input) throws Exception {
+              long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+              while (input.pendingRuntimeWaiterCount() == 0 && System.nanoTime() < deadline) {
+                Thread.sleep(2);
+              }
+              if (input.pendingRuntimeWaiterCount() == 0) throw new AssertionError("no input waiter");
+            }
+            public static void main(String[] args) throws Exception {
+              OresFuture<Integer> owned = new OresFuture<>();
+              try (OresScheduler scheduler = new OresScheduler(1)) {
+                TaskPipeline.PipelineHandle<Integer> handle =
+                    TaskPipeline.startOwnedInCurrentTaskOrRoot(
+                        scheduler, owned, List.of(v -> ((Integer) v) + 1));
+                awaitInput(owned);
+                if (!handle.cancel()) throw new AssertionError("owned cancel lost");
+                if (!owned.isCancelled()) throw new AssertionError("owned input survived cancellation");
+                if (!handle.result().isCancelled()) throw new AssertionError("result not cancelled");
+                if (!(handle.getDone().get(5, TimeUnit.SECONDS) instanceof TaskHandle.Cancelled)) {
+                  throw new AssertionError("owned pipeline did not physically retire as cancelled");
+                }
+              }
+
+              OresFuture<Integer> borrowed = new OresFuture<>();
+              try (OresScheduler scheduler = new OresScheduler(1)) {
+                TaskPipeline.PipelineHandle<Integer> handle =
+                    TaskPipeline.startInCurrentTaskOrRoot(
+                        scheduler, borrowed, List.of(v -> ((Integer) v) + 1));
+                awaitInput(borrowed);
+                if (!handle.cancel()) throw new AssertionError("borrowed cancel lost");
+                if (borrowed.isCancelled()) throw new AssertionError("borrowed input was cancelled");
+              }
+
+              OresFuture<Integer> rejected = new OresFuture<>();
+              OresScheduler closed = new OresScheduler(1);
+              closed.close();
+              boolean failed = false;
+              try {
+                TaskPipeline.startOwnedInCurrentTaskOrRoot(closed, rejected, List.of(v -> v));
+              } catch (RuntimeException expected) {
+                failed = true;
+              }
+              if (!failed) throw new AssertionError("closed scheduler admitted pipeline");
+              if (!rejected.isCancelled()) throw new AssertionError("moved input leaked on admission failure");
+              System.out.println("owned-input-probe: ok");
+            }
+          }
+          JAVA
+          javac --release 21 -cp ci/oreslang-select-1747/target/classes -d /tmp /tmp/OwnedInputProbe.java
+          java -cp ci/oreslang-select-1747/target/classes:/tmp dev.oreslang.runtime.OwnedInputProbe
