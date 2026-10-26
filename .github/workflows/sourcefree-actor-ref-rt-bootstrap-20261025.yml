@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           test ! -e private-oreslang-source
           echo "private_source_bytes=0"
-          echo "model_for_java_head=8a0ed171f5e10e71eac182e1bc4d35f633447e31"
+          echo "model_for_java_head=f08b5d4d1afb4c7b8b38ab71188bbd2bf1966aa9"
       - name: Compile and run exact-incarnation model
         shell: bash
         run: |
@@ -135,6 +135,13 @@ jobs:
                       return true;
                   }
               }
+              static final class BehaviorState {
+                  final Ref owner;
+                  BehaviorState(Ref owner) { this.owner = owner; }
+                  boolean validateAfterTurn(Ref current) {
+                      return current == owner;
+                  }
+              }
               private static void require(boolean value, String message) {
                   if (!value) throw new AssertionError(message);
               }
@@ -223,7 +230,15 @@ jobs:
                   require(reservation.close(owner),
                           "exact private reservation owner was rejected");
 
-                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=27 private_source_bytes=0");
+                  BehaviorState behaviorState = new BehaviorState(owner);
+                  require(behaviorState.validateAfterTurn(owner),
+                          "post-turn private-state validator rejected exact ref");
+                  require(!behaviorState.validateAfterTurn(restarted),
+                          "post-turn private-state validator accepted restarted same-id ref");
+                  require(!behaviorState.validateAfterTurn(forgedSameFields),
+                          "post-turn private-state validator accepted forged same-fields ref");
+
+                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=30 private_source_bytes=0");
               }
           }
           JAVA
