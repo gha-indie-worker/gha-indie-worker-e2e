@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           test ! -e private-oreslang-source
           echo "private_source_bytes=0"
-          echo "model_for_java_head=749c3b87a3cb20d7079321f4c3eb27c857654479"
+          echo "model_for_java_head=147fb35b7e72b35b7ad063fccf87988f908e9a43"
       - name: Compile and run exact-incarnation model
         shell: bash
         run: |
@@ -38,6 +38,7 @@ jobs:
           cat > "$work/ActorRefModel.java" <<'JAVA'
           public final class ActorRefModel {
               record Id(long value) {}
+              static final ThreadLocal<Ref> CURRENT = new ThreadLocal<>();
               static final class Ref {
                   final Object runtime;
                   final Id id;
@@ -58,6 +59,13 @@ jobs:
                   boolean ownedBy(Object candidateRuntime, Ref candidate) {
                       return runtime == candidateRuntime && owner == candidate;
                   }
+                  boolean ownedBy(Object candidateRuntime, Id logicalId) {
+                      Ref current = CURRENT.get();
+                      return logicalId != null
+                              && current != null
+                              && current.id.equals(logicalId)
+                              && ownedBy(candidateRuntime, current);
+                  }
               }
               private static void require(boolean value, String message) {
                   if (!value) throw new AssertionError(message);
@@ -68,14 +76,30 @@ jobs:
                   Ref owner = new Ref(runtime, 7, 41);
                   Ref restarted = new Ref(runtime, 7, 42);
                   Ref forgedSameFields = new Ref(runtime, 7, 41);
-                  Ref foreign = new Ref(foreignRuntime, 7, 41);
+                  Ref foreignRuntimeRef = new Ref(foreignRuntime, 7, 41);
                   Lease lease = new Lease(runtime, owner);
+
                   require(lease.ownedBy(runtime, owner), "exact owner rejected");
-                  require(!lease.ownedBy(runtime, restarted), "new generation accepted by logical id");
-                  require(!lease.ownedBy(runtime, forgedSameFields), "forged same fields accepted");
-                  require(!lease.ownedBy(foreignRuntime, foreign), "foreign runtime accepted");
-                  require(!lease.ownedBy(runtime, null), "null owner accepted");
-                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=5 private_source_bytes=0");
+                  require(!lease.ownedBy(runtime, restarted), "new generation accepted as exact ref");
+                  require(!lease.ownedBy(runtime, forgedSameFields), "forged equal fields accepted as exact ref");
+
+                  CURRENT.set(owner);
+                  require(lease.ownedBy(runtime, new Id(7)),
+                          "legacy logical id rejected for exact current owner");
+
+                  CURRENT.set(restarted);
+                  require(!lease.ownedBy(runtime, new Id(7)),
+                          "restarted same-id incarnation gained legacy authority");
+
+                  CURRENT.set(foreignRuntimeRef);
+                  require(!lease.ownedBy(runtime, new Id(7)),
+                          "foreign runtime gained legacy authority");
+
+                  CURRENT.remove();
+                  require(!lease.ownedBy(runtime, new Id(7)),
+                          "ambient host gained legacy ActorId authority");
+
+                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=7 private_source_bytes=0");
               }
           }
           JAVA
