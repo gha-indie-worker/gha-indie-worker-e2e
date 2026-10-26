@@ -166,6 +166,17 @@ final class TaskCancellation {
         }
     }
 
+    /**
+     * A terminal parent result is not equivalent to physical retirement while
+     * child lifetimes remain. The caller may still request child revocation
+     * without changing the already settled parent result.
+     */
+    boolean hasOutstandingLifetimeChildren() {
+        synchronized (GRAPH_LOCK) {
+            return !retired && !lifetimeChildren.isEmpty();
+        }
+    }
+
     /** Null until cancellation; writing reason precedes volatile cancelled. */
     String cancellationReason() {
         return cancellationReason;
