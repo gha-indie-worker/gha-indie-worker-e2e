@@ -134,3 +134,5 @@ dab18b2284478606f23ceece35bdc4446cd28342 src/test/java/dev/oreslang/parser/Futur
 b955e41c44c30d2e58a52ce6b91918ee5beb1591 src/test/java/dev/oreslang/parser/FuturePipelineProvenanceCheck.java
 ba75f73878d3b2cda58240e53c4446fa67e45907 src/main/java/dev/oreslang/ast/TaskCaptureNames.java
 ac58abf9328959e809522f050ad067879c76339d src/main/java/dev/oreslang/types/ScopedRequestBorrowPreflight.java
+f6f3656bcd59c16d76137ab30c436af9769b634e src/main/java/dev/oreslang/runtime/SupervisorCodeSlot.java
+8d8e42d6b5a396736b35c3b518c32560b4f5fae1 src/main/java/dev/oreslang/runtime/ActorShardBacking.java
