@@ -30,25 +30,39 @@ JAVA
 javac /tmp/CleanupBoundProbe.java
 java -cp /tmp CleanupBoundProbe
 
+echo "model_for_llvm_head=0fa71cd8bc5ddef2ba70f5d697bbd4a46bdf9019"
+echo "private_source_bytes=0"
+
 cat >/tmp/prepublication_binding.cpp <<'CPP'
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
 
-struct Scheduler {};
+struct Scheduler {
+    std::uint64_t domain{};
+    bool live{true};
+};
 struct ActorRef { std::uint64_t domain{}, slot{}, generation{}; };
 struct Ticket { Scheduler* scheduler{}; ActorRef actor{}; };
+
+static bool poll_ready(Scheduler* scheduler, ActorRef actor) {
+    return scheduler && scheduler->live
+        && actor.domain == scheduler->domain
+        && actor.generation != 0;
+}
+
 struct Group {
     std::vector<Ticket> published;
     void adopt(Scheduler* scheduler, ActorRef actor) {
         const bool any = actor.domain || actor.slot || actor.generation;
         if ((scheduler == nullptr) != !any ||
-            (scheduler && (!actor.domain || !actor.generation)))
-            throw std::invalid_argument("incomplete binding");
+            (scheduler && (!actor.domain || !actor.generation ||
+                           !poll_ready(scheduler, actor))))
+            throw std::invalid_argument("incomplete or foreign scheduler binding");
         Ticket ticket;
         ticket.scheduler = scheduler;
         ticket.actor = actor;
-        // Publication happens only after the ticket is completely initialized.
+        // Publication happens only after completeness AND scheduler provenance.
         published.push_back(ticket);
         const auto& seen = published.back();
         if (seen.scheduler != scheduler ||
@@ -60,7 +74,9 @@ struct Group {
 };
 int main() {
     Group group;
-    Scheduler scheduler;
+    Scheduler scheduler{9, true};
+    Scheduler foreign{10, true};
+
     bool rejected = false;
     try { group.adopt(nullptr, ActorRef{9, 0, 3}); }
     catch (const std::invalid_argument&) { rejected = true; }
@@ -71,14 +87,32 @@ int main() {
     catch (const std::invalid_argument&) { rejected = true; }
     if (!rejected || !group.published.empty()) return 2;
 
-    group.adopt(&scheduler, ActorRef{9, 1, 3});
-    if (group.published.size() != 1) return 3;
+    // Complete public routing labels are not authority when the scheduler
+    // pointer names a different minting domain. Reject before publication.
+    rejected = false;
+    try { group.adopt(&scheduler, ActorRef{foreign.domain, 1, 3}); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    if (!rejected || !group.published.empty()) return 3;
+
+    scheduler.live = false;
+    rejected = false;
+    try { group.adopt(&scheduler, ActorRef{scheduler.domain, 1, 3}); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    if (!rejected || !group.published.empty()) return 4;
+    scheduler.live = true;
+
+    group.adopt(&scheduler, ActorRef{scheduler.domain, 1, 3});
+    if (group.published.size() != 1) return 5;
     return 0;
 }
 CPP
-clang++ -std=c++20 -Wall -Wextra -Werror /tmp/prepublication_binding.cpp -o /tmp/prepublication_binding
-/tmp/prepublication_binding
-echo "pre-publication scheduler binding: PASS"
+g++ -std=c++20 -O2 -Wall -Wextra -Werror /tmp/prepublication_binding.cpp -o /tmp/prepublication_binding_gcc
+/tmp/prepublication_binding_gcc
+clang++ -std=c++20 -O2 -Wall -Wextra -Werror /tmp/prepublication_binding.cpp -o /tmp/prepublication_binding_clang
+/tmp/prepublication_binding_clang
+clang++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer /tmp/prepublication_binding.cpp -o /tmp/prepublication_binding_san
+/tmp/prepublication_binding_san
+echo "pre-publication scheduler binding: PASS compilers=3 private_source_bytes=0"
 
 
 cat >/tmp/ref32_overflow.rs <<'RS'
