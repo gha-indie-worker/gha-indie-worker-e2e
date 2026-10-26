@@ -4506,11 +4506,20 @@ private:
                     }
                     continue;
                 }
-                if (!binding.task_await_name.empty()) {
+                if (!binding.task_await_name.empty() ||
+                        !binding.future_await_name.empty()) {
                     if (binding.scalar_type != ScalarType::I64)
                         throw std::runtime_error(
-                            "native Task<int> await result must bind int");
+                            !binding.task_await_name.empty()
+                                ? "native Task<int> await result must bind int"
+                                : "native Future<int> await result must bind int");
+                    if (binding.initializer)
+                        throw std::runtime_error(
+                            "native async await result binding must not carry a scalar initializer");
                 } else {
+                    if (!binding.initializer)
+                        throw std::runtime_error(
+                            "native scalar local requires an initializer");
                     require_scalar(*binding.initializer, binding.scalar_type,
                         "native scalar local initializer", scalar_types);
                 }
