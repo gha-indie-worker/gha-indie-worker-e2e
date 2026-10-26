@@ -36,6 +36,14 @@ jobs:
           test "$n" -eq 41
           echo "verified $n exact LLVM1041 source blobs"
 
+      - name: Compile and run post-ownership rewrite guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/ci/oreslang-llvm1041/repo"
+          clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror             -I"$ROOT/src/main/cpp"             "$ROOT/tests/future_pipeline_authority_fingerprint_test.cpp"             -o /tmp/future-pipeline-authority-fingerprint
+          /tmp/future-pipeline-authority-fingerprint
+
       - name: Build exact native compiler
         shell: bash
         run: |
