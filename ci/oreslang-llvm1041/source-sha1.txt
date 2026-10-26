@@ -1,5 +1,5 @@
 # exact source blobs from ores-truffle-oreslang/oreslang-source.llvm
-# source commit 657cc70db9b492cee1e31e23e751a314429fdbba
+# source commit 8951e8b229a1d57aef7fb6882b48110cb3397d85
 b6965740cf101240cdb0f322843d5fa4fd5a8e70 docs/FUTURE_PIPELINE_OWNERSHIP_CONTRACT.md
 fcf0864580d92e7288bb01c3f7728b80e3cd7351 src/main/cpp/oreslang/backend/LlvmCodegen.cpp
 d6b888fd32e912c15acf5c20015f59af7acfacef src/main/cpp/oreslang/backend/LlvmCodegen.hpp
@@ -39,6 +39,6 @@ fd34c7177737c85f791fbcb324875468bc562cbb src/main/cpp/oreslang/types/OwnershipCh
 b9e269598fb55c51f30d1ee4c365c0015beae459 src/main/cpp/oreslang/types/RealtimeAnalysis.hpp
 d8552624e30ebcd995c2f8397c7fa33330a494af tests/fixtures/source-future-pipeline-i64.ores
 ed9c69abfb6e4838895b81ffa34df7047c13186e tests/fixtures/source-future-pipeline-async-stage-i64.ores
-7c1f659c76e92d9aa9cefac2568c15b754f35527 tests/source_future_pipeline_i64_e2e.rs
+eea598b16af1829d4761789c96041fa986f40bd6 tests/source_future_pipeline_i64_e2e.rs
 bf83f359fa3f6ec0821b2b928b29547e5ab6796b tests/source_task_i64_runtime_test.c
 4f3dd4b22c768d08c493e280bdda0bcc14ef6ce1 tests/future_pipeline_authority_fingerprint_test.cpp
