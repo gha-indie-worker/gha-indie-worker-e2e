@@ -364,6 +364,48 @@ bool native_capture_free_task_tree(
     return false;
 }
 
+bool native_async_i64_tree(
+        const Expression& expr,
+        const std::string* allowed_parameter,
+        std::size_t depth = 1) {
+    require_expression_depth(depth, expr.offset);
+    using K = Expression::Kind;
+    if (expr.kind == K::Integer || expr.kind == K::Boolean) return true;
+    if (expr.kind == K::Variable)
+        return allowed_parameter != nullptr &&
+            expr.name == *allowed_parameter;
+    if ((expr.kind == K::Negate || expr.kind == K::LogicalNot) && expr.left)
+        return native_async_i64_tree(
+            *expr.left, allowed_parameter, depth + 1);
+    if ((expr.kind == K::Add || expr.kind == K::Subtract ||
+            expr.kind == K::Multiply || expr.kind == K::Equal ||
+            expr.kind == K::NotEqual || expr.kind == K::Less ||
+            expr.kind == K::LessEqual || expr.kind == K::Greater ||
+            expr.kind == K::GreaterEqual || expr.kind == K::LogicalAnd ||
+            expr.kind == K::LogicalOr || expr.kind == K::LogicalXor) &&
+            expr.left && expr.right)
+        return native_async_i64_tree(
+                *expr.left, allowed_parameter, depth + 1) &&
+            native_async_i64_tree(
+                *expr.right, allowed_parameter, depth + 1);
+    if (expr.kind == K::Conditional && expr.when_true && expr.when_false &&
+            (expr.condition || (expr.condition_lhs && expr.condition_rhs)))
+        return (!expr.condition ||
+                    native_async_i64_tree(
+                        *expr.condition, allowed_parameter, depth + 1)) &&
+            (!expr.condition_lhs ||
+                    native_async_i64_tree(
+                        *expr.condition_lhs, allowed_parameter, depth + 1)) &&
+            (!expr.condition_rhs ||
+                    native_async_i64_tree(
+                        *expr.condition_rhs, allowed_parameter, depth + 1)) &&
+            native_async_i64_tree(
+                *expr.when_true, allowed_parameter, depth + 1) &&
+            native_async_i64_tree(
+                *expr.when_false, allowed_parameter, depth + 1);
+    return false;
+}
+
 struct NativeCallSignature {
     std::vector<std::string> parameters;
     std::vector<GenericParameter> generics;
@@ -4202,8 +4244,18 @@ private:
                         "await get_done requires side-effect-free scalar return");
             }
             if (fn.async_source_i64) {
+                const bool unary_stage =
+                    fn.parameters.size() == 1 &&
+                    fn.parameters.front().mode == Parameter::Mode::Value &&
+                    fn.parameters.front().scalar_type == ScalarType::I64 &&
+                    fn.parameters.front().class_name.empty() &&
+                    fn.parameters.front().generic_type.empty() &&
+                    fn.parameters.front().pending_type_alias.empty() &&
+                    fn.parameters.front().sum_type.empty();
                 if (fn.name == "main" || fn.exported ||
-                        !fn.parameters.empty() || fn.returns_void ||
+                        fn.parameters.size() > 1 ||
+                        (fn.parameters.size() == 1 && !unary_stage) ||
+                        fn.returns_void ||
                         fn.return_type != ScalarType::I64 ||
                         !fn.return_class.empty() || !fn.return_sum.empty() ||
                         !fn.generic_parameters.empty() ||
@@ -4216,11 +4268,16 @@ private:
                         !fn.ready_await_actor.empty() ||
                         !fn.done_await_actor.empty() ||
                         fn.scalar_while || fn.caught_throw_value ||
-                        !fn.result ||
-                        !native_capture_free_task_tree(*fn.result))
+                        !fn.result)
                     throw std::runtime_error(
-                        "native async Future<int> producer v1 must be a private "
-                        "capture-free zero-argument int producer");
+                        "native async Future<int> v1 callable must be private, "
+                        "capture-free, pure, and have zero args or one value int arg");
+                const std::string* async_parameter =
+                    unary_stage ? &fn.parameters.front().name : nullptr;
+                if (!native_async_i64_tree(*fn.result, async_parameter))
+                    throw std::runtime_error(
+                        "native async Future<int> v1 body may reference only "
+                        "its exact value-int parameter");
             }
             if (!fn.future_pipelines.empty()) {
                 if (fn.name != "main" || !fn.parameters.empty() ||
@@ -5058,7 +5115,17 @@ void resolve_future_pipeline_contracts(Program& program) {
 
     for (auto& producer : program.functions) {
         if (!producer.async_source_i64) continue;
-        if (!producer.parameters.empty() || producer.returns_void ||
+        const bool unary_stage =
+            producer.parameters.size() == 1 &&
+            producer.parameters.front().mode == Parameter::Mode::Value &&
+            producer.parameters.front().scalar_type == ScalarType::I64 &&
+            producer.parameters.front().class_name.empty() &&
+            producer.parameters.front().generic_type.empty() &&
+            producer.parameters.front().pending_type_alias.empty() &&
+            producer.parameters.front().sum_type.empty();
+        if (producer.parameters.size() > 1 ||
+                (producer.parameters.size() == 1 && !unary_stage) ||
+                producer.returns_void ||
                 producer.return_type != ScalarType::I64 ||
                 !producer.return_class.empty() || !producer.return_sum.empty() ||
                 !producer.generic_parameters.empty() ||
@@ -5071,11 +5138,16 @@ void resolve_future_pipeline_contracts(Program& program) {
                 !producer.ready_await_actor.empty() ||
                 !producer.done_await_actor.empty() ||
                 producer.scalar_while || producer.caught_throw_value ||
-                !producer.result ||
-                !native_capture_free_task_tree(*producer.result))
+                !producer.result)
             throw std::runtime_error(
-                "native async Future<int> producer v1 must be capture-free, "
-                "zero-argument, pure and return one int expression");
+                "native async Future<int> v1 callable must be capture-free, "
+                "pure and have zero args or one value int arg");
+        const std::string* async_parameter =
+            unary_stage ? &producer.parameters.front().name : nullptr;
+        if (!native_async_i64_tree(*producer.result, async_parameter))
+            throw std::runtime_error(
+                "native async Future<int> v1 body may reference only "
+                "its exact value-int parameter");
     }
 
     for (auto& owner : program.functions) {
@@ -5094,8 +5166,7 @@ void resolve_future_pipeline_contracts(Program& program) {
             for (std::size_t i = 0; i < pipeline.stages.size(); ++i) {
                 Function& stage = exact(pipeline.stages[i], 1);
                 const Parameter& parameter = stage.parameters.front();
-                if (stage.async_source_i64 ||
-                        parameter.mode != Parameter::Mode::Value ||
+                if (parameter.mode != Parameter::Mode::Value ||
                         parameter.scalar_type != ScalarType::I64 ||
                         !parameter.class_name.empty() ||
                         !parameter.generic_type.empty() ||
@@ -5119,7 +5190,7 @@ void resolve_future_pipeline_contracts(Program& program) {
                         !native_pure_scalar_tree(*stage.result))
                     throw std::runtime_error(
                         "native Future<int> pipeline stage v1 requires one pure "
-                        "sync int -> int function with no captures/effects");
+                        "int -> int callable with no captures/effects");
 
                 types::FuturePipelinePlan plan;
                 plan.declaration_identity =
@@ -5139,6 +5210,19 @@ void resolve_future_pipeline_contracts(Program& program) {
                     ? types::pipeline_root_ownership(pipeline.root_consumed)
                     : types::pipeline_internal_ownership();
                 plan.root_stage = i == 0;
+                if (stage.async_source_i64) {
+                    // This first async-stage slice is capture-free and cannot
+                    // suspend internally, so LLVM may fuse its freshly-created
+                    // ready Future into the already scheduler-owned pipeline
+                    // task. The checked semantic plan still records one-level
+                    // flattening and cancellation ownership before that
+                    // representation optimization.
+                    plan.flattens_future = true;
+                    plan.produced_future_ownership =
+                        types::PipelineStageFutureOwnership::OwnedStageResult;
+                    plan.produced_future_provenance =
+                        types::PipelineStageFutureProvenance::FreshCheckedProducer;
+                }
                 types::validate_executable_future_pipeline_plan(plan);
                 prior = plan.cumulative_effects;
                 pipeline.plans.push_back(std::move(plan));
