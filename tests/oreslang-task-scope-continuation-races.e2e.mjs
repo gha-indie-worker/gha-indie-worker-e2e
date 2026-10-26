@@ -85,7 +85,7 @@ class GeneratorModel {
   }
   producerQuiescent(){
     this.quiescent=true;
-    if(this.reg) this.reg.physicallyQuiescent();
+    if(this.reg) this.reg.quiesced();
   }
 }
 for(let i=0;i<1000;i++){
