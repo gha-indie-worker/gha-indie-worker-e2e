@@ -1,5 +1,5 @@
 # exact source blobs from ores-truffle-oreslang/oreslang-source.llvm
-# source commit 8951e8b229a1d57aef7fb6882b48110cb3397d85
+# source commit 61845ff3138e0fd47870d8603cf14b0ae7e5cf32
 b6965740cf101240cdb0f322843d5fa4fd5a8e70 docs/FUTURE_PIPELINE_OWNERSHIP_CONTRACT.md
 fcf0864580d92e7288bb01c3f7728b80e3cd7351 src/main/cpp/oreslang/backend/LlvmCodegen.cpp
 d6b888fd32e912c15acf5c20015f59af7acfacef src/main/cpp/oreslang/backend/LlvmCodegen.hpp
@@ -11,8 +11,8 @@ dec82f3b4b87c1ba832727194b1aa4844c535ce0 src/main/cpp/oreslang/backend/ScalarLoo
 9f277e305de03127c54af29c8e1b28b056c1ed9d src/main/cpp/oreslang/frontend/MethodResolver.hpp
 07aba8d22ae24a076087a1bad9896e82453548e4 src/main/cpp/oreslang/frontend/ModuleLoader.cpp
 022330bc32edc116ea5673b73b05b03d27695dc0 src/main/cpp/oreslang/frontend/ModuleLoader.hpp
-27ac3e2935b6b07066f80869d4db34bb512a37a4 src/main/cpp/oreslang/frontend/Parser.cpp
-2ec4f946f533acae376eda17b61deddacbbf2bb7 src/main/cpp/oreslang/frontend/Parser.hpp
+42db5310e85fdee7a0efc06a1559074a5bab0c83 src/main/cpp/oreslang/frontend/Parser.cpp
+6691456bf72679d1144415a6b94089ec8a04e4cb src/main/cpp/oreslang/frontend/Parser.hpp
 cdcd18ac33be684003326cc16c344beac7cd1b06 src/main/cpp/oreslang/frontend/ProjectRootImport.hpp
 d7dbd6a6b57209c43b73a8830c8c7e8773267bb5 src/main/cpp/oreslang/frontend/SourceInput.hpp
 df0e1a0aad12ae7ecc44cd33f5d08442bd513aa6 src/main/cpp/oreslang/main.cpp
@@ -39,6 +39,6 @@ fd34c7177737c85f791fbcb324875468bc562cbb src/main/cpp/oreslang/types/OwnershipCh
 b9e269598fb55c51f30d1ee4c365c0015beae459 src/main/cpp/oreslang/types/RealtimeAnalysis.hpp
 d8552624e30ebcd995c2f8397c7fa33330a494af tests/fixtures/source-future-pipeline-i64.ores
 ed9c69abfb6e4838895b81ffa34df7047c13186e tests/fixtures/source-future-pipeline-async-stage-i64.ores
-eea598b16af1829d4761789c96041fa986f40bd6 tests/source_future_pipeline_i64_e2e.rs
+5f2d26363af82ba06cf8c7351b0c186fd61fa680 tests/source_future_pipeline_i64_e2e.rs
 bf83f359fa3f6ec0821b2b928b29547e5ab6796b tests/source_task_i64_runtime_test.c
-4f3dd4b22c768d08c493e280bdda0bcc14ef6ce1 tests/future_pipeline_authority_fingerprint_test.cpp
+e237b86751f05b1e5ee366b452c988615b3b0850 tests/future_pipeline_authority_fingerprint_test.cpp
