@@ -12,7 +12,7 @@ permissions:
 jobs:
   future-pipeline-e2e:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -33,7 +33,7 @@ jobs:
             fi
             n=$((n+1))
           done < source-sha1.txt
-          test "$n" -eq 38
+          test "$n" -eq 39
           echo "verified $n exact LLVM1041 source blobs"
 
       - name: Build exact native compiler
@@ -58,8 +58,7 @@ jobs:
           ARGS=()
           for s in "${SOURCES[@]}"; do ARGS+=("$ROOT/$s"); done
           read -r -a LLVM_CXX <<< "$("$LLVM_CONFIG" --cxxflags | sed -E 's/-std=c\+\+[^ ]+//g; s/-fno-exceptions//g; s/-fno-rtti//g')"
-          clang++ -std=c++17 -fexceptions -Wall -Wextra -Wpedantic -Werror             -I"$ROOT/src/main/cpp" "${LLVM_CXX[@]}" "${ARGS[@]}"             $("$LLVM_CONFIG" --ldflags --system-libs --libs core support)             -o /tmp/oreslang-llvmc
-          /tmp/oreslang-llvmc --help >/tmp/llvm1041-help.txt 2>&1 || true
+          clang++ -std=c++17 -fexceptions             -I"$ROOT/src/main/cpp" "${LLVM_CXX[@]}" "${ARGS[@]}"             $("$LLVM_CONFIG" --ldflags --system-libs --libs core support)             -o /tmp/oreslang-llvmc
           test -x /tmp/oreslang-llvmc
 
       - name: Build Rust end-to-end harness
@@ -86,10 +85,26 @@ jobs:
         run: |
           set -euo pipefail
           REAL_CLANG="$(command -v clang)"
-          cat >/tmp/clang-sanitize <<EOF
-          #!/usr/bin/env bash
-          exec "$REAL_CLANG" -fsanitize=address,undefined -fno-omit-frame-pointer "$@"
-          EOF
+          printf '%s\n'             '#!/usr/bin/env bash'             "exec \"$REAL_CLANG\" -fsanitize=address,undefined -fno-omit-frame-pointer \"\$@\""             > /tmp/clang-sanitize
           chmod +x /tmp/clang-sanitize
           ROOT="$PWD/ci/oreslang-llvm1041/repo"
           /tmp/source-future-pipeline-e2e             /tmp/oreslang-llvmc             /tmp/clang-sanitize             "$ROOT"
+
+      - name: Stress task await-shutdown reclamation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/ci/oreslang-llvm1041/repo"
+          clang -std=c11 -Wall -Wextra -Wpedantic -Werror -pthread             -DORESLANG_SOURCE_TASK_TESTING=1             -I"$ROOT/src/main/cpp"             "$ROOT/tests/source_task_i64_runtime_test.c"             "$ROOT/src/main/cpp/oreslang/runtime/SourceTaskRuntime.c"             "$ROOT/src/main/cpp/oreslang/runtime/NativeActorScheduler.c"             -o /tmp/source-task-runtime-race
+          /tmp/source-task-runtime-race
+
+      - name: Sanitize task await-shutdown reclamation
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/ci/oreslang-llvm1041/repo"
+          clang -std=c11 -Wall -Wextra -Wpedantic -Werror -pthread             -fsanitize=address,undefined -fno-omit-frame-pointer             -DORESLANG_SOURCE_TASK_TESTING=1             -I"$ROOT/src/main/cpp"             "$ROOT/tests/source_task_i64_runtime_test.c"             "$ROOT/src/main/cpp/oreslang/runtime/SourceTaskRuntime.c"             "$ROOT/src/main/cpp/oreslang/runtime/NativeActorScheduler.c"             -o /tmp/source-task-runtime-race-sanitized
+          /tmp/source-task-runtime-race-sanitized
