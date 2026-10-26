@@ -11,11 +11,10 @@ import java.util.Objects;
  * snapshotColumn returns a copy. No guest lowering or scoped Task permit is
  * implied by this host-only type.</p>
  */
-public final class ActorShardColumns implements AutoCloseable {
+public final class ActorShardColumns extends ActorShardBacking implements AutoCloseable {
     public enum Layout { AOS, SOA, AOSOA }
     private static final int MAX_BYTES = 16 * 1024 * 1024;
 
-    private final ActorRuntime.ActorId owner;
     private final Layout layout;
     private final int rows;
     private final int fields;
@@ -29,7 +28,7 @@ public final class ActorShardColumns implements AutoCloseable {
      * two lane count; AoS and SoA use lanes=1.
      */
     public ActorShardColumns(Layout layout, int rows, int fields, int lanes) {
-        this.owner = ActorRuntime.currentActorId().orElseThrow(() ->
+        ActorRuntime.currentActorId().orElseThrow(() ->
                 new SecurityException("shard creation requires an executing actor"));
         this.layout = Objects.requireNonNull(layout, "layout");
         if (rows <= 0 || fields <= 0) {
@@ -73,9 +72,11 @@ public final class ActorShardColumns implements AutoCloseable {
         }
     }
 
+    @Override
     boolean ownedBy(ActorRuntime runtime, ActorRuntime.ActorId actor) {
         return reservation.ownedBy(runtime, actor);
     }
+    @Override
     boolean isPrivateBacked() { return reservation.privateBacking(); }
 
     public Layout layout() { return layout; }
@@ -88,6 +89,7 @@ public final class ActorShardColumns implements AutoCloseable {
      * Also runs on actor-stop finalization, without any active actor turn.
      * Must not publish or retain the old mutable backing reference.
      */
+    @Override
     void revokeBackingFromLease() {
         double[] old = storage;
         if (old != null) {
@@ -173,6 +175,9 @@ public final class ActorShardColumns implements AutoCloseable {
         }
         public int length() { return lease.length(); }
         public double read(int index) { return lease.read(index); }
+        public void copyInto(double[] destination, int offset) {
+            lease.copyInto(destination, offset);
+        }
         @Override public void close() { lease.close(); }
     }
 
@@ -202,14 +207,17 @@ public final class ActorShardColumns implements AutoCloseable {
         for (int i = 0; i < rows; i++) dest[offset + i] = get(offset(i, field));
     }
 
-    /** Trusted host copy; detached array lifetime is not budget accounted. */
-    @Deprecated
+    /**
+     * Legacy raw detached copy is intentionally disabled. Returning an array
+     * here would outlive the reservation that paid for it and reintroduce an
+     * unbounded allocation escape. Use snapshotColumnLeased() or copyColumnInto().
+     */
+    @Deprecated(forRemoval = true)
     public double[] snapshotColumn(int field) {
         requireOwner();
         if (field < 0 || field >= fields)
             throw new IndexOutOfBoundsException("field");
-        double[] copy = new double[rows];
-        copyColumnInto(field, copy, 0);
-        return copy;
+        throw new UnsupportedOperationException(
+                "unmetered detached snapshots are disabled; use a leased snapshot");
     }
 }

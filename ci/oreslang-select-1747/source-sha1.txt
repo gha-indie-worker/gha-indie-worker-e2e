@@ -38,7 +38,7 @@ a44debada084d29a542f511be2df90b00f2f7a76 src/main/java/dev/oreslang/runtime/Acto
 c7d2bd0c79278cb47a522b2a24484ed0c59202ad src/main/java/dev/oreslang/runtime/ActorMailman.java
 90ac451a24bccf22b19249045e18776ddf711d13 src/main/java/dev/oreslang/runtime/ActorPhysicalTurnGate.java
 7befc483a2dd831daea2c749278f2d76750eaa6c src/main/java/dev/oreslang/runtime/ActorRuntime.java
-bd7d5764c02dccb05dc5060e82cdf5aece19772b src/main/java/dev/oreslang/runtime/ActorShardColumns.java
+2b4265322942d4d081ac3b408159330ca62be906 src/main/java/dev/oreslang/runtime/ActorShardColumns.java
 2795159ca42526ea46a665fc7f3a51db73d3ad29 src/main/java/dev/oreslang/runtime/ActorTurnWatchdog.java
 30faea897f3245810a4ae4d1bcf524f25bc52eb8 src/main/java/dev/oreslang/runtime/ActorUpgradeEpochGate.java
 9e75aa9cef80bfae317ba4ca4804ba1a6e1b5186 src/main/java/dev/oreslang/runtime/AsyncNativeIo.java
@@ -138,3 +138,5 @@ f6f3656bcd59c16d76137ab30c436af9769b634e src/main/java/dev/oreslang/runtime/Supe
 8d8e42d6b5a396736b35c3b518c32560b4f5fae1 src/main/java/dev/oreslang/runtime/ActorShardBacking.java
 55efadfc5c0bcdfe18d616755929db321016ab0f src/main/java/dev/oreslang/runtime/ActorDenseIndexColumns.java
 a50bde284f055290dffeb9a2a86a55e9cd9bab1e src/main/java/dev/oreslang/runtime/ActorProxyRequestSlab.java
+9219f0bc093434f1f3cc4aac31c19ac0d3ec0994 src/main/java/dev/oreslang/runtime/OresKeyedMap.java
+74b84e6efc3c23a73ac6e20c8058eddb6e7131e5 src/main/java/dev/oreslang/runtime/ManagedReferencePolicy.java
