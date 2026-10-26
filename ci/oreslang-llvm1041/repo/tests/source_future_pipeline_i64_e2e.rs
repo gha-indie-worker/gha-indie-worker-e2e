@@ -102,6 +102,20 @@ fn main() {
     }
     link_and_run(&clang, &root, &dir.0, "consumed", &output.stdout);
 
+    let parenthesized = consumed.replace(
+        "rt take source()", "rt take(source())");
+    let parenthesized_output = compile(
+        &compiler, &dir.0, "consumed-parenthesized.ores", &parenthesized);
+    assert!(parenthesized_output.status.success(),
+        "parenthesized rt take Future source compile failed: {}",
+        String::from_utf8_lossy(&parenthesized_output.stderr));
+    let parenthesized_ir = String::from_utf8_lossy(&parenthesized_output.stdout);
+    assert!(parenthesized_ir.contains(".future.pending.consumed.producer"),
+        "parenthesized rt take lost consumed-root lowering marker");
+    link_and_run(
+        &clang, &root, &dir.0, "consumed-parenthesized",
+        &parenthesized_output.stdout);
+
     let async_stage = fs::read_to_string(
         root.join("tests/fixtures/source-future-pipeline-async-stage-i64.ores"))
         .expect("read async-stage Future pipeline fixture");
