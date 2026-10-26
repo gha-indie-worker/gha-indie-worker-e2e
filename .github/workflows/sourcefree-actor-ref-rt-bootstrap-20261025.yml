@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           test ! -e private-oreslang-source
           echo "private_source_bytes=0"
-          echo "model_for_java_head=fd77e8de27830e5a6222fd4a5bac44e9a0ccd28f"
+          echo "model_for_java_head=03c2d8b9d81925ff38ca03490212bd25013ff0e2"
       - name: Compile and run exact-incarnation model
         shell: bash
         run: |
@@ -91,6 +91,11 @@ jobs:
               }
               static final class Group {
                   final java.util.Map<Id, Ref> members = new java.util.HashMap<>();
+                  final java.util.Map<Ref, java.util.Set<Integer>> reverse =
+                          new java.util.IdentityHashMap<>();
+                  final java.util.Set<Ref> stopping =
+                          java.util.Collections.newSetFromMap(
+                                  new java.util.IdentityHashMap<>());
                   void join(Ref ref) {
                       Ref existing = members.get(ref.id);
                       if (existing == ref) return;
@@ -98,12 +103,26 @@ jobs:
                           throw new IllegalStateException("logical id already bound");
                       }
                       members.put(ref.id, ref);
+                      reverse.computeIfAbsent(
+                              ref, ignored -> new java.util.HashSet<>()).add(1);
                   }
                   boolean isMember(Ref ref) {
                       return members.get(ref.id) == ref;
                   }
                   void leave(Ref ref) {
-                      members.remove(ref.id, ref);
+                      if (!members.remove(ref.id, ref)) return;
+                      reverse.remove(ref);
+                  }
+                  void markStopping(Ref ref) {
+                      stopping.add(ref);
+                  }
+              }
+              static final class Subscription {
+                  final Ref owner;
+                  boolean closed;
+                  Subscription(Ref owner) { this.owner = owner; }
+                  void retire(Ref ref) {
+                      if (owner == ref) closed = true;
                   }
               }
               private static void require(boolean value, String message) {
@@ -157,13 +176,34 @@ jobs:
                   try { group.join(restarted); }
                   catch (IllegalStateException expected) { collisionRejected = true; }
                   require(collisionRejected, "replacement overtook live same-id group member");
+                  require(group.reverse.containsKey(owner),
+                          "reverse membership index lost exact owner ref");
+                  require(!group.reverse.containsKey(restarted),
+                          "same-id replacement inherited reverse membership quota");
+                  group.markStopping(owner);
+                  require(group.stopping.contains(owner),
+                          "exact owner missing from stop-admission ledger");
+                  require(!group.stopping.contains(restarted),
+                          "same-id replacement inherited stop-admission state");
+
+                  Subscription subscription = new Subscription(owner);
+                  subscription.retire(forgedSameFields);
+                  require(!subscription.closed,
+                          "forged same-fields ref closed exact-owner subscription");
+
                   group.leave(owner);
                   group.join(restarted);
                   require(group.isMember(restarted), "replacement could not explicitly rejoin after retirement");
                   group.leave(owner);
                   require(group.isMember(restarted), "stale retirement evicted replacement membership");
+                  require(group.reverse.containsKey(restarted),
+                          "replacement reverse membership not keyed by exact ref");
 
-                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=17 private_source_bytes=0");
+                  subscription.retire(owner);
+                  require(subscription.closed,
+                          "exact owner retirement failed to close subscription");
+
+                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=23 private_source_bytes=0");
               }
           }
           JAVA
