@@ -541,8 +541,10 @@ void validate_i64_ownership(Program& program) {
     // before checking anything. Failed ownership admission therefore cannot
     // leave executable Future-pipeline authority from an earlier pass.
     for (auto& function : program.functions)
-        for (auto& pipeline : function.future_pipelines)
+        for (auto& pipeline : function.future_pipelines) {
             pipeline.ownership_admitted = false;
+            pipeline.ownership_authority_fingerprint = 0;
+        }
     Functions functions;
     for (const auto& function : program.functions)
         functions.emplace(native_function_slot(function.name, function.parameters.size()), &function);
@@ -1408,8 +1410,11 @@ void validate_i64_ownership(Program& program) {
         }
     }
     for (auto& function : program.functions)
-        for (auto& pipeline : function.future_pipelines)
+        for (auto& pipeline : function.future_pipelines) {
+            pipeline.ownership_authority_fingerprint =
+                future_pipeline_authority_fingerprint(pipeline);
             pipeline.ownership_admitted = true;
+        }
 }
 
 } // namespace oreslang
