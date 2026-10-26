@@ -139,7 +139,7 @@ pub fnc main(): int {
     let int result = await pending;
     return result;
 }
-"#, "native async Future<int> v1 callable must be private");
+"#, "native async Future<int> v1 callable must be capture-free");
 
     rejected(&compiler, &dir.0, "impure-stage.ores",
         r#"async fnc source(): int { return 21; }
