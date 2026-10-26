@@ -14,8 +14,8 @@ is_approved_destination() {
     /^[[:space:]]*(#|$)/ { next }
     NF != 2 || $1 !~ /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/ ||
       $2 !~ /^[1-9][0-9]*$/ { bad = 1; next }
-    $1 == want && $2 == id { matched++ }
-    END { exit (bad || matched != 1) ? 1 : 0 }
+    $1 == want { slug_count++; if ($2 == id) matched++ }
+    END { exit (bad || slug_count != 1 || matched != 1) ? 1 : 0 }
   ' "$file"
 }
 
@@ -62,6 +62,12 @@ sed -i '$d' "$tmp/approved.txt"
 printf '%s\n' "example/approved-carrier 123456" >>"$tmp/approved.txt"
 if is_approved_destination "$tmp/approved.txt" "example/approved-carrier" "123456"; then
   fail "duplicate destination approval was accepted"
+fi
+sed -i '$d' "$tmp/approved.txt"
+sed -i '$d' "$tmp/approved.txt"
+printf '%s\n' "example/approved-carrier 999999" >>"$tmp/approved.txt"
+if is_approved_destination "$tmp/approved.txt" "example/approved-carrier" "123456"; then
+  fail "conflicting repository ID for same slug was accepted"
 fi
 sed -i '$d' "$tmp/approved.txt"
 
