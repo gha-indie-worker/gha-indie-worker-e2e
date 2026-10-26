@@ -32,3 +32,43 @@ jobs:
       - name: Prove source-free private-CI security primitives
         shell: bash
         run: bash source-free-carrier/test-policy.sh
+      - name: Set up GraalVM for Java/Graal capacity proof
+        uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: graalvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prove Java/Graal toolchain
+        run: |
+          set -euo pipefail
+          java --version
+          native-image --version
+      - name: Prove native/LLVM/Forge and wasm32 object toolchains
+        run: |
+          set -euo pipefail
+          g++ --version
+          clang++ --version
+          cmake --version
+          printf '%s\n' 'int main(){return 0;}' > /tmp/probe.cpp
+          clang++ -std=c++20 -Wall -Wextra -Werror /tmp/probe.cpp -o /tmp/probe
+          /tmp/probe
+          printf '%s\n' 'int answer(void){return 42;}' > /tmp/probe.c
+          clang --target=wasm32 -c /tmp/probe.c -o /tmp/probe.wasm.o
+          test -s /tmp/probe.wasm.o
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: '10.0.x'
+      - name: Prove .NET toolchain
+        run: dotnet --info
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Prove Node/HDL toolchain
+        run: node --version
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+      - name: Prove Rust toolchain
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
