@@ -1,5 +1,5 @@
-# Exact blobs from ores-truffle-oreslang/oreslang-source.llvm branch feat/future-pipeline-ownership-contract-v1-20261026
+# Exact blobs from ores-truffle-oreslang/oreslang-source.llvm head 37f890dedf156f75eeeaffdebf519275a131f010
 7fd4f0a21573b3001943c5463ae7952ebc06f7f9 src/main/cpp/oreslang/types/AutoTraitRules.hpp
 c0f75dae6908ed1f844c780dcb7df2915149b249 src/main/cpp/oreslang/types/FunctionEffects.hpp
-44115f6420c05bd8eb4b9a2454412208e898e7f5 src/main/cpp/oreslang/types/FuturePipelineContract.hpp
-974dfa61ae989403cf02c7da3836366e8383b403 tests/future_pipeline_ownership_contract_test.cpp
+1bd1325be6199d140a8397454ad8735977c5928b src/main/cpp/oreslang/types/FuturePipelineContract.hpp
+3d703cfba47943478d9d10205750476351f2a979 tests/future_pipeline_ownership_contract_test.cpp
