@@ -23,8 +23,11 @@ jobs:
           set -euo pipefail
           test ! -e private-oreslang-source
           echo "private_source_bytes=0"
-          echo "model_for_llvm_nio_head=5024875f2acafe0ca2822107775efacaf4363eb5"
+          echo "model_for_llvm_nio_head=c8f8b1f9c8cc90affd439dfaac83978df722f731"
+          echo "model_for_llvm_http_head=a78ab3b5c5b022be3fa442af0b1d583c893f778d"
           echo "model_for_llvm_envelope_head=a0ddf7216bccfc2be95dbd438e0ee36e03a84b79"
+          echo "model_for_llvm_cleanup_head=a7559f3a9bd8eb1547cdee96724d99c5bec97cbf"
+          echo "model_for_llvm_send_stop_head=8f787a6d034b402aba325c099330902c92ac7927"
       - name: Build and run scheduler identity model
         shell: bash
         run: |
@@ -125,6 +128,50 @@ jobs:
                   && scheduler->domain == actor.scheduler_domain;
           }
 
+          struct HttpExchange {
+              ActorRef owner{};
+              bool queued{};
+
+              bool enqueue(ActorRef actor) {
+                  if (!actor.scheduler_domain || !actor.generation || queued) return false;
+                  owner = actor;
+                  queued = true;
+                  return true;
+              }
+
+              bool claim(ActorRef actor) const {
+                  return queued && same_actor(owner, actor);
+              }
+          };
+
+          struct CleanupRecord {
+              std::uint64_t allocation_domain{};
+              std::uint64_t allocation_owner{};
+              std::uint64_t actor_generation{};
+              std::uint64_t execution_runtime_domain{};
+          };
+
+          static bool cleanup_claimed(
+                  const CleanupRecord& record,
+                  std::uint64_t ticket_actor,
+                  std::uint64_t ticket_generation) {
+              return record.allocation_domain != 0
+                  && record.allocation_owner == ticket_actor
+                  && record.actor_generation == ticket_generation
+                  && record.execution_runtime_domain == record.allocation_domain;
+          }
+
+          struct SendAdmission {
+              bool stop_requested{};
+              int allocated{};
+
+              bool start() {
+                  if (stop_requested) return false;
+                  ++allocated;
+                  return true;
+              }
+          };
+
           static void require(bool value, const char* message) {
               if (!value) {
                   std::cerr << "FAIL: " << message << '\n';
@@ -197,8 +244,36 @@ jobs:
               require(registry.finalize(forged_same_numeric, 5),
                       "replacement exact opaque ticket could not finalize");
 
+              HttpExchange exchange;
+              require(exchange.enqueue(owner),
+                      "HTTP exchange rejected exact actor incarnation");
+              require(exchange.claim(owner),
+                      "HTTP exchange rejected exact owner claim");
+              require(!exchange.claim(stale_generation),
+                      "HTTP exchange accepted stale generation");
+              require(!exchange.claim(foreign_same_slot_generation),
+                      "HTTP exchange accepted foreign scheduler domain");
+
+              CleanupRecord cleanup{77, 17, 9, 77};
+              require(cleanup_claimed(cleanup, 17, 9),
+                      "cleanup binding rejected exact owner/domain/generation");
+              require(!cleanup_claimed(cleanup, 77, 9),
+                      "cleanup binding confused runtime domain with actor owner");
+              require(!cleanup_claimed(cleanup, 17, 10),
+                      "cleanup binding accepted wrong actor generation");
+              CleanupRecord mismatched_domain{77, 17, 9, 78};
+              require(!cleanup_claimed(mismatched_domain, 17, 9),
+                      "cleanup binding accepted execution/allocation domain mismatch");
+
+              SendAdmission send;
+              require(send.start() && send.allocated == 1,
+                      "pre-stop send admission rejected");
+              send.stop_requested = true;
+              require(!send.start() && send.allocated == 1,
+                      "post-stop send allocated a new async descriptor");
+
               std::cout
-                  << "NATIVE_IDENTITY_FENCE_MODEL_OK cases=18 private_source_bytes=0\n";
+                  << "NATIVE_IDENTITY_FENCE_MODEL_OK cases=28 private_source_bytes=0\n";
               return 0;
           }
           CPP
