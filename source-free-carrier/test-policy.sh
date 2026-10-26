@@ -28,7 +28,7 @@ validate_codeowners() {
     NF != 2 || $1 !~ /^\// || $2 != "@ORESoftware" { bad = 1; next }
     { seen[$1]++ }
     END {
-      n = split("/.github/workflows/ /src/ /compiler/ /runtime/ /tests/ /contracts/", required, " ")
+      n = split("/.github/workflows/ /.github/CODEOWNERS /.github/private-ci-approved-repositories.txt /.github/workflows/private-ci-policy.yml /src/ /compiler/ /runtime/ /tests/ /contracts/", required, " ")
       for (i = 1; i <= n; ++i)
         if (seen[required[i]] != 1) bad = 1
       exit bad ? 1 : 0
@@ -64,12 +64,15 @@ if is_approved_destination "$tmp/approved.txt" "example/approved-carrier" "12345
   fail "duplicate destination approval was accepted"
 fi
 sed -i '$d' "$tmp/approved.txt"
-sed -i '$d' "$tmp/approved.txt"
+is_approved_destination "$tmp/approved.txt" "example/approved-carrier" "123456" ||
+  fail "valid approval unexpectedly disappeared after duplicate test"
 printf '%s\n' "example/approved-carrier 999999" >>"$tmp/approved.txt"
 if is_approved_destination "$tmp/approved.txt" "example/approved-carrier" "123456"; then
   fail "conflicting repository ID for same slug was accepted"
 fi
 sed -i '$d' "$tmp/approved.txt"
+is_approved_destination "$tmp/approved.txt" "example/approved-carrier" "123456" ||
+  fail "conflicting-ID test did not restore the original approval"
 
 cat >"$tmp/good-workflow.yml" <<'EOF'
 - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -94,6 +97,9 @@ fi
 
 cat >"$tmp/CODEOWNERS.good" <<'EOF'
 /.github/workflows/ @ORESoftware
+/.github/CODEOWNERS @ORESoftware
+/.github/private-ci-approved-repositories.txt @ORESoftware
+/.github/workflows/private-ci-policy.yml @ORESoftware
 /src/ @ORESoftware
 /compiler/ @ORESoftware
 /runtime/ @ORESoftware
@@ -125,6 +131,16 @@ fi
 grep -vFx '/contracts/ @ORESoftware' "$tmp/CODEOWNERS.good" >"$tmp/CODEOWNERS.bad"
 if validate_codeowners "$tmp/CODEOWNERS.bad"; then
   fail "missing critical ownership rule was accepted"
+fi
+
+grep -vFx '/.github/private-ci-approved-repositories.txt @ORESoftware' "$tmp/CODEOWNERS.good" >"$tmp/CODEOWNERS.bad"
+if validate_codeowners "$tmp/CODEOWNERS.bad"; then
+  fail "missing private CI allowlist ownership was accepted"
+fi
+
+grep -vFx '/.github/workflows/private-ci-policy.yml @ORESoftware' "$tmp/CODEOWNERS.good" >"$tmp/CODEOWNERS.bad"
+if validate_codeowners "$tmp/CODEOWNERS.bad"; then
+  fail "missing private CI workflow ownership was accepted"
 fi
 
 # A source-free carrier may carry this probe, but not a private source snapshot.
