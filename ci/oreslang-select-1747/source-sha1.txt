@@ -26,9 +26,9 @@ ee355dd00b19988be25415c37c4bc3d407e65081 src/main/java/dev/oreslang/compiler/Bui
 bff9daee369346e40aa107c3d3cac2ec21493eed src/main/java/dev/oreslang/launcher/OresMain.java
 d8840cb153ff671a28a28ab7dd62b93ad8ab232f src/main/java/dev/oreslang/nodes/HostAwaitProjection.java
 62ac55ad410d3e07d9494b73b3f658d43de70351 src/main/java/dev/oreslang/nodes/OresInteropRootNode.java
-4dc6ff0971176c6ed3ce7b2faca9b1f5e6a42c38 src/main/java/dev/oreslang/parser/Lexer.java
-6d57e79a3b7b857d8814f9d2d48a92d7da77729a src/main/java/dev/oreslang/parser/Parser.java
-b99b356c125f05bee5e570601bfd065f9f73f9ff src/main/java/dev/oreslang/parser/Token.java
+9c037439caddb8eb9ce68d7c4e4947e8cc558172 src/main/java/dev/oreslang/parser/Lexer.java
+dcd7b40abdf2ef545e01b920debf7b30936cd6d9 src/main/java/dev/oreslang/parser/Parser.java
+c82b527e2f6c6c0b941c8bdca69bb78b53159965 src/main/java/dev/oreslang/parser/Token.java
 5422a20c2fe461707a3a2e31f1a431e64df5dd0e src/main/java/dev/oreslang/runtime/ActorAffinityDispatcher.java
 6b0923aa38afb8d0b7887227f41ae7ef70f622d7 src/main/java/dev/oreslang/runtime/ActorEventBus.java
 2d61a9510fc6f7b42f684c7b8019af58eedf7f40 src/main/java/dev/oreslang/runtime/ActorGroupContext.java
