@@ -1260,10 +1260,14 @@ std::string emit_verified_llvm_ir(const Program& source, bool wasm32_target, boo
                     task.name + ".task.handle"));
         }
         for (const auto& pipeline : fn.future_pipelines) {
+            const std::uint64_t authority =
+                future_pipeline_authority_fingerprint(pipeline);
             if (!has_source_tasks || pipeline.plans.empty() ||
-                    pipeline.stages.empty() || !pipeline.ownership_admitted)
+                    pipeline.stages.empty() || !pipeline.ownership_admitted ||
+                    pipeline.ownership_authority_fingerprint == 0 ||
+                    pipeline.ownership_authority_fingerprint != authority)
                 throw std::runtime_error(
-                    "source Future<int> pipeline lacks post-ownership lowering authority");
+                    "source Future<int> pipeline lacks exact post-ownership lowering authority");
             auto* producer = llvm::Function::Create(
                 llvm::FunctionType::get(i64, {}, false),
                 llvm::Function::InternalLinkage,
