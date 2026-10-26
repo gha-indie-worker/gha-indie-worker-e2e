@@ -25,7 +25,6 @@ ee355dd00b19988be25415c37c4bc3d407e65081 src/main/java/dev/oreslang/compiler/Bui
 40c4cdb69929867da99252a24157b097715588cb src/main/java/dev/oreslang/interop/MixedSourceUnit.java
 bff9daee369346e40aa107c3d3cac2ec21493eed src/main/java/dev/oreslang/launcher/OresMain.java
 d8840cb153ff671a28a28ab7dd62b93ad8ab232f src/main/java/dev/oreslang/nodes/HostAwaitProjection.java
-da224996180459ba63838b68b8059a4d8fdb83a9 src/main/java/dev/oreslang/nodes/OresEvalRootNode.java
 62ac55ad410d3e07d9494b73b3f658d43de70351 src/main/java/dev/oreslang/nodes/OresInteropRootNode.java
 4dc6ff0971176c6ed3ce7b2faca9b1f5e6a42c38 src/main/java/dev/oreslang/parser/Lexer.java
 6d57e79a3b7b857d8814f9d2d48a92d7da77729a src/main/java/dev/oreslang/parser/Parser.java
@@ -99,10 +98,8 @@ a5467fe931ddf99318d601c5692f23848ce8a4ca src/main/java/dev/oreslang/types/Checke
 c3f48622469bb860cdb9d16eca16d7436d69aece src/main/java/dev/oreslang/types/EffectContracts.java
 4d67876a059751bd944bc654c5636b1611d8e096 src/main/java/dev/oreslang/types/GenericCallArguments.java
 386789e9fb35a43a36e37e2fa49201de7c7b67f2 src/main/java/dev/oreslang/types/NativeArrayResultWire.java
-4ee42bbd3a0419039507ab162181e323a212bcb6 src/main/java/dev/oreslang/types/OwnershipChecker.java
 13b099b24f780601e88045efd4ea5b6a6b3dccea src/main/java/dev/oreslang/types/ReturnCleanupChecker.java
 41da9b0677b4dda813ab34027769c700b704e5c1 src/main/java/dev/oreslang/types/TypeAutoTraits.java
-992254dc92c16203e1005cdf95243738ba85d3c7 src/main/java/dev/oreslang/types/TypeChecker.java
 448b0add530e84adb0161b3f2bcf2def10a4d409 src/main/java/dev/oreslang/types/TypeclassRegistry.java
 1d3ab21946e0da136e6acc89af1029b2b3c721e7 src/main/java/dev/oreslang/types/Types.java
 44e23c91c50f034ca3c7f4fc315b97f45c7c1eac src/main/java/module-info.java
@@ -133,3 +130,5 @@ bff7ed59bad105e2b0548921600caec7bb724dbe src/main/java/dev/oreslang/runtime/Exec
 4550b0a7de6d288a47b37fcc866fd51d1b869c15 src/main/java/dev/oreslang/runtime/TaskOwnedLeases.java
 942aa675dee819911a08b4fac39465a37bb75459 src/main/java/dev/oreslang/runtime/UntrappableTaskFailure.java
 e1829ca69dd5aac7fd45fe0d0e47f5bdbe2d7cd8 src/test/java/dev/oreslang/runtime/TaskPipelineTest.java
+dab18b2284478606f23ceece35bdc4446cd28342 src/test/java/dev/oreslang/parser/FuturePipelineProvenanceTest.java
+b955e41c44c30d2e58a52ce6b91918ee5beb1591 src/test/java/dev/oreslang/parser/FuturePipelineProvenanceCheck.java

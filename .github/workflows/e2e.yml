@@ -36,12 +36,18 @@ jobs:
             test "$(git hash-object "$file")" = "$expected"
             n=$((n+1))
           done < source-sha1.txt
-          test "$n" -eq 134
+          test "$n" -eq 133
           echo "verified $n source blob SHAs"
-      - name: Verify hardened TaskPipeline derived blob
+      - name: Verify hardened compiler and runtime derived blobs
         shell: bash
         run: |
+          set -euo pipefail
           test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/runtime/TaskPipeline.java)" = "87be82c4dfbf6231d70aad9197f9fcaf255cd74d"
+          test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/types/TypeChecker.java)" = "48e2c81bc1582212c5b12d3352e54f7277a1c05b"
+          test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/types/OwnershipChecker.java)" = "5e99a657c3cdb4ad9a1079adf039b47accbc7c30"
+          test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/nodes/OresEvalRootNode.java)" = "be2bcac53512bdc1c08a88f7089a7691c7f9ad76"
+          test "$(git hash-object ci/oreslang-select-1747/src/test/java/dev/oreslang/parser/FuturePipelineTypingCheck.java)" = "b29c22efb6d357d4706446143abae20561e70231"
+          test "$(git hash-object ci/oreslang-select-1747/src/test/java/dev/oreslang/SourcePureFuturePipelineExecutionTest.java)" = "8971b4084474f4395e5bb6249dbaa911d7042ff1"
       - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
           java-version: '25'
@@ -49,7 +55,7 @@ jobs:
       - name: Exact-head select-plan regression suite
         run: |
           mvn -B -ntp -f ci/oreslang-select-1747/pom.xml \
-            -Dtest=SelectLoopDescriptorHoistTest,StaticSelectTicketTest,DynamicSelectPlanGenerationTest,ChannelRuntimeTest,FutureChannelSelectTest,ChannelSelectArmBudgetTest,ChannelPendingAdmissionTest,ChannelFutureSelectQuotaTest,ChannelSelectFairAdmissionRaceTest,FutureSelectAttachmentPublicationBarrierTest,FutureSelectLateDetachBarrierTest,ChannelMappedSelectionCancellationTest,ActorSelectFairnessIsolationTest,SelectPeerFutureAliasReadinessTest,FutureSelectAdditionalRegressionTest,ChannelMappedCancellationStressTest,TaskPipelineTest test
+            -Dtest=SelectLoopDescriptorHoistTest,StaticSelectTicketTest,DynamicSelectPlanGenerationTest,ChannelRuntimeTest,FutureChannelSelectTest,ChannelSelectArmBudgetTest,ChannelPendingAdmissionTest,ChannelFutureSelectQuotaTest,ChannelSelectFairAdmissionRaceTest,FutureSelectAttachmentPublicationBarrierTest,FutureSelectLateDetachBarrierTest,ChannelMappedSelectionCancellationTest,ActorSelectFairnessIsolationTest,SelectPeerFutureAliasReadinessTest,FutureSelectAdditionalRegressionTest,ChannelMappedCancellationStressTest,TaskPipelineTest,FuturePipelineProvenanceTest,SourcePureFuturePipelineExecutionTest test
       - name: Probe consuming Future input ownership
         shell: bash
         run: |
