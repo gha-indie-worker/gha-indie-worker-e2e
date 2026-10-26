@@ -1,5 +1,5 @@
 # exact source blobs from ores-truffle-oreslang/oreslang-source.llvm
-# source commit 76da5030dd8633a1b1268c59d51f77ef1543c965
+# source commit 48f135c5c184db571be963ce66eb6350e4632367
 ab138a3304655384072c73f6595f84d907ab8fb9 src/main/cpp/oreslang/backend/LlvmCodegen.cpp
 d6b888fd32e912c15acf5c20015f59af7acfacef src/main/cpp/oreslang/backend/LlvmCodegen.hpp
 798c9f6c01d375396d6b757b8e5cdf8ee739375a src/main/cpp/oreslang/backend/LlvmCompat.hpp
@@ -10,7 +10,7 @@ dec82f3b4b87c1ba832727194b1aa4844c535ce0 src/main/cpp/oreslang/backend/ScalarLoo
 9f277e305de03127c54af29c8e1b28b056c1ed9d src/main/cpp/oreslang/frontend/MethodResolver.hpp
 07aba8d22ae24a076087a1bad9896e82453548e4 src/main/cpp/oreslang/frontend/ModuleLoader.cpp
 022330bc32edc116ea5673b73b05b03d27695dc0 src/main/cpp/oreslang/frontend/ModuleLoader.hpp
-b94939c02bca898a99066c4170c65ec7d94c8c97 src/main/cpp/oreslang/frontend/Parser.cpp
+cdf5223d034b45746b13d5cdcb9883d8c6929486 src/main/cpp/oreslang/frontend/Parser.cpp
 7063a2285db4ce11b259561125b65f7aee0d5296 src/main/cpp/oreslang/frontend/Parser.hpp
 cdcd18ac33be684003326cc16c344beac7cd1b06 src/main/cpp/oreslang/frontend/ProjectRootImport.hpp
 d7dbd6a6b57209c43b73a8830c8c7e8773267bb5 src/main/cpp/oreslang/frontend/SourceInput.hpp
