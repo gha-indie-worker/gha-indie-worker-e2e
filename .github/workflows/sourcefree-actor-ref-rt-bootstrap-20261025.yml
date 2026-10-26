@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           test ! -e private-oreslang-source
           echo "private_source_bytes=0"
-          echo "model_for_java_head=844bb0851cb6335f05a376345495054fb445846f"
+          echo "model_for_java_head=fd77e8de27830e5a6222fd4a5bac44e9a0ccd28f"
       - name: Compile and run exact-incarnation model
         shell: bash
         run: |
