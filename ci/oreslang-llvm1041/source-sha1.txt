@@ -1,7 +1,7 @@
 # exact source blobs from ores-truffle-oreslang/oreslang-source.llvm
-# source commit 48eed22271d008181109657067d6bc4251efddeb
+# source commit 268234c0011fe3608dbe61d968613f79115924be
 b6965740cf101240cdb0f322843d5fa4fd5a8e70 docs/FUTURE_PIPELINE_OWNERSHIP_CONTRACT.md
-ab138a3304655384072c73f6595f84d907ab8fb9 src/main/cpp/oreslang/backend/LlvmCodegen.cpp
+fcf0864580d92e7288bb01c3f7728b80e3cd7351 src/main/cpp/oreslang/backend/LlvmCodegen.cpp
 d6b888fd32e912c15acf5c20015f59af7acfacef src/main/cpp/oreslang/backend/LlvmCodegen.hpp
 798c9f6c01d375396d6b757b8e5cdf8ee739375a src/main/cpp/oreslang/backend/LlvmCompat.hpp
 f2567b543151377b3d095830cac167b2bb3c23a1 src/main/cpp/oreslang/backend/NativeFlatClasses.hpp
@@ -12,7 +12,7 @@ dec82f3b4b87c1ba832727194b1aa4844c535ce0 src/main/cpp/oreslang/backend/ScalarLoo
 07aba8d22ae24a076087a1bad9896e82453548e4 src/main/cpp/oreslang/frontend/ModuleLoader.cpp
 022330bc32edc116ea5673b73b05b03d27695dc0 src/main/cpp/oreslang/frontend/ModuleLoader.hpp
 27ac3e2935b6b07066f80869d4db34bb512a37a4 src/main/cpp/oreslang/frontend/Parser.cpp
-7063a2285db4ce11b259561125b65f7aee0d5296 src/main/cpp/oreslang/frontend/Parser.hpp
+2ec4f946f533acae376eda17b61deddacbbf2bb7 src/main/cpp/oreslang/frontend/Parser.hpp
 cdcd18ac33be684003326cc16c344beac7cd1b06 src/main/cpp/oreslang/frontend/ProjectRootImport.hpp
 d7dbd6a6b57209c43b73a8830c8c7e8773267bb5 src/main/cpp/oreslang/frontend/SourceInput.hpp
 df0e1a0aad12ae7ecc44cd33f5d08442bd513aa6 src/main/cpp/oreslang/main.cpp
@@ -34,10 +34,11 @@ b5b77c169c8426ac26f3877f7e62bbf1b2db851b src/main/cpp/oreslang/types/NativeScala
 158885f7fa3509847a5dab0f8258f93fd25b0bd8 src/main/cpp/oreslang/types/NativeScalarTypes.hpp
 9ebadcc3f22e96cef8a99b0b23f9606fbb44fc82 src/main/cpp/oreslang/types/NativeSumTypes.hpp
 551505552aab4a8f1fb419d2c39c3b5d6948fe41 src/main/cpp/oreslang/types/OwnershipCfg.hpp
-7f63bff85109f8969c81bb621d08a04427d7e868 src/main/cpp/oreslang/types/OwnershipChecker.cpp
+34ac7ff23fb4a781aff413c88dc26b06d9d90390 src/main/cpp/oreslang/types/OwnershipChecker.cpp
 fd34c7177737c85f791fbcb324875468bc562cbb src/main/cpp/oreslang/types/OwnershipChecker.hpp
 b9e269598fb55c51f30d1ee4c365c0015beae459 src/main/cpp/oreslang/types/RealtimeAnalysis.hpp
 d8552624e30ebcd995c2f8397c7fa33330a494af tests/fixtures/source-future-pipeline-i64.ores
 ed9c69abfb6e4838895b81ffa34df7047c13186e tests/fixtures/source-future-pipeline-async-stage-i64.ores
-ad4f54636f3a25bd5b5460e1894f7c9ad191c4f5 tests/source_future_pipeline_i64_e2e.rs
+5ad92d035b32cdfffd9f82dc49cbf6121889a89f tests/source_future_pipeline_i64_e2e.rs
 bf83f359fa3f6ec0821b2b928b29547e5ab6796b tests/source_task_i64_runtime_test.c
+4f3dd4b22c768d08c493e280bdda0bcc14ef6ce1 tests/future_pipeline_authority_fingerprint_test.cpp
