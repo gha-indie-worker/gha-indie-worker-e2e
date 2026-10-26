@@ -102,32 +102,6 @@ fn main() {
     }
     link_and_run(&clang, &root, &dir.0, "consumed", &output.stdout);
 
-    let async_stage = r#"async fnc source(): int { return 20; }
-async fnc plus_one(int value): int { return value + 1; }
-fnc twice(int value): int { return value * 2; }
-pub fnc main(): int {
-    let Future<int> pending = rt take source() |> plus_one() |> twice();
-    let int result = await pending;
-    return result;
-}
-"#;
-    let async_output = compile(
-        &compiler, &dir.0, "async-stage.ores", async_stage);
-    assert!(async_output.status.success(),
-        "async-stage Future source compile failed: {}",
-        String::from_utf8_lossy(&async_output.stderr));
-    let async_ir = String::from_utf8_lossy(&async_output.stdout);
-    for needle in [
-        ".future.pending.consumed.producer",
-        "pending.plus_one.value",
-        "pending.twice.value",
-    ] {
-        assert!(async_ir.contains(needle),
-            "missing async-stage pipeline IR marker {needle}");
-    }
-    link_and_run(
-        &clang, &root, &dir.0, "async-stage", &async_output.stdout);
-
     let async_stage = fs::read_to_string(
         root.join("tests/fixtures/source-future-pipeline-async-stage-i64.ores"))
         .expect("read async-stage Future pipeline fixture");
@@ -165,7 +139,7 @@ pub fnc main(): int {
     let int result = await pending;
     return result;
 }
-"#, "native async Future<int> v1 callable must be capture-free");
+"#, "native async Future<int> v1 callable must be private");
 
     rejected(&compiler, &dir.0, "impure-stage.ores",
         r#"async fnc source(): int { return 21; }
