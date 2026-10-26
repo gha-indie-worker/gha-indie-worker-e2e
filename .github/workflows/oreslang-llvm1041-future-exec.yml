@@ -1,0 +1,95 @@
+name: LLVM1041 exact Future pipeline source execution
+
+on:
+  push:
+    branches:
+      - tmp/oreslang-llvm1041-future-exec-20261026
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  future-pipeline-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Verify exact LLVM1041 source closure
+        working-directory: ci/oreslang-llvm1041
+        shell: bash
+        run: |
+          set -euo pipefail
+          n=0
+          while read -r expected file; do
+            [[ -z "${expected:-}" || "${expected:0:1}" == "#" ]] && continue
+            actual="$(git -C repo hash-object "$file")"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "::error file=$file::expected $expected got $actual"
+              exit 1
+            fi
+            n=$((n+1))
+          done < source-sha1.txt
+          test "$n" -eq 38
+          echo "verified $n exact LLVM1041 source blobs"
+
+      - name: Build exact native compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/ci/oreslang-llvm1041/repo"
+          LLVM_CONFIG="$(command -v llvm-config-18 || command -v llvm-config)"
+          test -n "$LLVM_CONFIG"
+          "$LLVM_CONFIG" --version
+          clang++ --version
+          mapfile -t SOURCES <<'EOF'
+          src/main/cpp/oreslang/main.cpp
+          src/main/cpp/oreslang/frontend/Parser.cpp
+          src/main/cpp/oreslang/frontend/ModuleLoader.cpp
+          src/main/cpp/oreslang/frontend/MethodResolver.cpp
+          src/main/cpp/oreslang/types/NativeScalarTypes.cpp
+          src/main/cpp/oreslang/types/OwnershipChecker.cpp
+          src/main/cpp/oreslang/backend/LlvmCodegen.cpp
+          src/main/cpp/oreslang/backend/ScalarLoopLowering.cpp
+          EOF
+          ARGS=()
+          for s in "${SOURCES[@]}"; do ARGS+=("$ROOT/$s"); done
+          read -r -a LLVM_CXX <<< "$("$LLVM_CONFIG" --cxxflags | sed -E 's/-std=c\+\+[^ ]+//g; s/-fno-exceptions//g; s/-fno-rtti//g')"
+          clang++ -std=c++17 -fexceptions -Wall -Wextra -Wpedantic -Werror             -I"$ROOT/src/main/cpp" "${LLVM_CXX[@]}" "${ARGS[@]}"             $("$LLVM_CONFIG" --ldflags --system-libs --libs core support)             -o /tmp/oreslang-llvmc
+          /tmp/oreslang-llvmc --help >/tmp/llvm1041-help.txt 2>&1 || true
+          test -x /tmp/oreslang-llvmc
+
+      - name: Build Rust end-to-end harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          rustc --edition=2021 -O -D warnings             ci/oreslang-llvm1041/repo/tests/source_future_pipeline_i64_e2e.rs             -o /tmp/source-future-pipeline-e2e
+
+      - name: Execute .ores to LLVM to linked native pipeline
+        shell: bash
+        env:
+          RUST_BACKTRACE: "1"
+        run: |
+          set -euo pipefail
+          ROOT="$PWD/ci/oreslang-llvm1041/repo"
+          /tmp/source-future-pipeline-e2e             /tmp/oreslang-llvmc             "$(command -v clang)"             "$ROOT"
+
+      - name: Execute linked native binary under ASan and UBSan
+        shell: bash
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          REAL_CLANG="$(command -v clang)"
+          cat >/tmp/clang-sanitize <<EOF
+          #!/usr/bin/env bash
+          exec "$REAL_CLANG" -fsanitize=address,undefined -fno-omit-frame-pointer "$@"
+          EOF
+          chmod +x /tmp/clang-sanitize
+          ROOT="$PWD/ci/oreslang-llvm1041/repo"
+          /tmp/source-future-pipeline-e2e             /tmp/oreslang-llvmc             /tmp/clang-sanitize             "$ROOT"
