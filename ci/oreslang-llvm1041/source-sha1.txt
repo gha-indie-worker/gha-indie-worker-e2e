@@ -1,5 +1,5 @@
 # exact source blobs from ores-truffle-oreslang/oreslang-source.llvm
-# source commit 8adc0e142bb4cf017f4a16676e3d48bf7d3ac138
+# source commit 76da5030dd8633a1b1268c59d51f77ef1543c965
 ab138a3304655384072c73f6595f84d907ab8fb9 src/main/cpp/oreslang/backend/LlvmCodegen.cpp
 d6b888fd32e912c15acf5c20015f59af7acfacef src/main/cpp/oreslang/backend/LlvmCodegen.hpp
 798c9f6c01d375396d6b757b8e5cdf8ee739375a src/main/cpp/oreslang/backend/LlvmCompat.hpp
@@ -21,7 +21,7 @@ a25dcdf9000b52886d48fcfcba5a44329bd2f606 src/main/cpp/oreslang/runtime/NativeAct
 3aede9229c490888f5b3a986f1a6081dc2ac4243 src/main/cpp/oreslang/runtime/NativeExecutionAuthority.h
 6e3689c5d8a909a5a828d37288b365d126fc3bfa src/main/cpp/oreslang/runtime/NativeExecutionContext.h
 bc7d4bd89dde58474e453931e29b0043b567d714 src/main/cpp/oreslang/runtime/NativePhysicalTurnGate.h
-fa8c594b24e994ad2fcc300effe3cd2b9dd4df8f src/main/cpp/oreslang/runtime/SourceTaskRuntime.c
+96add0dec6603b3f807df100314d1891f86681d6 src/main/cpp/oreslang/runtime/SourceTaskRuntime.c
 a796788ddf3f298392079b009ff327d317b8f19b src/main/cpp/oreslang/runtime/SourceTaskRuntime.h
 b451be07dc8bef0ff1cc26bc4bbf23a3c24c02b2 src/main/cpp/oreslang/runtime/TargetAbi.hpp
 7fd4f0a21573b3001943c5463ae7952ebc06f7f9 src/main/cpp/oreslang/types/AutoTraitRules.hpp
@@ -38,3 +38,4 @@ fd34c7177737c85f791fbcb324875468bc562cbb src/main/cpp/oreslang/types/OwnershipCh
 b9e269598fb55c51f30d1ee4c365c0015beae459 src/main/cpp/oreslang/types/RealtimeAnalysis.hpp
 d8552624e30ebcd995c2f8397c7fa33330a494af tests/fixtures/source-future-pipeline-i64.ores
 1e63a1607c6666cff874b5fa2bd6313ce8a7f0c2 tests/source_future_pipeline_i64_e2e.rs
+bf83f359fa3f6ec0821b2b928b29547e5ab6796b tests/source_task_i64_runtime_test.c
