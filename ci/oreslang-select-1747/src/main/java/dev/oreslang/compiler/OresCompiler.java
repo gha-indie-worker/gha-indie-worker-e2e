@@ -5,7 +5,6 @@ import dev.oreslang.parser.Parser;
 import dev.oreslang.runtime.CapabilityChecker;
 import dev.oreslang.runtime.IsolatePolicy;
 import dev.oreslang.types.TypeChecker;
-import dev.oreslang.types.OwnershipChecker;
 
 /** Trusted compiler front-end API for build systems and isolate admission. */
 public final class OresCompiler {
@@ -17,9 +16,14 @@ public final class OresCompiler {
 
     /** Runs the complete front-end admission policy on an already parsed program. */
     public static Ast.Program analyze(Ast.Program program) {
-        TypeChecker.TypeCheckResult checked = TypeChecker.checkTypesWithDiagnostics(program);
-        OwnershipChecker.check(checked.program(), checked.shortInferredAliases());
-        return checked.program();
+        return TypeChecker.checkWithDiagnostics(program).program();
+    }
+
+    /** Imported module contracts participate in type proofs, not runtime declarations. */
+    public static Ast.Program analyze(
+            Ast.Program program, java.util.Map<String, Ast.InterfaceDecl> importedContracts) {
+        return TypeChecker.checkWithLinkedMetadataWithDiagnostics(
+                program, java.util.Map.of(), java.util.Map.of(), importedContracts).program();
     }
 
     /** Compiler diagnostics are returned explicitly instead of written to shared stderr. */
@@ -32,8 +36,7 @@ public final class OresCompiler {
     }
 
     public static AnalysisResult analyzeWithDiagnostics(Ast.Program program) {
-        TypeChecker.TypeCheckResult checked = TypeChecker.checkTypesWithDiagnostics(program);
-        OwnershipChecker.check(checked.program(), checked.shortInferredAliases());
+        TypeChecker.TypeCheckResult checked = TypeChecker.checkWithDiagnostics(program);
         return new AnalysisResult(checked.program(), checked.warnings());
     }
 

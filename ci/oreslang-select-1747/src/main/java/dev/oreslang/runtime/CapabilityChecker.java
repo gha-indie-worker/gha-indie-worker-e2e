@@ -311,6 +311,7 @@ public final class CapabilityChecker {
             else if (stmt instanceof Ast.ExprStmt s) checkExpr(s.expression(), policy);
             else if (stmt instanceof Ast.DeferStmt s) checkExpr(s.expression(), policy);
             else if (stmt instanceof Ast.BlockStmt s) checkStatements(s.body(), policy);
+            else if (stmt instanceof Ast.TaskScopeStmt s) checkStatements(s.body(), policy);
             else if (stmt instanceof Ast.LoopStmt s) checkStatements(s.body(), policy);
             else if (stmt instanceof Ast.IfStmt s) {
                 for (Ast.IfBranch b : s.branches()) {
@@ -494,6 +495,9 @@ public final class CapabilityChecker {
             for (Ast.Expr a : e.arguments()) checkExpr(a, policy);
         }
         else if (expr instanceof Ast.AwaitExpr e) checkExpr(e.expression(), policy);
+        else if (expr instanceof Ast.TaskExpr e) {
+            checkStatements(e.body(), policy);
+        }
         else if (expr instanceof Ast.ChannelOpExpr e) {
             checkExpr(e.channel(), policy);
             if (e.value() != null) checkExpr(e.value(), policy);

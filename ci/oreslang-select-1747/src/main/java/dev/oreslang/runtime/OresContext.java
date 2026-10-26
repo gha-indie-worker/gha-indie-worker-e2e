@@ -22,6 +22,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
 public final class OresContext implements AutoCloseable {
+    // A failed physical shutdown must never let Truffle/actor heaps disappear
+    // merely because the host dropped the context wrapper. This quarantine is
+    // released only after every mandatory retirement gate has succeeded.
+    private static final java.util.Set<OresContext> QUARANTINED_CONTEXTS =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
     private static final ContextReference<OresContext> REFERENCE = ContextReference.create(OresLanguage.class);
 
     private final OresLanguage language;
@@ -110,9 +115,15 @@ public final class OresContext implements AutoCloseable {
                     isolatePolicy,
                     ActorRuntime.DispatcherConfig.defaults(),
                     this::executeActorTurn,
-                    vm::executeControl);
+                    vm::executeControl,
+                    vm::executePhysicalStop);
             async = new AsyncRuntime(this::executeAsyncTurn);
             gc = new RuntimeGarbageCollector();
+            // Install BEFORE publishing this actor runtime to any guest.
+            // The arena-release gate runs before actorExitHook and is notified
+            // by the final physical worker/resource-loan receipt.
+            actors.setNativeIoLoanRetirementGate(nativeIo::actorPhysicallyRetired);
+            nativeIo.setActorLoanRetiredListener(actors::onNativeIoLoanRetired);
             actors.setActorExitHook(gc::retireActorDomain);
 
             this.vm = vm;
@@ -426,36 +437,94 @@ public final class OresContext implements AutoCloseable {
         return Map.copyOf(descriptor);
     }
 
-    @Override
-    public void close() {
-        nativeIo.close();
-        http.close();
+    /**
+     * Two-phase physical context retirement. Separate sealing/revocation from
+     * the physical joins, so an actor holding a socket loan cannot make the
+     * context wait for a worker before any cancellation has been requested.
+     *
+     * Each phase is independently attempted on failure; neither actor nor
+     * native ownership may be reclaimed without BOTH joins succeeding.
+     * Package access permits exercising this exact production sequence in
+     * deterministic unit tests without constructing a Truffle environment.
+     */
+    static void joinActorsAndNativeIo(ActorRuntime actors, AsyncNativeIo nativeIo) {
+        java.util.Objects.requireNonNull(actors);
+        java.util.Objects.requireNonNull(nativeIo);
         RuntimeException failure = null;
         try {
-            asyncRuntime.close();
-        } catch (RuntimeException asyncFailure) {
-            failure = asyncFailure;
+            actors.sealShutdownAdmission();
+        } catch (RuntimeException sealFailure) {
+            failure = sealFailure;
+        }
+        try {
+            nativeIo.requestShutdown();
+        } catch (RuntimeException revokeFailure) {
+            if (failure == null) failure = revokeFailure;
+            else if (failure != revokeFailure) failure.addSuppressed(revokeFailure);
         }
         try {
             actors.close();
         } catch (RuntimeException actorFailure) {
             if (failure == null) failure = actorFailure;
-            else failure.addSuppressed(actorFailure);
+            else if (failure != actorFailure) failure.addSuppressed(actorFailure);
+        }
+        try {
+            nativeIo.close();
+        } catch (RuntimeException ioFailure) {
+            if (failure == null) failure = ioFailure;
+            else if (failure != ioFailure) failure.addSuppressed(ioFailure);
+        }
+        if (failure != null) {
+            throw new IllegalStateException(
+                    "Oreslang actor and native I/O retirement incomplete", failure);
+        }
+    }
+
+    @Override
+    public void close() {
+        // Hold the entire actor, scheduler, Truffle code image and GC graph
+        // strongly reachable until BOTH physical joins succeed.
+        QUARANTINED_CONTEXTS.add(this);
+        try {
+            joinActorsAndNativeIo(actors, nativeIo);
+        } catch (RuntimeException incomplete) {
+            output.flush();
+            throw new IllegalStateException(
+                    "Oreslang context cleanup incomplete; physical state quarantined",
+                    incomplete);
+        }
+        RuntimeException failure = null;
+        try {
+            http.close();
+        } catch (RuntimeException httpFailure) {
+            failure = httpFailure;
+        }
+        try {
+            asyncRuntime.close();
+        } catch (RuntimeException asyncFailure) {
+            if (failure == null) failure = asyncFailure;
+            else if (failure != asyncFailure) failure.addSuppressed(asyncFailure);
         }
         try {
             vm.close();
         } catch (RuntimeException vmFailure) {
             if (failure == null) failure = vmFailure;
-            else failure.addSuppressed(vmFailure);
-        } finally {
-            synchronized (this) {
-                linkedCodeUnits.clear();
-                linkedImportResolutions.clear();
-                sharedCodeImages.close();
-            }
-            garbageCollector.close();
-            output.flush();
+            else if (failure != vmFailure) failure.addSuppressed(vmFailure);
         }
-        if (failure != null) throw failure;
+        if (failure != null) {
+            output.flush();
+            throw new IllegalStateException(
+                    "Oreslang context auxiliary shutdown incomplete; context quarantined",
+                    failure);
+        }
+
+        synchronized (this) {
+            linkedCodeUnits.clear();
+            linkedImportResolutions.clear();
+            sharedCodeImages.close();
+        }
+        garbageCollector.close();
+        output.flush();
+        QUARANTINED_CONTEXTS.remove(this);
     }
 }

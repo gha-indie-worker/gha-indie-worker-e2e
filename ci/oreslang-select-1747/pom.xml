@@ -17,6 +17,9 @@
     <tomlj.version>1.1.1</tomlj.version>
     <!-- Override with -Pnative-size to favor executable size over throughput. -->
     <native.image.optimization>-O2</native.image.optimization>
+    <!-- Native Image uses 32-bit Java references by default in Oreslang.
+         Combine a native build profile with -Pnative-ref64 for full-width refs. -->
+    <native.image.reference.args>-H:+UseCompressedReferences -Dores.native.ref-mode=compressed32</native.image.reference.args>
   </properties>
 
   <dependencies>
@@ -164,7 +167,7 @@
                 <configuration>
                   <executable>${env.JAVA_HOME}/bin/native-image</executable>
                   <classpathScope>runtime</classpathScope>
-                  <commandlineArgs>${native.image.optimization} -p %classpath -Dores.native.build-mode=hybrid --shared --features=com.oracle.svm.truffle.PolyglotIsolateGuestFeature -H:APIFunctionPrefix=truffle_isolate_ -H:+CopyLanguageResources -H:+UnlockExperimentalVMOptions -H:-InitializeVM -H:-UnlockExperimentalVMOptions -Dgraalvm.locatorDisabled=true -o ${project.build.directory}/oresvm</commandlineArgs>
+                  <commandlineArgs>${native.image.optimization} ${native.image.reference.args} -p %classpath --initialize-at-build-time=dev.oreslang.runtime.NativeBuildMode -Dores.native.build-mode=hybrid --shared --features=com.oracle.svm.truffle.PolyglotIsolateGuestFeature -H:APIFunctionPrefix=truffle_isolate_ -H:+CopyLanguageResources -H:+UnlockExperimentalVMOptions -H:-InitializeVM -H:-UnlockExperimentalVMOptions -Dgraalvm.locatorDisabled=true -o ${project.build.directory}/oresvm</commandlineArgs>
                 </configuration>
               </execution>
             </executions>
@@ -189,7 +192,7 @@
                 <configuration>
                   <executable>${env.JAVA_HOME}/bin/native-image</executable>
                   <classpathScope>runtime</classpathScope>
-                  <commandlineArgs>${native.image.optimization} -p %classpath -H:+ReportExceptionStackTraces -Dgraalvm.locatorDisabled=true -Dtruffle.UseFallbackRuntime=true -Dores.native.build-mode=aot --no-fallback -m dev.oreslang/dev.oreslang.launcher.OresMain -o ${project.build.directory}/ores-aot</commandlineArgs>
+                  <commandlineArgs>${native.image.optimization} ${native.image.reference.args} -p %classpath -H:+ReportExceptionStackTraces -Dgraalvm.locatorDisabled=true -Dtruffle.UseFallbackRuntime=true --initialize-at-build-time=dev.oreslang.runtime.NativeBuildMode -Dores.native.build-mode=aot --no-fallback -m dev.oreslang/dev.oreslang.launcher.OresMain -o ${project.build.directory}/ores-aot</commandlineArgs>
                 </configuration>
               </execution>
             </executions>
@@ -214,13 +217,19 @@
                 <configuration>
                   <executable>${env.JAVA_HOME}/bin/native-image</executable>
                   <classpathScope>runtime</classpathScope>
-                  <commandlineArgs>${native.image.optimization} -p %classpath -H:+ReportExceptionStackTraces -Dgraalvm.locatorDisabled=true -Dores.native.build-mode=hybrid --no-fallback -m dev.oreslang/dev.oreslang.launcher.OresMain -o ${project.build.directory}/ores-hybrid</commandlineArgs>
+                  <commandlineArgs>${native.image.optimization} ${native.image.reference.args} -p %classpath -H:+ReportExceptionStackTraces -Dgraalvm.locatorDisabled=true --initialize-at-build-time=dev.oreslang.runtime.NativeBuildMode -Dores.native.build-mode=hybrid --no-fallback -m dev.oreslang/dev.oreslang.launcher.OresMain -o ${project.build.directory}/ores-hybrid</commandlineArgs>
                 </configuration>
               </execution>
             </executions>
           </plugin>
         </plugins>
       </build>
+    </profile>
+    <profile>
+      <id>native-ref64</id>
+      <properties>
+        <native.image.reference.args>-H:-UseCompressedReferences -Dores.native.ref-mode=native64</native.image.reference.args>
+      </properties>
     </profile>
     <profile>
       <id>native-size</id>

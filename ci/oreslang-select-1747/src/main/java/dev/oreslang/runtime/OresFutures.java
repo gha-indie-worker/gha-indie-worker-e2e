@@ -15,8 +15,17 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
  * accepted only as a host-interop input and is immediately normalized into an
  * OresFuture so dependent Oreslang work never inherits a host callback
  * execution policy.</p>
+ *
+ * <p>These combinators observe already-started Futures. Cancellation of
+ * an aggregate detaches its waiters, NEVER cancelling its borrowed input
+ * sources; only explicit owners such as TaskScope may revoke work.</p>
  */
 public final class OresFutures {
+    // Bound listener and input allocations for both guest and host adapters.
+    // Keep parity with FutureCombinators; a source TaskScope can impose a
+    // tighter actor/tenant-specific budget before invoking this helper.
+    public static final int MAX_FAN_IN = 65_536;
+
     private OresFutures() { }
 
     public record Settled<T>(T value, Throwable error) {
@@ -32,8 +41,10 @@ public final class OresFutures {
         Runnable detachWaiters = () -> detachAll(waiters);
 
         OresFuture<List<T>> result = new OresFuture<>(() -> {
+            // An aggregate only OBSERVES borrowed input Futures. Revoking
+            // the observer must never cancel a shared Task or actor reply.
+            // Structured child cancellation belongs to an owning TaskScope.
             detachWaiters.run();
-            children.forEach(child -> child.cancel(true));
         });
         if (children.isEmpty()) {
             result.completeFromRuntime(List.of());
@@ -96,8 +107,10 @@ public final class OresFutures {
         Runnable detachWaiters = () -> detachAll(waiters);
 
         OresFuture<T> result = new OresFuture<>(() -> {
+            // An aggregate only OBSERVES borrowed input Futures. Revoking
+            // the observer must never cancel a shared Task or actor reply.
+            // Structured child cancellation belongs to an owning TaskScope.
             detachWaiters.run();
-            children.forEach(child -> child.cancel(true));
         });
 
         for (int index = 0; index < children.size(); index++) {
@@ -135,8 +148,10 @@ public final class OresFutures {
                 new AtomicReferenceArray<>(children.size());
         Runnable detachWaiters = () -> detachAll(waiters);
         OresFuture<List<Settled<T>>> result = new OresFuture<>(() -> {
+            // An aggregate only OBSERVES borrowed input Futures. Revoking
+            // the observer must never cancel a shared Task or actor reply.
+            // Structured child cancellation belongs to an owning TaskScope.
             detachWaiters.run();
-            children.forEach(child -> child.cancel(true));
         });
         if (children.isEmpty()) {
             result.completeFromRuntime(List.of());
@@ -180,6 +195,23 @@ public final class OresFutures {
         return result;
     }
 
+    /**
+     * Cancellation-aware replacement for the legacy Settled(value,error)
+     * view. It preserves SUCCESS, FAILURE and runtime-authenticated CANCELLED
+     * independently, including failures whose Throwable happens to be a
+     * CancellationException. It does not cancel borrowed input sources.
+     *
+     * <p>Host-runtime staging only. The source compiler must enforce checked
+     * throws/raises/panics before exposing this as a guest allSettled: an
+     * Oreslang panic may never be reclassified as a catchable failure.</p>
+     */
+    public static <T> OresFuture<List<FutureCombinators.Outcome<T>>>
+            allSettledDetailed(List<?> awaitables) {
+        List<OresFuture<T>> children =
+                normalize(awaitables, "Futures.all_settled_detailed");
+        return FutureCombinators.allSettled(children);
+    }
+
     private static void detachAll(
             AtomicReferenceArray<OresFuture.RuntimeWaiterRegistration> waiters) {
         for (int i = 0; i < waiters.length(); i++) {
@@ -194,8 +226,16 @@ public final class OresFutures {
             List<?> awaitables,
             String operation) {
         Objects.requireNonNull(awaitables, "awaitables");
-        ArrayList<OresFuture<T>> children = new ArrayList<>(awaitables.size());
-        for (Object awaitable : awaitables) {
+        if (awaitables.size() > MAX_FAN_IN) {
+            throw new IllegalArgumentException(
+                    operation + " exceeds maximum fan-in " + MAX_FAN_IN);
+        }
+        // Do not iterate a mutable, caller-owned List while installing
+        // runtime waiters. Snapshot all arguments before any normalization
+        // or host completion-stage subscription is created.
+        List<?> snapshot = List.copyOf(awaitables);
+        ArrayList<OresFuture<T>> children = new ArrayList<>(snapshot.size());
+        for (Object awaitable : snapshot) {
             Objects.requireNonNull(awaitable, "future");
             if (awaitable instanceof OresFuture<?> ores) {
                 children.add((OresFuture<T>) ores);

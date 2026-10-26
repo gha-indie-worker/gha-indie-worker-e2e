@@ -2,9 +2,9 @@ package dev.oreslang.compiler;
 
 import dev.oreslang.ast.AnnotationExpander;
 import dev.oreslang.ast.Ast;
+import dev.oreslang.imports.ImportRules;
 import dev.oreslang.parser.Parser;
 import dev.oreslang.types.TypeChecker;
-import dev.oreslang.types.OwnershipChecker;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -109,23 +109,17 @@ public final class IncrementalCompiler {
             Ast.Program checked;
             LinkedClasses linked = linkedPublicClasses(
                     id, parsed.get(id), parsed, normalizedImportResolutions);
-            if (linked.classes().isEmpty()) {
-                checked = OresCompiler.parseAndTypeCheck(normalized.get(id));
-            } else {
-                try {
-                    // Foreign layouts are used for type and ownership proofs;
-                    // their declarations are never executed in the importer.
-                    TypeChecker.TypeCheckResult analysis =
-                            TypeChecker.checkTypesWithImportedClassesWithDiagnostics(
-                                    Parser.parse(normalized.get(id)),
-                                    linked.classes(), linked.aliases());
-                    checked = analysis.program();
-                    OwnershipChecker.checkWithImportedClasses(
-                            checked, linked.classes(), analysis.shortInferredAliases());
-                } catch (IllegalArgumentException invalid) {
-                    throw new IllegalArgumentException(
-                            "Oreslang source unit '" + id + "': " + invalid.getMessage(), invalid);
-                }
+            Map<String, Ast.InterfaceDecl> contracts = linkedImportedContracts(
+                    id, parsed.get(id), parsed, normalizedImportResolutions);
+            try {
+                TypeChecker.TypeCheckResult analysis =
+                        TypeChecker.checkWithLinkedMetadataWithDiagnostics(
+                                Parser.parse(normalized.get(id)),
+                                linked.classes(), linked.aliases(), contracts);
+                checked = analysis.program();
+            } catch (IllegalArgumentException invalid) {
+                throw new IllegalArgumentException(
+                        "Oreslang source unit '" + id + "': " + invalid.getMessage(), invalid);
             }
             CompiledUnit unit = new CompiledUnit(
                     id,
@@ -209,12 +203,137 @@ public final class IncrementalCompiler {
         cache.clear();
     }
 
+    /**
+     * Resolves named cross-file contract imports into type-only linker metadata.
+     *
+     * This deliberately does not splice foreign declarations into the local AST.
+     * The first linked slice supports direct exported contracts. Inherited
+     * cross-file contracts fail closed until parent-type provenance/substitution
+     * is represented explicitly by the linker rather than guessed by name.
+     */
+    private static Map<String, Ast.InterfaceDecl> linkedImportedContracts(
+            String unitId,
+            Ast.Program program,
+            Map<String, Ast.Program> programs,
+            Map<String, Map<String, String>> importResolutions) {
+        LinkedHashMap<String, Ast.InterfaceDecl> result = new LinkedHashMap<>();
+        for (Ast.ImportDecl imported : program.imports()) {
+            if (imported.kind() != Ast.ImportKind.CONTRACT) continue;
+            if (imported.wildcard()) {
+                // Namespace-qualified contract references need a first-class
+                // qualified nominal metadata model; do not manufacture one by
+                // string concatenation.
+                continue;
+            }
+
+            String targetId = ImportGraph.resolveImportUnitId(
+                    unitId, imported, programs.keySet(), importResolutions);
+            if (targetId == null) continue; // external/package resolver owns it
+            Ast.Program target = programs.get(targetId);
+
+            for (String sourceName : imported.names()) {
+                Ast.InterfaceDecl match = null;
+                for (Ast.ModuleDecl module : target.modules()) {
+                    for (Ast.Decl declaration : module.declarations()) {
+                        if (declaration instanceof Ast.InterfaceDecl iface
+                                && iface.moduleContract()
+                                && iface.visibility() == Ast.Visibility.PUBLIC
+                                && iface.name().equals(sourceName)) {
+                            if (match != null) {
+                                throw new IllegalArgumentException(
+                                        "import contract '" + sourceName + "' from '" + imported.path()
+                                                + "' is ambiguous in '" + targetId + "'");
+                            }
+                            match = iface;
+                        }
+                    }
+                }
+                if (match == null) {
+                    // ImportGraph.validateLinkedImports should already diagnose
+                    // this, but keep this boundary independently fail-closed.
+                    throw new IllegalArgumentException(
+                            "import contract '" + sourceName + "' from '" + imported.path()
+                                    + "' does not resolve to an exported module contract");
+                }
+                if (!match.parents().isEmpty()) {
+                    throw new IllegalArgumentException(
+                            "imported module contract '" + sourceName
+                                    + "' extends another contract; cross-file inherited contract metadata "
+                                    + "is not yet linkable without explicit parent provenance");
+                }
+                validatePortableImportedContract(match, targetId);
+
+                String localName = ImportRules.localName(imported, sourceName);
+                Ast.InterfaceDecl previous = result.putIfAbsent(localName, match);
+                if (previous != null && previous != match) {
+                    throw new IllegalArgumentException(
+                            "duplicate imported contract metadata for local name '" + localName + "'");
+                }
+            }
+        }
+        return Map.copyOf(result);
+    }
+
+    private static final Set<String> LINKABLE_CONTRACT_TYPES = Set.of(
+            "int", "uint", "float", "decimal", "complex", "bool", "String", "void",
+            "Object", "List", "Map", "Tuple", "FixedArray", "Option", "Result", "Future",
+            "Iterator", "AsyncIterator", "IteratorResult", "Generator", "AsyncGenerator",
+            "Channel", "SelectCase", "SelectSet", "SelectResult", "Fnc");
+
+    private static void validatePortableImportedContract(
+            Ast.InterfaceDecl contract,
+            String targetId) {
+        Set<String> contractGenerics = Set.copyOf(contract.genericParameters());
+        for (Ast.InterfaceMember member : contract.members()) {
+            if (member instanceof Ast.InterfaceFieldDecl field) {
+                validatePortableContractType(
+                        field.type(), contractGenerics, targetId, contract.name() + "." + field.name());
+            } else if (member instanceof Ast.InterfaceFunctionDecl fn) {
+                LinkedHashSet<String> generics = new LinkedHashSet<>(contractGenerics);
+                generics.addAll(fn.genericParameters());
+                for (Ast.Param param : fn.parameters()) {
+                    validatePortableContractType(
+                            param.type(), generics, targetId, contract.name() + "." + fn.name());
+                }
+                validatePortableContractType(
+                        fn.returnType(), generics, targetId, contract.name() + "." + fn.name());
+            }
+        }
+    }
+
+    private static void validatePortableContractType(
+            Ast.TypeRef ref,
+            Set<String> generics,
+            String targetId,
+            String member) {
+        if (ref == null) {
+            throw new IllegalArgumentException(
+                    "imported module contract member '" + member + "' from '" + targetId
+                            + "' has an inferred type; linked contract ABI requires explicit types");
+        }
+        if (ref.isStringLiteral()) return;
+        String name = ref.name();
+        if (!generics.contains(name) && !LINKABLE_CONTRACT_TYPES.contains(name)) {
+            throw new IllegalArgumentException(
+                    "imported module contract member '" + member + "' from '" + targetId
+                            + "' references nominal type '" + name + "' without linker provenance; "
+                            + "imported contract conformance fails closed until nominal type identities are linked");
+        }
+        for (Ast.TypeRef argument : ref.arguments()) {
+            validatePortableContractType(argument, generics, targetId, member);
+        }
+    }
+
     private static String abiDigest(Ast.Program program) {
-        StringBuilder abi = new StringBuilder("ores-abi-v2\n");
+        StringBuilder abi = new StringBuilder("ores-abi-v3\n");
         abi.append("namespace=").append(program.namespace() == null ? "" : program.namespace()).append('\n');
 
         for (Ast.ModuleDecl module : program.modules()) {
             abi.append("module ").append(module.name()).append('\n');
+            for (String contract : module.contracts().stream()
+                    .map(IncrementalCompiler::typeRef).sorted().toList()) {
+                abi.append(" module-contract ").append(contract).append('\n');
+            }
             for (Ast.Annotation annotation : module.annotations()) {
                 if (annotation.name().equals("AdheresTo")) {
                     abi.append(" module-annotation AdheresTo:");
@@ -300,7 +419,8 @@ public final class IncrementalCompiler {
         if (decl instanceof Ast.InterfaceDecl iface) {
             // Private contracts/traits/interfaces are not part of the imported ABI.
             if (iface.visibility() != Ast.Visibility.PUBLIC) return;
-            abi.append("interface ").append(iface.visibility()).append(' ').append(iface.name());
+            abi.append(iface.moduleContract() ? "contract " : "interface ")
+                    .append(iface.visibility()).append(' ').append(iface.name());
             appendGenerics(abi, iface.genericParameters());
             abi.append(" extends ");
             for (Ast.TypeRef parent : iface.parents()) abi.append(typeRef(parent)).append(',');
@@ -310,7 +430,13 @@ public final class IncrementalCompiler {
                 if (member instanceof Ast.InterfaceFunctionDecl fn) {
                     memberEntries.add(interfaceFunctionAbi(fn));
                 } else if (member instanceof Ast.InterfaceFieldDecl field) {
-                    memberEntries.add(" iface-field " + field.name() + ":" + typeRef(field.type()) + "\n");
+                    String requirement = iface.moduleContract()
+                            ? (field.bindingKind() == null ? "readable"
+                                    : "rebindable=" + (field.bindingKind() == Ast.BindingKind.LET)
+                                            + ",mutableReferent=" + field.mutableReferent())
+                            : "mutableReferent=" + field.mutableReferent();
+                    memberEntries.add(" iface-field " + requirement + " " + field.name()
+                            + ":" + typeRef(field.type()) + "\n");
                 }
             }
             memberEntries.stream().sorted().forEach(abi::append);

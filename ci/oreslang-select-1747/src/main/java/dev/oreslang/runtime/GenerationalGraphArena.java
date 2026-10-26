@@ -210,6 +210,9 @@ public final class GenerationalGraphArena<T> implements AutoCloseable {
         liveCount--;
     }
 
+    /** Physical width of the hot adjacency slot column. */
+    public static int edgeSlotStorageBytes() { return Integer.BYTES; }
+
     public synchronized int size() { return liveCount; }
 
     /** Retire all cyclic nodes together; stale IDs never become valid again. */

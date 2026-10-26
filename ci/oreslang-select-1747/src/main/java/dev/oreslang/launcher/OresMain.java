@@ -67,12 +67,18 @@ public final class OresMain {
         }
     }
 
+    static String buildInfoJson() {
+        return "{\"build_mode\":\"" + NativeBuildMode.kind().name().toLowerCase(Locale.ROOT)
+                + "\",\"default_execution_mode\":\"" + NativeBuildMode.defaultExecutionMode()
+                + "\",\"managed_reference_mode\":\""
+                + NativeBuildMode.managedReferenceMode().name().toLowerCase(Locale.ROOT)
+                + "\",\"guest_execution\":\"" + (NativeBuildMode.kind() == NativeBuildMode.Kind.AOT
+                    ? "interpreter-no-jit" : "runtime-selected") + "\"}";
+    }
+
     private static int runForExitStatus(String[] args) throws Exception {
         if (args.length == 1 && args[0].equals("--build-info")) {
-            System.out.println("{\"build_mode\":\"" + NativeBuildMode.kind().name().toLowerCase(Locale.ROOT)
-                    + "\",\"default_execution_mode\":\"" + NativeBuildMode.defaultExecutionMode()
-                    + "\",\"guest_execution\":\"" + (NativeBuildMode.kind() == NativeBuildMode.Kind.AOT
-                        ? "interpreter-no-jit" : "runtime-selected") + "\"}");
+            System.out.println(buildInfoJson());
             return 0;
         }
         String perfEnv = System.getenv("ORES_CORE_PERF");

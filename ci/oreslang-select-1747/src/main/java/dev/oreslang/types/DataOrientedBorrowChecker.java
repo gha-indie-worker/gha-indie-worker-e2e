@@ -92,6 +92,8 @@ public final class DataOrientedBorrowChecker {
     }
 
     public static boolean canRunConcurrently(List<Loan> left, List<Loan> right) {
+        left = List.copyOf(left);
+        right = List.copyOf(right);
         for (Loan a : left) {
             for (Loan b : right) {
                 if (conflicts(a, b)) return false;
@@ -101,6 +103,7 @@ public final class DataOrientedBorrowChecker {
     }
 
     public static void requireInternallyValid(List<Loan> loans) {
+        loans = List.copyOf(loans);
         for (int i = 0; i < loans.size(); i++) {
             for (int j = i + 1; j < loans.size(); j++) {
                 if (conflicts(loans.get(i), loans.get(j))) {
@@ -123,3 +126,4 @@ public final class DataOrientedBorrowChecker {
         }
     }
 }
+

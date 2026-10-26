@@ -36,9 +36,9 @@ jobs:
             test "$(git hash-object "$file")" = "$expected"
             n=$((n+1))
           done < source-sha1.txt
-          test "$n" -eq 143
+          test "$n" -eq 168
           echo "verified $n source blob SHAs"
-      - name: Verify hardened compiler and runtime derived blobs
+      - name: Verify proposed compiler/test blobs and hardened runtime
         shell: bash
         run: |
           set -euo pipefail

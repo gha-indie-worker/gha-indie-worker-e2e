@@ -160,7 +160,8 @@ public final class AnnotationExpander {
                 klass.interfaces(),
                 klass.fields(),
                 klass.constructor(),
-                methods);
+                methods,
+                klass.actorConcurrency());
     }
 
     private static void addGeneratedAccessor(

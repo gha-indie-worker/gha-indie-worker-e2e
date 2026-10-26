@@ -293,13 +293,25 @@ public final class OresMutex {
         private final class LocalGuard implements Guard<T> {
             private final Object owningSegment;
             private final AtomicBoolean released = new AtomicBoolean();
+            private final TaskOwnedLeases.Lease taskLease;
 
             private LocalGuard(Object owningSegment) {
                 this.owningSegment = owningSegment;
+                // Registration is part of acquisition, not mutex creation.
+                // If the tracked Task cannot admit the lease, roll back the
+                // already acquired CAS gate before reporting the failure.
+                try {
+                    taskLease = TaskOwnedLeases.registerIfTracked(
+                            this::releaseFromRuntime, this::releaseFromRuntime);
+                } catch (RuntimeException | Error admissionFailure) {
+                    releaseFromRuntime();
+                    throw admissionFailure;
+                }
             }
 
             private void requireOwningSegment() {
                 requireOwnerDomain();
+                if (taskLease != null) taskLease.requireCurrentOwner();
                 // Identity is intentional: record value equality would merge
                 // separate physical actor turns in the same execution domain.
                 if (ActorRuntime.currentMutexExecutionSegment() != owningSegment) {
@@ -322,6 +334,12 @@ public final class OresMutex {
             @Override
             public void release() {
                 requireOwningSegment();
+                if (taskLease == null) releaseFromRuntime();
+                else taskLease.close();
+            }
+
+            /** Only invoked by the owner or after physical Task quiescence. */
+            private void releaseFromRuntime() {
                 if (!released.compareAndSet(false, true)) return;
                 if (!holderSegment.compareAndSet(owningSegment, null)) {
                     throw new IllegalStateException("MutexGuard owner segment changed before release");
@@ -471,9 +489,60 @@ public final class OresMutex {
          * single actor from queueing a second acquisition behind itself and
          * deadlocking, even when the actor migrates JVM workers.
          */
+        /**
+         * Reference-identity key, not record equality. ActorExecutionContext
+         * is a record: two distinct concurrent actor dispatches can compare
+         * equal by value even though they own DIFFERENT physical turns.
+         *
+         * This host bridge will eventually become a generated/generation-
+         * checked numeric owner handle in the AoS/SoA/AoSoA metadata store.
+         */
+        private static final class LogicalOwner {
+            private final Object execution;
+
+            private LogicalOwner(Object execution) {
+                this.execution = Objects.requireNonNull(execution);
+            }
+
+            @Override public int hashCode() {
+                return System.identityHashCode(execution);
+            }
+
+            @Override public boolean equals(Object other) {
+                return other instanceof LogicalOwner identity
+                        && execution == identity.execution;
+            }
+        }
+
+        // Package-private proof seam: different value-equal actor turns must
+        // never collapse into a single logical lock/deadlock owner.
+        static Object logicalOwnerKey(Object execution) {
+            return new LogicalOwner(execution);
+        }
+
+        private static Object currentLogicalExecutionIdentity() {
+            // Actor domain != execution owner. Task identity survives await
+            // and carrier migration; an untracked actor uses its physical
+            // dispatch instance, and an ordinary host uses its Thread.
+            Object taskDomain = OresScheduler.currentTaskDomain();
+            return taskDomain != null
+                    ? taskDomain : ActorRuntime.currentMutexExecutionSegment();
+        }
+
+        private static Object currentLogicalLockOwner() {
+            // One allocated key per lock admission. Keep guard reads and
+            // releases free of additional wrapper allocations.
+            return logicalOwnerKey(currentLogicalExecutionIdentity());
+        }
+
+        private static boolean currentExecutionOwns(Object ownerKey) {
+            return ownerKey instanceof LogicalOwner owner
+                    && owner.execution == currentLogicalExecutionIdentity();
+        }
+
         private Object reserveDomain(boolean tryOnly) {
             requireActorAccess();
-            Object domain = ActorRuntime.currentExecutionDomain();
+            Object domain = currentLogicalLockOwner();
             if (activeDomains.add(domain)) return domain;
             if (tryOnly) return null;
             throw new RecursiveLockException("SharedMutex<T>");
@@ -574,18 +643,202 @@ public final class OresMutex {
             return future;
         }
 
+        /**
+         * Track a queued async acquisition in the requesting Task, not in
+         * the unrelated carrier which eventually grants the permit.
+         * Retirement cancels pending admission or poisons/releases an
+         * already-granted guard. The handshake is bounded and host-only.
+         */
+        private final class TaskBoundRequest {
+            private GuardFuture<T> future;
+            private SharedGuard guard;
+            private boolean retired;
+            private boolean handoffInFlight;
+            // This receipt is registered while the originating Task is still
+            // executing, BEFORE any waiter is placed in a public queue.
+            private final CompletableFuture<Void> physicalSettlement =
+                    new CompletableFuture<>();
+            private final TaskOwnedLeases.Lease lease;
+
+            private TaskBoundRequest() {
+                lease = TaskOwnedLeases.registerIfTracked(
+                        this::releaseExplicitly, this::retireAbandoned);
+                if (lease == null) {
+                    throw new IllegalStateException("async lock Task ownership was lost");
+                }
+                try {
+                    TaskHandle.registerPhysicalSettlement(physicalSettlement);
+                } catch (RuntimeException | Error registrationFailure) {
+                    lease.disarmWithoutRelease();
+                    throw registrationFailure;
+                }
+            }
+
+            /** Claim under asyncQueueLock, before any releasing carrier can race retirement. */
+            private synchronized void beginHandoff() {
+                handoffInFlight = true;
+            }
+
+            /** A fair semaphore waiter takes precedence, returning this request to the queue. */
+            private synchronized void deferHandoff() {
+                handoffInFlight = false;
+            }
+
+            /**
+             * Finalize the claim on the granting carrier. A successfully
+             * published but abandoned guard is revoked only AFTER all
+             * synchronous completion subscribers have returned; a cancelled
+             * unpublished grant was already reclaimed by this carrier.
+             */
+            private void finishHandoff() {
+                final SharedGuard abandoned;
+                final GuardFuture<T> pending;
+                synchronized (this) {
+                    handoffInFlight = false;
+                    abandoned = retired ? guard : null;
+                    pending = future;
+                }
+                try {
+                    if (abandoned != null) {
+                        abandoned.releaseFromRuntime(isPublishedAsyncGrant(pending));
+                    }
+                    physicalSettlement.complete(null);
+                } catch (RuntimeException | Error failure) {
+                    physicalSettlement.completeExceptionally(failure);
+                    throw failure;
+                }
+            }
+
+            private void failHandoff(Throwable failure) {
+                // If a carrier aborts during a physical grant transition,
+                // success cannot be proven. Quarantine through Task cleanup.
+                physicalSettlement.completeExceptionally(failure);
+            }
+
+            private synchronized void bindFuture(GuardFuture<T> future) {
+                this.future = future;
+            }
+
+            private synchronized boolean bindGuard(SharedGuard next) {
+                if (retired) return false;
+                guard = next;
+                return true;
+            }
+
+            /**
+             * A failed/timed-out/cancelled request that never obtained a guard
+             * owns NO permit and must not consume the Task's live lease quota.
+             * This is safe on the host notification carrier: no guest callback
+             * is invoked and no protected payload was ever exposed.
+             */
+            private void finishWithoutGrant() {
+                boolean settled;
+                synchronized (this) {
+                    if (guard != null) return;
+                    retired = true;
+                    settled = !handoffInFlight;
+                }
+                lease.disarmWithoutRelease();
+                // A Future terminal notification does not settle a dequeued
+                // permit. Only its granting carrier can do that.
+                if (settled) physicalSettlement.complete(null);
+            }
+
+            /** A grant lost the Future completion race; reclaim it first. */
+            private void finishUndeliveredGrant(SharedGuard undelivered) {
+                synchronized (this) {
+                    if (guard != undelivered) return;
+                    retired = true;
+                    guard = null;
+                }
+                lease.disarmWithoutRelease();
+            }
+
+            private void releaseExplicitly() {
+                SharedGuard acquired;
+                synchronized (this) {
+                    acquired = guard;
+                }
+                if (acquired == null) {
+                    throw new IllegalStateException("cannot release an ungranted async mutex guard");
+                }
+                acquired.releaseFromRuntime(false);
+            }
+
+            private void retireAbandoned() {
+                GuardFuture<T> pending;
+                SharedGuard acquired;
+                boolean claimed;
+                synchronized (this) {
+                    retired = true;
+                    pending = future;
+                    acquired = guard;
+                    claimed = handoffInFlight;
+                }
+                // Binding a guard is NOT publication. The grant may still
+                // lose the Future completion race to Task cancellation or
+                // timeout, in which case guest state was never exposed and
+                // poisoning would be a false-positive.
+                //
+                // Cancellation of the Future linearizes before this cleanup
+                // decides whether an acquired guard was actually published.
+                // A successfully completed Future cannot subsequently become
+                // cancelled, even if its observers have not yet run.
+                try {
+                    if (pending != null && !isPublishedAsyncGrant(pending)) {
+                        pending.cancel(false);
+                    }
+                } finally {
+                    // Cancellation callbacks execute outside this monitor.
+                    // If a grant was delivered, conservative poison is
+                    // required; if it was not, merely reclaim the permit.
+                    // The guard CAS protects exact-once release against the
+                    // concurrent granting carrier.
+                    if (acquired != null && !claimed) {
+                        acquired.releaseFromRuntime(isPublishedAsyncGrant(pending));
+                    }
+                    // Claimed permits are still owned by the granting carrier.
+                    // It performs the abandoned release in finishHandoff(),
+                    // then resolves the physical receipt joined by getDone().
+                }
+            }
+        }
+
+        /**
+         * The Future's successful completion is the publication point, not
+         * the earlier internal guard binding. A cancelled/timed-out/failed
+         * request cannot have exposed protected state to its caller.
+         *
+         * Keep this side-effect-free so the same predicate can be exercised
+         * by deterministic regression tests without Task scheduling.
+         */
+        static boolean isPublishedAsyncGrant(CompletableFuture<?> future) {
+            return future != null
+                    && future.isDone()
+                    && !future.isCompletedExceptionally();
+        }
+
         private final class AsyncWaiter {
             private final Object ownerDomain;
             private final boolean enforceOwnerDomain;
+            // Transporting a grant does not transport actor authority.
+            // Capture the requesting actor domain before another carrier
+            // performs the physical permit handoff.
+            private final Object requestingActorDomain;
             private final GuardFuture<T> future;
+            private final TaskBoundRequest taskRequest;
 
             private AsyncWaiter(
                     Object ownerDomain,
                     boolean enforceOwnerDomain,
-                    GuardFuture<T> future) {
+                    Object requestingActorDomain,
+                    GuardFuture<T> future,
+                    TaskBoundRequest taskRequest) {
                 this.ownerDomain = ownerDomain;
                 this.enforceOwnerDomain = enforceOwnerDomain;
+                this.requestingActorDomain = requestingActorDomain;
                 this.future = future;
+                this.taskRequest = taskRequest;
             }
         }
 
@@ -596,53 +849,109 @@ public final class OresMutex {
          * <p>When both blocking host waiters and async waiters exist, alternate
          * preference so neither class can monopolize release handoff.</p>
          */
+        // Test-only, same-package hook; invoked OUTSIDE queue and lease locks.
+        // A deterministic latch lets tests halt between dequeue and publication.
+        private volatile Runnable afterAsyncDequeueForTesting;
+
+        void setAfterAsyncDequeueForTesting(Runnable hook) {
+            afterAsyncDequeueForTesting = hook;
+        }
+
         private void releasePermitOrHandoff() {
             while (true) {
                 AsyncWaiter waiter = null;
+                ArrayDeque<TaskBoundRequest> discarded = null;
+                boolean releasedToSemaphore = false;
                 synchronized (asyncQueueLock) {
                     while (!asyncQueue.isEmpty()) {
                         AsyncWaiter candidate = asyncQueue.removeFirst();
+                        if (candidate.taskRequest != null) {
+                            // Claim even a now-cancelled candidate: cleanup
+                            // must not complete its retirement receipt before
+                            // wait/domain accounting is physically removed.
+                            candidate.taskRequest.beginHandoff();
+                        }
                         if (!candidate.future.isDone()) {
                             waiter = candidate;
                             break;
                         }
-                        // Cancellation/completion can race with dequeue. Once
-                        // removed from the queue, this path owns wait/domain cleanup.
                         endWait(candidate.ownerDomain);
                         releaseDomain(candidate.ownerDomain);
+                        if (candidate.taskRequest != null) {
+                            if (discarded == null) discarded = new ArrayDeque<>();
+                            discarded.addLast(candidate.taskRequest);
+                        }
                     }
 
                     if (waiter == null) {
                         permit.release();
-                        return;
-                    }
-
-                    if (permit.hasQueuedThreads() && !preferAsyncHandoff) {
+                        releasedToSemaphore = true;
+                    } else if (permit.hasQueuedThreads() && !preferAsyncHandoff) {
                         asyncQueue.addFirst(waiter);
+                        if (waiter.taskRequest != null) {
+                            waiter.taskRequest.deferHandoff();
+                        }
                         preferAsyncHandoff = true;
                         permit.release();
+                        releasedToSemaphore = true;
+                    } else if (permit.hasQueuedThreads()) {
+                        preferAsyncHandoff = false;
+                    }
+                }
+                // Physical accounting and receipt completion are outside
+                // asyncQueueLock. Never publish getDone under a queue monitor.
+                if (discarded != null) {
+                    for (TaskBoundRequest skipped : discarded) {
+                        skipped.finishHandoff();
+                    }
+                }
+                if (releasedToSemaphore) return;
+
+                try {
+                    Runnable hook = afterAsyncDequeueForTesting;
+                    if (hook != null) hook.run();
+
+                    if (poisoned.get()) {
+                        endWait(waiter.ownerDomain);
+                        releaseDomain(waiter.ownerDomain);
+                        waiter.future.failFromRuntime(new PoisonedMutexException());
+                        continue;
+                    }
+
+                    endWait(waiter.ownerDomain);
+                    markOwner(waiter.ownerDomain);
+                    SharedGuard guard = new SharedGuard(
+                            waiter.ownerDomain,
+                            waiter.enforceOwnerDomain,
+                            waiter.requestingActorDomain,
+                            waiter.taskRequest == null ? null : waiter.taskRequest.lease,
+                            false);
+                    if (waiter.taskRequest != null && !waiter.taskRequest.bindGuard(guard)) {
+                        boolean reclaimed = guard.takePermitForHandoff();
+                        waiter.taskRequest.finishUndeliveredGrant(guard);
+                        if (reclaimed) continue;
                         return;
                     }
-                    if (permit.hasQueuedThreads()) preferAsyncHandoff = false;
+                    if (waiter.future.completeFromRuntime(guard)) return;
+
+                    // Cancellation won after dequeue. Do not confuse
+                    // Future completion with reclaimed permit ownership.
+                    boolean reclaimed = guard.takePermitForHandoff();
+                    if (waiter.taskRequest != null) {
+                        waiter.taskRequest.finishUndeliveredGrant(guard);
+                    }
+                    if (reclaimed) continue;
+                    return;
+                } catch (RuntimeException | Error handoffFailure) {
+                    if (waiter.taskRequest != null) {
+                        waiter.taskRequest.failHandoff(handoffFailure);
+                    }
+                    throw handoffFailure;
+                } finally {
+                    if (waiter.taskRequest != null) {
+                        waiter.taskRequest.finishHandoff();
+                    }
                 }
-
-                if (poisoned.get()) {
-                    endWait(waiter.ownerDomain);
-                    releaseDomain(waiter.ownerDomain);
-                    waiter.future.failFromRuntime(new PoisonedMutexException());
-                    continue;
-                }
-
-                endWait(waiter.ownerDomain);
-                markOwner(waiter.ownerDomain);
-                SharedGuard guard = new SharedGuard(
-                        waiter.ownerDomain,
-                        waiter.enforceOwnerDomain);
-                if (waiter.future.completeFromRuntime(guard)) return;
-
-                // Cancellation won after dequeue but before completion.
-                clearOwner(waiter.ownerDomain);
-                releaseDomain(waiter.ownerDomain);
             }
         }
 
@@ -660,7 +969,15 @@ public final class OresMutex {
                 releasePermitOrHandoff();
                 throw failure;
             }
-            return new SharedGuard(ownerDomain, enforceOwnerDomain);
+            try {
+                return new SharedGuard(ownerDomain, enforceOwnerDomain,
+                        ActorRuntime.currentActorExecutionDomain(), null, true);
+            } catch (RuntimeException | Error registrationFailure) {
+                clearOwner(ownerDomain);
+                releaseDomain(ownerDomain);
+                releasePermitOrHandoff();
+                throw registrationFailure;
+            }
         }
 
         @Override
@@ -731,6 +1048,8 @@ public final class OresMutex {
 
         @Override
         public CompletableFuture<Guard<T>> lockAsync() {
+            // Reserve the logical owner before registering a Task lease.
+            // A recursive-lock rejection must not leave an ungranted lease.
             Object ownerDomain = reserveDomain(false);
             int waiterLimit = asyncWaiterLimit();
             if (!reserveAsyncWaiter(waiterLimit)) {
@@ -745,12 +1064,28 @@ public final class OresMutex {
                         "SharedMutex process-wide async waiter limit exceeded: " + MAX_GLOBAL_ASYNC_WAITERS));
             }
 
+            // Register before the waiter is exposed to other carriers. An
+            // admission failure must return both quotas and owner reservation.
+            final TaskBoundRequest taskRequest;
+            try {
+                taskRequest = TaskHandle.isCurrentTrackedTaskTurn()
+                        ? new TaskBoundRequest() : null;
+            } catch (RuntimeException | Error registrationFailure) {
+                releaseGlobalAsyncWaiter();
+                releaseAsyncWaiter();
+                releaseDomain(ownerDomain);
+                throw registrationFailure;
+            }
+
             boolean enforceOwnerDomain = ActorRuntime.inActorExecution();
             GuardFuture<T> future = new GuardFuture<>();
+            if (taskRequest != null) taskRequest.bindFuture(future);
             AsyncWaiter waiter = new AsyncWaiter(
                     ownerDomain,
                     enforceOwnerDomain,
-                    future);
+                    ActorRuntime.currentActorExecutionDomain(),
+                    future,
+                    taskRequest);
 
             future.whenComplete((ignored, failure) -> {
                 boolean removed;
@@ -763,6 +1098,9 @@ public final class OresMutex {
                 }
                 releaseAsyncWaiter();
                 releaseGlobalAsyncWaiter();
+                if (taskRequest != null && failure != null) {
+                    taskRequest.finishWithoutGrant();
+                }
             });
 
             boolean acquired = false;
@@ -781,6 +1119,7 @@ public final class OresMutex {
                         // fairness contract.
                         if (permit.tryAcquire(0L, TimeUnit.NANOSECONDS)) {
                             acquired = true;
+                            if (taskRequest != null) taskRequest.beginHandoff();
                         } else {
                             beginWait(ownerDomain);
                             waitRegistered = true;
@@ -809,14 +1148,27 @@ public final class OresMutex {
                     markOwner(ownerDomain);
                     SharedGuard guard = new SharedGuard(
                             ownerDomain,
-                            enforceOwnerDomain);
-                    if (!future.completeFromRuntime(guard)) {
-                        guard.releaseFromRuntime();
+                            enforceOwnerDomain,
+                            ActorRuntime.currentActorExecutionDomain(),
+                            taskRequest == null ? null : taskRequest.lease,
+                            false);
+                    if (taskRequest != null && !taskRequest.bindGuard(guard)) {
+                        guard.releaseFromRuntime(false);
+                        taskRequest.finishUndeliveredGrant(guard);
+                        future.cancel(false);
+                    } else if (!future.completeFromRuntime(guard)) {
+                        guard.releaseFromRuntime(false);
+                        if (taskRequest != null) {
+                            taskRequest.finishUndeliveredGrant(guard);
+                        }
                     }
                 } catch (RuntimeException | Error failure) {
+                    if (taskRequest != null) taskRequest.failHandoff(failure);
                     releaseDomain(ownerDomain);
                     releasePermitOrHandoff();
                     future.failFromRuntime(failure);
+                } finally {
+                    if (taskRequest != null) taskRequest.finishHandoff();
                 }
             }
 
@@ -936,19 +1288,41 @@ public final class OresMutex {
         private final class SharedGuard implements Guard<T> {
             private final Object ownerDomain;
             private final boolean enforceOwnerDomain;
+            private final Object requestingActorDomain;
             private final AtomicBoolean released = new AtomicBoolean();
+            private final TaskOwnedLeases.Lease taskLease;
 
-            private SharedGuard(Object ownerDomain, boolean enforceOwnerDomain) {
+            private SharedGuard(Object ownerDomain, boolean enforceOwnerDomain,
+                                Object requestingActorDomain,
+                                TaskOwnedLeases.Lease inheritedLease,
+                                boolean registerCurrentTask) {
                 this.ownerDomain = ownerDomain;
                 this.enforceOwnerDomain = enforceOwnerDomain;
+                this.requestingActorDomain = requestingActorDomain;
+                this.taskLease = registerCurrentTask
+                        ? TaskOwnedLeases.registerIfTracked(
+                                () -> releaseFromRuntime(false),
+                                () -> releaseFromRuntime(true))
+                        : inheritedLease;
             }
 
             private void requireOwnerDomain() {
-                if (enforceOwnerDomain
-                        && !Objects.equals(ActorRuntime.currentExecutionDomain(), ownerDomain)) {
-                    throw new WrongMutexDomainException(
-                            "SharedMutex guard belongs to another actor/execution domain");
+                if (enforceOwnerDomain) {
+                    // Actor shared-memory authorization and Task ownership
+                    // are distinct checks. A Task identity does not authorize
+                    // entering another actor's guard domain.
+                    if (!Objects.equals(
+                            ActorRuntime.currentActorExecutionDomain(),
+                            requestingActorDomain)) {
+                        throw new WrongMutexDomainException(
+                                "SharedMutex guard belongs to a different actor domain");
+                    }
+                    if (!currentExecutionOwns(ownerDomain)) {
+                        throw new WrongMutexDomainException(
+                                "SharedMutex guard belongs to another logical Task or actor turn");
+                    }
                 }
+                if (taskLease != null) taskLease.requireCurrentOwner();
             }
 
             @Override
@@ -963,24 +1337,34 @@ public final class OresMutex {
             @Override
             public void release() {
                 requireOwnerDomain();
-                releaseFromRuntime();
+                if (taskLease == null) releaseFromRuntime(false);
+                else taskLease.close();
             }
 
-            private void releaseFromRuntime() {
+            /** Called only by the owner or the trusted quiescent Task cleanup. */
+            private void releaseFromRuntime(boolean abandoned) {
                 if (!released.compareAndSet(false, true)) return;
+                if (abandoned) poisoned.set(true);
                 clearOwner(ownerDomain);
                 releaseDomain(ownerDomain);
                 releasePermitOrHandoff();
+            }
+
+            /** Handoff loop keeps the physical permit instead of releasing it. */
+            private boolean takePermitForHandoff() {
+                if (!released.compareAndSet(false, true)) return false;
+                clearOwner(ownerDomain);
+                releaseDomain(ownerDomain);
+                return true;
             }
 
             @Override
             public void fail() {
                 requireOwnerDomain();
-                if (!released.compareAndSet(false, true)) return;
+                if (released.get()) return;
                 poisoned.set(true);
-                clearOwner(ownerDomain);
-                releaseDomain(ownerDomain);
-                releasePermitOrHandoff();
+                if (taskLease == null) releaseFromRuntime(false);
+                else taskLease.close();
             }
         }
     }

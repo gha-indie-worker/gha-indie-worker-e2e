@@ -468,18 +468,6 @@ public final class ChannelRuntime {
         }
 
         /**
-         * Compiler-only static select: capture a fresh source-site FAIR ticket
-         * per invocation without rotating this descriptor's shared cursor.
-         */
-        public OresFuture<SelectResult> selectStaticAsync(
-                SelectPolicy policy, long staticTicket) {
-            SelectRegistration registration = new SelectRegistration(
-                    this, Objects.requireNonNull(policy, "policy"), staticTicket, true);
-            registration.start(false);
-            return registration.future;
-        }
-
-        /**
          * Package-private deterministic race seam for runtime regression tests.
          * Observers run only in explicitly opted-in test selections; the normal
          * select path never executes injected callbacks.
@@ -519,16 +507,7 @@ public final class ChannelRuntime {
             return registration.tryNow();
         }
 
-        /** Compiler-only source-site analogue of trySelect. */
-        public Optional<SelectResult> tryStaticSelect(
-                SelectPolicy policy, long staticTicket) {
-            return new SelectRegistration(
-                    this, Objects.requireNonNull(policy, "policy"),
-                    staticTicket, true).tryNow();
-        }
-
-        private int[] initialOrder(
-                SelectPolicy policy, long staticTicket, boolean useStaticTicket) {
+        private int[] initialOrder(SelectPolicy policy) {
             int count = cases.size();
             int[] order = new int[count];
 
@@ -538,8 +517,7 @@ public final class ChannelRuntime {
             }
 
             if (policy == SelectPolicy.FAIR) {
-                int start = Math.floorMod(
-                        useStaticTicket ? staticTicket : fairCursor.get(), count);
+                int start = Math.floorMod(fairCursor.get(), count);
                 for (int i = 0; i < count; i++) {
                     order[i] = (start + i) % count;
                 }
@@ -811,8 +789,6 @@ public final class ChannelRuntime {
     private static final class SelectRegistration {
         private final SelectSet set;
         private final SelectPolicy policy;
-        private final long staticTicket;
-        private final boolean useStaticTicket;
         /** Captured under COORDINATOR at admission, after preceding FAIR commits. */
         private int[] order;
         private final ArrayList<CaseRegistration> registrations =
@@ -839,29 +815,14 @@ public final class ChannelRuntime {
         private final ArrayList<Runnable> deferredPublication = new ArrayList<>();
 
         private SelectRegistration(SelectSet set, SelectPolicy policy) {
-            this(set, policy, null, null, 0L, false);
-        }
-
-        private SelectRegistration(
-                SelectSet set, SelectPolicy policy, long ticket, boolean staticSite) {
-            this(set, policy, null, null, ticket, staticSite);
+            this(set, policy, null, null);
         }
 
         private SelectRegistration(SelectSet set, SelectPolicy policy,
                 Runnable afterWaiterAttachedForTesting,
                 Runnable beforeLateWaiterDetachedForTesting) {
-            this(set, policy, afterWaiterAttachedForTesting,
-                    beforeLateWaiterDetachedForTesting, 0L, false);
-        }
-
-        private SelectRegistration(SelectSet set, SelectPolicy policy,
-                Runnable afterWaiterAttachedForTesting,
-                Runnable beforeLateWaiterDetachedForTesting,
-                long ticket, boolean staticSite) {
             this.set = set;
             this.policy = policy;
-            this.staticTicket = ticket;
-            this.useStaticTicket = staticSite;
             this.afterWaiterAttachedForTesting = afterWaiterAttachedForTesting;
             this.beforeLateWaiterDetachedForTesting = beforeLateWaiterDetachedForTesting;
             this.registeredByIndex = new CaseRegistration[set.cases.size()];
@@ -877,10 +838,6 @@ public final class ChannelRuntime {
             this.future = new OresFuture<>(
                     this::cancelAdmission,
                     () -> { });
-        }
-
-        private void selected(int index) {
-            if (!useStaticTicket) set.selected(index, policy);
         }
 
         private boolean cancelAdmission() {
@@ -1100,8 +1057,7 @@ public final class ChannelRuntime {
         // this registration object was constructed. Capture the fairness
         // cursor at atomic admission, not at construction, so overlapping
         // invocations observe all earlier committed rotations.
-        selection.order = selection.set.initialOrder(
-                selection.policy, selection.staticTicket, selection.useStaticTicket);
+        selection.order = selection.set.initialOrder(selection.policy);
         selection.registered = true;
         ACTIVE.add(selection);
 
@@ -1445,8 +1401,8 @@ public final class ChannelRuntime {
 
         reader.selection.decided = true;
         writer.selection.decided = true;
-        reader.selection.selected(reader.index);
-        writer.selection.selected(writer.index);
+        reader.selection.set.selected(reader.index, reader.selection.policy);
+        writer.selection.set.selected(writer.index, writer.selection.policy);
         unregisterLocked(reader.selection, completions);
         unregisterLocked(writer.selection, completions);
 
@@ -1473,7 +1429,7 @@ public final class ChannelRuntime {
         if (selection.decided) return;
 
         selection.decided = true;
-        selection.selected(result.index());
+        selection.set.selected(result.index(), selection.policy);
         unregisterLocked(selection, completions);
         completions.add(() -> selection.publishAfterAttachment(
                 () -> selection.future.completeFromRuntime(result)));
@@ -1490,7 +1446,7 @@ public final class ChannelRuntime {
         // past it exactly as it does after a successful read/write; otherwise a
         // permanently closed arm can monopolize a reusable SelectSet forever.
         selection.decided = true;
-        selection.selected(registration.index);
+        selection.set.selected(registration.index, selection.policy);
         unregisterLocked(selection, completions);
         completions.add(() -> selection.publishAfterAttachment(
                 () -> selection.future.failFromRuntime(failure)));

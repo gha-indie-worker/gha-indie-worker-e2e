@@ -32,14 +32,21 @@ public final class EffectContracts {
     }
 
     public record Call(String target) {
-        public Call { Objects.requireNonNull(target, "target"); }
+        public Call {
+            Objects.requireNonNull(target, "target");
+            if (target.isBlank() || target.length() > 256) {
+                throw new IllegalArgumentException("invalid effect call target");
+            }
+        }
         public static Call direct(String target) { return new Call(target); }
     }
 
     public record Callable(String symbol, Set<Effect> direct, List<Call> calls, Set<Effect> allowed, boolean trapsThrow) {
         public Callable {
             Objects.requireNonNull(symbol, "symbol");
-            if (symbol.isBlank()) throw new IllegalArgumentException("empty callable symbol");
+            if (symbol.isBlank() || symbol.length() > 256) {
+                throw new IllegalArgumentException("invalid callable symbol");
+            }
             direct = Set.copyOf(direct);
             calls = List.copyOf(calls);
             allowed = allowed == null ? null : Set.copyOf(allowed);
@@ -60,13 +67,25 @@ public final class EffectContracts {
 
     /** Callers use qualified, overload-resolved symbols, never simple textual names. */
     public static final class Graph {
+        private static final int MAX_CALLABLES = 1024;
+        private static final int MAX_EDGES = 16384;
+        private static final int MAX_EDGES_PER_CALLABLE = 1024;
         private final Map<String, Callable> definitions = new LinkedHashMap<>();
+        private int edgeCount;
 
         public void add(Callable callable) {
             Objects.requireNonNull(callable, "callable");
-            if (definitions.putIfAbsent(callable.symbol(), callable) != null) {
+            if (definitions.containsKey(callable.symbol())) {
                 throw new IllegalArgumentException("duplicate effect symbol: " + callable.symbol());
             }
+            // Reject pathological graphs before inserting any part of them.
+            if (definitions.size() >= MAX_CALLABLES
+                    || callable.calls().size() > MAX_EDGES_PER_CALLABLE
+                    || callable.calls().size() > MAX_EDGES - edgeCount) {
+                throw new IllegalArgumentException("effect graph exceeds admission budget");
+            }
+            definitions.put(callable.symbol(), callable);
+            edgeCount += callable.calls().size();
         }
 
         public Map<String, Set<Effect>> infer() {
@@ -119,31 +138,42 @@ public final class EffectContracts {
         }
 
         private String explainPath(String from, Effect wanted, Map<String, Set<Effect>> inferred) {
-            java.util.ArrayDeque<List<String>> pending = new java.util.ArrayDeque<>();
-            pending.add(List.of(from));
-            Set<String> visited = new java.util.HashSet<>();
+            // Parent links avoid quadratic path cloning in wide/deep call graphs.
+            java.util.ArrayDeque<String> pending = new java.util.ArrayDeque<>();
+            Map<String, String> parent = new LinkedHashMap<>();
+            parent.put(from, null);
+            pending.add(from);
             while (!pending.isEmpty()) {
-                List<String> path = pending.removeFirst();
-                String symbol = path.getLast();
-                if (!visited.add(symbol)) continue;
+                String symbol = pending.removeFirst();
                 Callable def = definitions.get(symbol);
-                if (def == null) return " via " + String.join(" -> ", path);
-                if (def.direct().contains(wanted)) return " via " + String.join(" -> ", path);
+                if (def == null || def.direct().contains(wanted)) {
+                    return " via " + formatPath(symbol, parent);
+                }
                 for (Call call : def.calls()) {
-                    if (wanted == Effect.THROW && definitions.containsKey(call.target())
-                            && definitions.get(call.target()).trapsThrow()) continue;
-                    if (wanted == Effect.UNKNOWN_CALL && !definitions.containsKey(call.target())) {
-                        return " via " + String.join(" -> ", path) + " -> " + call.target();
+                    String target = call.target();
+                    if (wanted == Effect.THROW && definitions.containsKey(target)
+                            && definitions.get(target).trapsThrow()) continue;
+                    if (wanted == Effect.UNKNOWN_CALL && !definitions.containsKey(target)) {
+                        return " via " + formatPath(symbol, parent) + " -> " + target;
                     }
-                    if (inferred.getOrDefault(call.target(), Set.of()).contains(wanted)) {
-                        List<String> next = new ArrayList<>(path);
-                        next.add(call.target());
-                        pending.addLast(next);
+                    if (inferred.getOrDefault(target, Set.of()).contains(wanted)
+                            && !parent.containsKey(target)) {
+                        parent.put(target, symbol);
+                        pending.addLast(target);
                     }
                 }
             }
             return "";
         }
+
+        private static String formatPath(String last, Map<String, String> parent) {
+            java.util.ArrayDeque<String> reversed = new java.util.ArrayDeque<>();
+            for (String cursor = last; cursor != null; cursor = parent.get(cursor)) {
+                reversed.addFirst(cursor);
+            }
+            return String.join(" -> ", reversed);
+        }
+
     }
 
     private static EnumSet<Effect> enumCopy(Set<Effect> source) {

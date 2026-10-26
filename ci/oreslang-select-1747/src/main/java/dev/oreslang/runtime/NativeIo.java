@@ -275,8 +275,10 @@ public final class NativeIo {
         Socket socket = new Socket();
         try {
             context.nativeIo().register(socket);
-            socket.connect(new InetSocketAddress(host, port), 15_000);
-            return new TcpConnection(context, endpoint, socket);
+            try (AsyncNativeIo.IoLoan loan = context.nativeIo().borrow(socket)) {
+                socket.connect(new InetSocketAddress(host, port), 15_000);
+                return new TcpConnection(context, endpoint, socket);
+            }
         } catch (Exception failure) {
             context.nativeIo().unregister(socket);
             try { socket.close(); } catch (IOException cleanup) { failure.addSuppressed(cleanup); }
@@ -303,7 +305,7 @@ public final class NativeIo {
 
         public String readLine() {
             context.requirePermission(RuntimePermissions.Permission.NET, endpoint, "network.socket.read_line");
-            try {
+            try (AsyncNativeIo.IoLoan loan = context.nativeIo().borrow(socket)) {
                 return reader.readLine();
             } catch (IOException failure) {
                 throw new IllegalStateException("network read failed for " + endpoint + ": " + failure.getMessage(), failure);
@@ -312,7 +314,7 @@ public final class NativeIo {
 
         public void writeText(String value) {
             context.requirePermission(RuntimePermissions.Permission.NET, endpoint, "network.socket.write_text");
-            try {
+            try (AsyncNativeIo.IoLoan loan = context.nativeIo().borrow(socket)) {
                 writer.write(value);
                 writer.flush();
             } catch (IOException failure) {

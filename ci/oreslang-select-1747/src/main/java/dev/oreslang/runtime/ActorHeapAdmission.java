@@ -11,6 +11,12 @@ import java.util.Objects;
  * Physical isolation of an actor's direct bytes is not proof of a GC-free
  * guest object heap. Native Image Java isolate heaps also use GC.</p>
  *
+ * <p>Compressed object references are orthogonal to this contract. HotSpot
+ * compressed oops and Graal Native Image compressed references reduce storage
+ * width but remain traced Java references. Likewise, Oreslang 32-bit DOD/ECS
+ * indices remove object references from selected tables without proving that
+ * every guest allocation has left the traced heap.</p>
+ *
  * <p>A future native or foreign-memory backend may opt in only after its
  * compiler/runtime can supply every required proof. This class records that
  * admission contract; it does not implement allocation lowering or drops.</p>
