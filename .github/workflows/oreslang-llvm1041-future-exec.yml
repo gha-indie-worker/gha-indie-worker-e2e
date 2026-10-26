@@ -33,7 +33,7 @@ jobs:
             fi
             n=$((n+1))
           done < source-sha1.txt
-          test "$n" -eq 40
+          test "$n" -eq 41
           echo "verified $n exact LLVM1041 source blobs"
 
       - name: Build exact native compiler
