@@ -132,4 +132,4 @@ f4ff35b10683880e42e3151b34fc140d52704dba stdlib/trace.ores
 bff7ed59bad105e2b0548921600caec7bb724dbe src/main/java/dev/oreslang/runtime/ExecutionContext.java
 4550b0a7de6d288a47b37fcc866fd51d1b869c15 src/main/java/dev/oreslang/runtime/TaskOwnedLeases.java
 942aa675dee819911a08b4fac39465a37bb75459 src/main/java/dev/oreslang/runtime/UntrappableTaskFailure.java
-20859e02b1e68b977e39fa47ef479c65aef54cc7 src/test/java/dev/oreslang/runtime/TaskPipelineTest.java
+e1829ca69dd5aac7fd45fe0d0e47f5bdbe2d7cd8 src/test/java/dev/oreslang/runtime/TaskPipelineTest.java

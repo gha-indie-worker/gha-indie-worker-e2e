@@ -703,6 +703,53 @@ final class TaskPipelineTest {
 
 
     @Test
+    void cancellingConsumingPipelineCancelsOwnedProducer() throws Exception {
+        OresFuture<Integer> owned = new OresFuture<>();
+        try (OresScheduler scheduler = new OresScheduler(1)) {
+            TaskPipeline.PipelineHandle<Integer> handle =
+                    TaskPipeline.startOwnedInCurrentTaskOrRoot(
+                            scheduler, owned,
+                            List.of(value -> ((Integer) value) + 1));
+            awaitWaiter(owned);
+            assertTrue(handle.cancel());
+            assertTrue(handle.result().isCancelled());
+            assertTrue(owned.isCancelled(),
+                    "consuming pipeline owns cancellation authority for its input");
+            assertInstanceOf(TaskHandle.Cancelled.class,
+                    handle.getDone().get(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void consumingPipelineSuccessDoesNotRewriteCompletedInput() throws Exception {
+        OresFuture<Integer> owned = OresFuture.completed(41);
+        try (OresScheduler scheduler = new OresScheduler(1)) {
+            TaskPipeline.PipelineHandle<Integer> handle =
+                    TaskPipeline.startOwnedInCurrentTaskOrRoot(
+                            scheduler, owned,
+                            List.of(value -> ((Integer) value) + 1));
+            assertEquals(42, handle.result().get(5, TimeUnit.SECONDS));
+            assertInstanceOf(TaskHandle.Success.class,
+                    handle.getDone().get(5, TimeUnit.SECONDS));
+            assertFalse(handle.cancel());
+            assertFalse(owned.isCancelled(),
+                    "a completed consumed input remains successfully completed");
+        }
+    }
+
+    @Test
+    void consumingPipelineAdmissionFailureRevokesMovedInput() {
+        OresFuture<Integer> owned = new OresFuture<>();
+        OresScheduler scheduler = new OresScheduler(1);
+        scheduler.close();
+        assertThrows(RuntimeException.class,
+                () -> TaskPipeline.startOwnedInCurrentTaskOrRoot(
+                        scheduler, owned, List.of(value -> value)));
+        assertTrue(owned.isCancelled(),
+                "a moved input must not leak when scheduler admission fails");
+    }
+
+    @Test
     void sealedScopeRejectsPipelineWithoutChangingInputFuture() {
         OresFuture<Integer> input = new OresFuture<>();
         try (OresScheduler scheduler = new OresScheduler(1)) {
