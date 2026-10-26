@@ -77,6 +77,16 @@ static void require_function_only_tree_shake_surface(
             }))
         throw std::runtime_error(
             "tree shaking currently rejects scalar continuation functions until continuation ABI roots are modeled");
+    if (std::any_of(
+            program.functions.begin(),
+            program.functions.end(),
+            [](const oreslang::Function& fn) {
+                return fn.async_source_i64 ||
+                    !fn.source_tasks.empty() ||
+                    !fn.future_pipelines.empty();
+            }))
+        throw std::runtime_error(
+            "tree shaking currently rejects Task/Future pipeline metadata edges until they participate in the semantic reachability graph");
 }
 
 static void tree_shake_functions(oreslang::Program& program, const std::vector<std::string>& requested_roots) {
