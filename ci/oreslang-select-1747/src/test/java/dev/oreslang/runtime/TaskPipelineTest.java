@@ -821,7 +821,7 @@ final class TaskPipelineTest {
                     error::toString);
             assertFalse(owned.isCancelled(),
                     "completed consumed root must not be rewritten by the rejected stage claim");
-            assertInstanceOf(TaskHandle.Failure.class,
+            assertInstanceOf(TaskHandle.Failed.class,
                     handle.getDone().get(5, TimeUnit.SECONDS));
         }
     }
