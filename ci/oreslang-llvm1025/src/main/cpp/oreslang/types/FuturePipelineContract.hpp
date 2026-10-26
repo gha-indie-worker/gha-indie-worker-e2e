@@ -31,6 +31,18 @@ enum class PipelineStageFutureOwnership : std::uint8_t {
     OwnedStageResult
 };
 
+/**
+ * A flattened Future may receive cancellation ownership only when the checker
+ * proved that this exact stage creates fresh deferred work. Forwarding an
+ * existing/borrowed Future never becomes owned because a surrounding root was
+ * consumed.
+ */
+enum class PipelineStageFutureProvenance : std::uint8_t {
+    None,
+    FreshCheckedProducer,
+    BorrowedOrForwarded
+};
+
 struct PipelineEffectSummary {
     FunctionEffects effects{};
     PipelineEffectProvenance provenance =
@@ -100,14 +112,34 @@ inline void require_pipeline_output_traits(const AutoType& type) {
             "Future pipeline output requires Send");
 }
 
+inline bool same_pipeline_type(const AutoType& left, const AutoType& right) {
+    if (left.kind != right.kind
+            || left.dyn_bounds != right.dyn_bounds
+            || left.shareable_domain != right.shareable_domain
+            || left.complete_nominal_layout != right.complete_nominal_layout
+            || left.negative != right.negative
+            || left.parameters.size() != right.parameters.size())
+        return false;
+    for (std::size_t i = 0; i < left.parameters.size(); ++i)
+        if (!same_pipeline_type(left.parameters[i], right.parameters[i]))
+            return false;
+    return true;
+}
+
 /**
- * Identity-bound staged compiler plan. declaration_identity must be the exact
- * resolved callable identity, never a name-only lookup token.
+ * Identity-bound staged compiler plan. Both identities are required:
+ * declaration_identity binds the resolved callable and pipeline_node_identity
+ * binds the exact checked value-pipe AST node. Neither is a guest capability.
+ *
+ * prior_effects is the exact upstream cumulative row seen by this stage:
+ * producer effects for the root, previous-stage cumulative effects otherwise.
  */
 struct FuturePipelinePlan {
     std::uint64_t declaration_identity = 0;
+    std::uint64_t pipeline_node_identity = 0;
     AutoType input_type{};
     AutoType output_type{};
+    FunctionEffects prior_effects{};
     FunctionEffects stage_effects{};
     FunctionEffects cumulative_effects{};
     PipelineEffectProvenance effect_provenance =
@@ -116,20 +148,27 @@ struct FuturePipelinePlan {
         PipelineInputOwnership::BorrowedUpstreamSharedPayload;
     PipelineStageFutureOwnership produced_future_ownership =
         PipelineStageFutureOwnership::None;
+    PipelineStageFutureProvenance produced_future_provenance =
+        PipelineStageFutureProvenance::None;
     bool flattens_future = false;
     bool root_stage = false;
 };
 
 inline void validate_future_pipeline_plan(const FuturePipelinePlan& plan) {
-    if (plan.declaration_identity == 0)
+    if (plan.declaration_identity == 0 || plan.pipeline_node_identity == 0)
         throw std::invalid_argument(
-            "Future pipeline plan requires exact declaration identity");
-    if (!plan.stage_effects.valid() || !plan.cumulative_effects.valid())
+            "Future pipeline plan requires exact declaration and AST identities");
+    if (!plan.prior_effects.valid()
+            || !plan.stage_effects.valid()
+            || !plan.cumulative_effects.valid())
         throw std::invalid_argument(
             "Future pipeline plan contains unknown effect bits");
-    if (!plan.cumulative_effects.permits(plan.stage_effects))
+
+    const FunctionEffects expected_effects =
+        plan.prior_effects.united(plan.stage_effects);
+    if (plan.cumulative_effects.bits != expected_effects.bits)
         throw std::invalid_argument(
-            "Future pipeline cumulative effects dropped stage effects");
+            "Future pipeline cumulative effects must equal prior plus stage effects");
 
     if (plan.root_stage) {
         if (plan.input_ownership == PipelineInputOwnership::OwnedPipelineValue)
@@ -146,19 +185,31 @@ inline void validate_future_pipeline_plan(const FuturePipelinePlan& plan) {
     const bool owns_stage_future =
         plan.produced_future_ownership ==
             PipelineStageFutureOwnership::OwnedStageResult;
-    if (plan.flattens_future != owns_stage_future)
-        throw std::invalid_argument(
-            "Future pipeline flattening must own exactly one stage-created Future");
+    if (!plan.flattens_future) {
+        if (owns_stage_future
+                || plan.produced_future_provenance !=
+                    PipelineStageFutureProvenance::None)
+            throw std::invalid_argument(
+                "scalar Future pipeline stage cannot own deferred Future work");
+    } else {
+        if (!owns_stage_future
+                || plan.produced_future_provenance !=
+                    PipelineStageFutureProvenance::FreshCheckedProducer)
+            throw std::invalid_argument(
+                "Future flattening requires one fresh checked stage-created Future");
+    }
 }
 
 /**
  * Current native executable slice remains fail-closed for source exceptional
  * effects until throw/raise/panic continuation unwinding is implemented.
+ * Check the full cumulative row, not only the current stage, so an earlier
+ * exceptional effect cannot disappear at a later lowering boundary.
  */
 inline void validate_executable_future_pipeline_plan(
         const FuturePipelinePlan& plan) {
     validate_future_pipeline_plan(plan);
-    if (has_exceptional_pipeline_effects(plan.stage_effects))
+    if (has_exceptional_pipeline_effects(plan.cumulative_effects))
         throw std::invalid_argument(
             "Future pipeline exceptional effect execution is not enabled");
 }
@@ -184,9 +235,12 @@ inline void validate_future_pipeline_chain(
             throw std::invalid_argument(
                 "Future pipeline later edge cannot become a new root");
         const auto& prior = plans[i - 1];
-        if (!plan.cumulative_effects.permits(prior.cumulative_effects))
+        if (!same_pipeline_type(prior.output_type, plan.input_type))
             throw std::invalid_argument(
-                "Future pipeline cumulative effects are not monotonic");
+                "Future pipeline adjacent stage types do not compose");
+        if (plan.prior_effects.bits != prior.cumulative_effects.bits)
+            throw std::invalid_argument(
+                "Future pipeline prior effect row does not match preceding stage");
         if (prior.effect_provenance ==
                 PipelineEffectProvenance::UpstreamFutureUnknown
                 && plan.effect_provenance ==
@@ -196,15 +250,59 @@ inline void validate_future_pipeline_chain(
     }
 }
 
+struct FuturePipelineOwnershipAdmission {
+    std::uint64_t declaration_identity = 0;
+    std::uint64_t pipeline_node_identity = 0;
+    PipelineInputOwnership input_ownership =
+        PipelineInputOwnership::BorrowedUpstreamSharedPayload;
+    bool admitted = false;
+};
+
+inline void require_matching_pipeline_admission(
+        const FuturePipelinePlan& staged,
+        const FuturePipelineOwnershipAdmission& admission) {
+    if (staged.declaration_identity != admission.declaration_identity
+            || staged.pipeline_node_identity != admission.pipeline_node_identity
+            || staged.input_ownership != admission.input_ownership)
+        throw std::invalid_argument(
+            "Future pipeline ownership admission does not match staged proof identity");
+}
+
 /**
- * Type checking may stage a plan, but executable authority is published only
- * after the ownership checker admits the same exact AST/declaration proof.
+ * A single staged proof may publish only after ownership admits the exact AST,
+ * declaration and ownership mode. A bare boolean is deliberately insufficient:
+ * admission for one call must never authorize another rewritten/rebound call.
  */
 inline std::optional<FuturePipelinePlan> publish_future_pipeline_plan(
         const FuturePipelinePlan& staged,
-        bool ownership_admitted) {
+        const FuturePipelineOwnershipAdmission& admission) {
     validate_future_pipeline_plan(staged);
-    if (!ownership_admitted) return std::nullopt;
+    if (!admission.admitted) return std::nullopt;
+    require_matching_pipeline_admission(staged, admission);
+    return staged;
+}
+
+/**
+ * Compilation-unit publication is atomic like Java/Graal CheckedFuturePipe:
+ * if any staged edge fails ownership admission, no prefix receives executable
+ * authorization. Identity mismatches are hard errors rather than partial
+ * publication.
+ */
+inline std::optional<std::vector<FuturePipelinePlan>>
+publish_future_pipeline_chain(
+        const std::vector<FuturePipelinePlan>& staged,
+        const std::vector<FuturePipelineOwnershipAdmission>& admissions) {
+    validate_future_pipeline_chain(staged);
+    if (staged.size() != admissions.size())
+        throw std::invalid_argument(
+            "Future pipeline ownership admission count does not match staged chain");
+
+    for (const auto& admission : admissions)
+        if (!admission.admitted) return std::nullopt;
+
+    for (std::size_t i = 0; i < staged.size(); ++i)
+        require_matching_pipeline_admission(staged[i], admissions[i]);
+
     return staged;
 }
 
