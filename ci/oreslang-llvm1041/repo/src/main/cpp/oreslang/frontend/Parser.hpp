@@ -213,15 +213,35 @@ inline std::uint64_t future_pipeline_authority_fingerprint(
         for (unsigned char ch : value) byte(ch);
     };
 
+    const auto auto_type = [&](const auto& self,
+                               const types::AutoType& type) -> void {
+        byte(static_cast<std::uint8_t>(type.kind));
+        byte(type.shareable_domain ? 1u : 0u);
+        byte(type.complete_nominal_layout ? 1u : 0u);
+        u64(static_cast<std::uint64_t>(type.parameters.size()));
+        for (const auto& parameter : type.parameters)
+            self(self, parameter);
+        u64(static_cast<std::uint64_t>(type.dyn_bounds.size()));
+        for (const auto trait : type.dyn_bounds)
+            byte(static_cast<std::uint8_t>(trait));
+        u64(static_cast<std::uint64_t>(type.negative.size()));
+        for (const auto trait : type.negative)
+            byte(static_cast<std::uint8_t>(trait));
+    };
+
     text(pipeline.name);
     text(pipeline.producer_function);
+    u64(static_cast<std::uint64_t>(pipeline.offset));
     byte(pipeline.root_consumed ? 1u : 0u);
+    byte(pipeline.awaited ? 1u : 0u);
     u64(static_cast<std::uint64_t>(pipeline.stages.size()));
     for (const auto& stage : pipeline.stages) text(stage);
     u64(static_cast<std::uint64_t>(pipeline.plans.size()));
     for (const auto& plan : pipeline.plans) {
         u64(plan.declaration_identity);
         u64(plan.pipeline_node_identity);
+        auto_type(auto_type, plan.input_type);
+        auto_type(auto_type, plan.output_type);
         u64(static_cast<std::uint64_t>(plan.prior_effects.bits));
         u64(static_cast<std::uint64_t>(plan.stage_effects.bits));
         u64(static_cast<std::uint64_t>(plan.cumulative_effects.bits));
