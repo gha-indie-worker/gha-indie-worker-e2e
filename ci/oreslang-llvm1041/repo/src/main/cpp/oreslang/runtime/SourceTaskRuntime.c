@@ -3,6 +3,7 @@
 #include "oreslang/runtime/NativeActorScheduler.h"
 
 #include <pthread.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,16 +24,22 @@ typedef struct {
 
 typedef struct {
     pthread_mutex_t mutex;
+    pthread_cond_t quiesced;
     OresNativeActorScheduler* scheduler;
     OresNativeActorRef actor;
     SourceTaskI64* task;
+    size_t active_awaiters;
+    int closing;
 } SourceTaskRuntime;
 
 static SourceTaskRuntime runtime = {
     .mutex = PTHREAD_MUTEX_INITIALIZER,
+    .quiesced = PTHREAD_COND_INITIALIZER,
     .scheduler = NULL,
     .actor = {0, 0, 0},
-    .task = NULL
+    .task = NULL,
+    .active_awaiters = 0,
+    .closing = 0
 };
 
 static void task_worker(void* context, size_t actor_index, uint64_t payload) {
@@ -78,7 +85,8 @@ int oreslang_source_task_start_i64_checked(
     task->producer = producer;
 
     if (pthread_mutex_lock(&runtime.mutex) != 0) abort();
-    if (runtime.task != NULL) {
+    if (runtime.task != NULL || runtime.closing ||
+            runtime.active_awaiters != 0) {
         if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
         (void)pthread_cond_destroy(&task->completed);
         (void)pthread_mutex_destroy(&task->mutex);
@@ -146,32 +154,50 @@ void* oreslang_source_task_start_i64(OresSourceTaskI64Producer producer) {
 int oreslang_source_task_await_i64_checked(void* opaque, int64_t* out_result) {
     if (!opaque || !out_result) return ORES_SOURCE_TASK_INVALID;
 
+    /*
+     * Pin the task against runtime_shutdown() before dropping runtime.mutex.
+     * Without this lease, shutdown can free the task after pointer validation
+     * but before this function acquires task->mutex.
+     */
     if (pthread_mutex_lock(&runtime.mutex) != 0) abort();
     SourceTaskI64* task = runtime.task;
     OresNativeActorScheduler* scheduler = runtime.scheduler;
     const int valid = task == (SourceTaskI64*)opaque &&
-        task != NULL && scheduler != NULL;
-    if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
-    if (!valid) return ORES_SOURCE_TASK_INVALID;
-
-    if (ores_native_actor_scheduler_is_current_carrier(scheduler))
+        task != NULL && scheduler != NULL && !runtime.closing;
+    if (!valid) {
+        if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
+        return ORES_SOURCE_TASK_INVALID;
+    }
+    if (ores_native_actor_scheduler_is_current_carrier(scheduler)) {
+        if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
         return ORES_SOURCE_TASK_WOULD_DEADLOCK;
+    }
+    ++runtime.active_awaiters;
+    if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
 
+    int status = ORES_SOURCE_TASK_OK;
     if (pthread_mutex_lock(&task->mutex) != 0) abort();
     if (task->magic != SOURCE_TASK_MAGIC) abort();
     if (task->consuming || task->consumed) {
-        if (pthread_mutex_unlock(&task->mutex) != 0) abort();
-        return ORES_SOURCE_TASK_ALREADY_CONSUMED;
+        status = ORES_SOURCE_TASK_ALREADY_CONSUMED;
+    } else {
+        task->consuming = 1;
+        while (!task->done) {
+            if (pthread_cond_wait(&task->completed, &task->mutex) != 0) abort();
+        }
+        *out_result = task->result;
+        task->consuming = 0;
+        task->consumed = 1;
     }
-    task->consuming = 1;
-    while (!task->done) {
-        if (pthread_cond_wait(&task->completed, &task->mutex) != 0) abort();
-    }
-    *out_result = task->result;
-    task->consuming = 0;
-    task->consumed = 1;
     if (pthread_mutex_unlock(&task->mutex) != 0) abort();
-    return ORES_SOURCE_TASK_OK;
+
+    if (pthread_mutex_lock(&runtime.mutex) != 0) abort();
+    if (runtime.active_awaiters == 0) abort();
+    --runtime.active_awaiters;
+    if (runtime.closing && runtime.active_awaiters == 0)
+        if (pthread_cond_broadcast(&runtime.quiesced) != 0) abort();
+    if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
+    return status;
 }
 
 int64_t oreslang_source_task_await_i64(void* task) {
@@ -191,18 +217,33 @@ int oreslang_source_task_runtime_shutdown(void) {
         if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
         return 1;
     }
-    if (!scheduler || !task ||
+    if (!scheduler || !task || runtime.closing ||
             ores_native_actor_scheduler_is_current_carrier(scheduler)) {
         if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
         return 0;
     }
+
+    /*
+     * Close admission to new awaiters, then wait for every caller that already
+     * pinned the task to leave it. This is the physical-retirement fence for
+     * the task object itself; no task mutex/cond may be destroyed before it.
+     */
+    runtime.closing = 1;
+    while (runtime.active_awaiters != 0)
+        if (pthread_cond_wait(&runtime.quiesced, &runtime.mutex) != 0) abort();
     if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
 
     if (pthread_mutex_lock(&task->mutex) != 0) abort();
     const int terminal = task->done && task->consumed &&
         task->producer_on_carrier;
     if (pthread_mutex_unlock(&task->mutex) != 0) abort();
-    if (!terminal) return 0;
+    if (!terminal) {
+        if (pthread_mutex_lock(&runtime.mutex) != 0) abort();
+        if (runtime.scheduler != scheduler || runtime.task != task) abort();
+        runtime.closing = 0;
+        if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
+        return 0;
+    }
 
     if (!ores_native_actor_scheduler_stop(scheduler, actor)) return 0;
     if (!ores_native_actor_scheduler_wait_done(scheduler, actor)) return 0;
@@ -221,10 +262,13 @@ int oreslang_source_task_runtime_shutdown(void) {
     if (!ores_native_actor_scheduler_try_destroy(scheduler)) return 0;
 
     if (pthread_mutex_lock(&runtime.mutex) != 0) abort();
-    if (runtime.scheduler != scheduler || runtime.task != task) abort();
+    if (runtime.scheduler != scheduler || runtime.task != task ||
+            runtime.active_awaiters != 0 || !runtime.closing)
+        abort();
     runtime.scheduler = NULL;
     runtime.actor = (OresNativeActorRef){0, 0, 0};
     runtime.task = NULL;
+    runtime.closing = 0;
     if (pthread_mutex_unlock(&runtime.mutex) != 0) abort();
 
     task->magic = 0;
