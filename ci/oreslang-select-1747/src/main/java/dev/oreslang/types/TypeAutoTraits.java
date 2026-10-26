@@ -134,7 +134,7 @@ public final class TypeAutoTraits {
                 kind, modelFromCapabilities(child), shareableDomain));
     }
 
-    private static TypeModel modelFromCapabilities(Capabilities capabilities) {
+    static TypeModel modelFromCapabilities(Capabilities capabilities) {
         EnumSet<AutoTrait> denied = EnumSet.noneOf(AutoTrait.class);
         if (!capabilities.send()) denied.add(AutoTrait.SEND);
         if (!capabilities.sync()) denied.add(AutoTrait.SYNC);

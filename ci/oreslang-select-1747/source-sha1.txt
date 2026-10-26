@@ -37,7 +37,7 @@ a44debada084d29a542f511be2df90b00f2f7a76 src/main/java/dev/oreslang/runtime/Acto
 24c47c9c2db140535a9e0da8de18304fcceff776 src/main/java/dev/oreslang/runtime/ActorMail.java
 c7d2bd0c79278cb47a522b2a24484ed0c59202ad src/main/java/dev/oreslang/runtime/ActorMailman.java
 90ac451a24bccf22b19249045e18776ddf711d13 src/main/java/dev/oreslang/runtime/ActorPhysicalTurnGate.java
-7baf41889db4ae904bbc6b7b1b5ae336121d726e src/main/java/dev/oreslang/runtime/ActorRuntime.java
+7befc483a2dd831daea2c749278f2d76750eaa6c src/main/java/dev/oreslang/runtime/ActorRuntime.java
 bd7d5764c02dccb05dc5060e82cdf5aece19772b src/main/java/dev/oreslang/runtime/ActorShardColumns.java
 2795159ca42526ea46a665fc7f3a51db73d3ad29 src/main/java/dev/oreslang/runtime/ActorTurnWatchdog.java
 30faea897f3245810a4ae4d1bcf524f25bc52eb8 src/main/java/dev/oreslang/runtime/ActorUpgradeEpochGate.java
@@ -87,7 +87,7 @@ a4ff2a81cff4ec90cf565e94ec2cd0359b5514c0 src/main/java/dev/oreslang/runtime/Sour
 b9b615f19d14b628037d41e2277f7c708d6c3982 src/main/java/dev/oreslang/runtime/SourceCooperationQuantum.java
 fa91174a0c3b88158561af596822fe73b2fd2971 src/main/java/dev/oreslang/runtime/TaskCancellation.java
 c29c45dacbef42127541cdb30b68a77c858d3995 src/main/java/dev/oreslang/runtime/TaskHandle.java
-211b5812183e9e35f7a9d7358b1a6f2ccebd024b src/main/java/dev/oreslang/runtime/TaskScope.java
+fdc109399f568e1e0a2378d2ec8f4fddba6545ed src/main/java/dev/oreslang/runtime/TaskScope.java
 ee2ca924b0747cca21097f30d824d6db17a30087 src/main/java/dev/oreslang/runtime/TrapFailurePolicy.java
 8a634db95bbe6aed9dac19135f6e47ead7336d04 src/main/java/dev/oreslang/runtime/VersionedActorCell.java
 2bba2aa35b4b096e4336fed2aa93eab1b96a7fae src/main/java/dev/oreslang/runtime/realtime/RealtimeProfile.java
@@ -99,7 +99,7 @@ c3f48622469bb860cdb9d16eca16d7436d69aece src/main/java/dev/oreslang/types/Effect
 4d67876a059751bd944bc654c5636b1611d8e096 src/main/java/dev/oreslang/types/GenericCallArguments.java
 386789e9fb35a43a36e37e2fa49201de7c7b67f2 src/main/java/dev/oreslang/types/NativeArrayResultWire.java
 13b099b24f780601e88045efd4ea5b6a6b3dccea src/main/java/dev/oreslang/types/ReturnCleanupChecker.java
-41da9b0677b4dda813ab34027769c700b704e5c1 src/main/java/dev/oreslang/types/TypeAutoTraits.java
+6b6183da332f44de84ae9e6e17e73a910b459aae src/main/java/dev/oreslang/types/TypeAutoTraits.java
 448b0add530e84adb0161b3f2bcf2def10a4d409 src/main/java/dev/oreslang/types/TypeclassRegistry.java
 71dce151c2348e69bec42ae8b80111a355eb2b08 src/main/java/dev/oreslang/types/Types.java
 44e23c91c50f034ca3c7f4fc315b97f45c7c1eac src/main/java/module-info.java
@@ -133,3 +133,4 @@ e1829ca69dd5aac7fd45fe0d0e47f5bdbe2d7cd8 src/test/java/dev/oreslang/runtime/Task
 dab18b2284478606f23ceece35bdc4446cd28342 src/test/java/dev/oreslang/parser/FuturePipelineProvenanceTest.java
 b955e41c44c30d2e58a52ce6b91918ee5beb1591 src/test/java/dev/oreslang/parser/FuturePipelineProvenanceCheck.java
 ba75f73878d3b2cda58240e53c4446fa67e45907 src/main/java/dev/oreslang/ast/TaskCaptureNames.java
+ac58abf9328959e809522f050ad067879c76339d src/main/java/dev/oreslang/types/ScopedRequestBorrowPreflight.java

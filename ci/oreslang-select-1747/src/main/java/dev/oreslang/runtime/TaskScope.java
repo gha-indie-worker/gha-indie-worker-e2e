@@ -1,5 +1,7 @@
 package dev.oreslang.runtime;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.RejectedExecutionException;
 
@@ -19,8 +21,15 @@ public final class TaskScope implements AutoCloseable {
     private final TaskCancellation cancellation = new TaskCancellation();
     private final Object admissionLock = new Object();
     private final OresFuture<Void> done = new OresFuture<>(() -> false, () -> { });
+    private final OresFuture<List<Throwable>> cleanupFailures =
+            new OresFuture<>(() -> false, () -> { });
+    private final ArrayList<Throwable> releaseErrors = new ArrayList<>();
     private boolean sealed;
     private int active;
+    // Observation retained through physical scope quiescence so source-level
+    // structured concurrency can surface an unawaited child failure without
+    // changing getDone() from a pure quiescence witness.
+    private TaskHandle.TaskOutcome<?> firstNonSuccess;
 
     TaskScope(OresScheduler scheduler) {
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
@@ -28,7 +37,20 @@ public final class TaskScope implements AutoCloseable {
 
     /** Atomically reserve a child slot or reject a sealed scope. */
     public <T> TaskHandle<T> startTask(OresScheduler.Task<T> task) {
+        return startTask(task, () -> { });
+    }
+
+    /**
+     * Runtime-only child admission with an exact physical-quiescence callback.
+     * The callback runs after TaskHandle.getDone() settles and before this
+     * scope retires the child's active slot. A callback failure is retained as
+     * a structured child failure and cannot make the scope appear successful.
+     */
+    <T> TaskHandle<T> startTask(
+            OresScheduler.Task<T> task,
+            Runnable onPhysicalQuiescence) {
         Objects.requireNonNull(task, "task");
+        Objects.requireNonNull(onPhysicalQuiescence, "onPhysicalQuiescence");
         synchronized (admissionLock) {
             if (sealed) {
                 throw new RejectedExecutionException("TaskScope is sealed");
@@ -54,7 +76,7 @@ public final class TaskScope implements AutoCloseable {
                 active--;
                 publish = sealed && active == 0;
             }
-            if (publish) done.completeFromRuntime(null);
+            if (publish) publishCompletion();
             throw admissionFailure;
         }
         // The child may have finished before callback registration. In that
@@ -62,21 +84,64 @@ public final class TaskScope implements AutoCloseable {
         // arbitrary scope completion observers while holding admissionLock.
         // Any seal/cancel racing this interval sees active > 0 and waits for
         // childDone() after its actual scheduler quiescence.
-        child.getDone().whenCompleteRuntime((outcome, failure) -> childDone());
+        child.getDone().whenCompleteRuntime(
+                (outcome, failure) -> {
+                    Throwable completionFailure = failure;
+                    try {
+                        onPhysicalQuiescence.run();
+                    } catch (RuntimeException | Error retirementFailure) {
+                        if (completionFailure == null) {
+                            completionFailure = retirementFailure;
+                        } else if (completionFailure != retirementFailure) {
+                            completionFailure.addSuppressed(retirementFailure);
+                        }
+                    }
+                    List<Throwable> failedReleases;
+                    try {
+                        failedReleases = child.cleanupFailures().join();
+                    } catch (RuntimeException cleanupObservationFailure) {
+                        failedReleases = List.of(cleanupObservationFailure);
+                    }
+                    childDone(outcome, completionFailure, failedReleases);
+                });
         return child;
     }
 
-    private void childDone() {
+    private void childDone(
+            TaskHandle.TaskOutcome<?> outcome,
+            Throwable observationFailure,
+            List<Throwable> failedReleases) {
         boolean publish;
         synchronized (admissionLock) {
             if (active <= 0) {
                 throw new IllegalStateException("TaskScope child accounting underflow");
             }
+            releaseErrors.addAll(failedReleases);
+            if (firstNonSuccess == null) {
+                if (observationFailure != null) {
+                    firstNonSuccess =
+                            new TaskHandle.Failed<>(observationFailure);
+                } else if (outcome != null
+                        && !(outcome instanceof TaskHandle.Success<?>)) {
+                    firstNonSuccess = outcome;
+                }
+            }
             active--;
             publish = sealed && active == 0;
         }
         // Never deliver arbitrary Future subscribers under the admission lock.
-        if (publish) done.completeFromRuntime(null);
+        if (publish) publishCompletion();
+    }
+
+    private void publishCompletion() {
+        final List<Throwable> snapshot;
+        synchronized (admissionLock) {
+            if (!sealed || active != 0) return;
+            snapshot = List.copyOf(releaseErrors);
+        }
+        cleanupFailures.completeFromRuntime(snapshot);
+        if (snapshot.isEmpty()) done.completeFromRuntime(null);
+        else done.failFromRuntime(new TaskOwnedLeases.CleanupFailure(snapshot));
     }
 
     /** Stop admitting new children but let existing children complete normally. */
@@ -86,7 +151,7 @@ public final class TaskScope implements AutoCloseable {
             sealed = true;
             publish = active == 0;
         }
-        if (publish) done.completeFromRuntime(null);
+        if (publish) publishCompletion();
     }
 
     /** Cancel owned children and seal admission. Does not wait for execution. */
@@ -105,7 +170,7 @@ public final class TaskScope implements AutoCloseable {
             synchronized (admissionLock) {
                 publish = active == 0;
             }
-            if (publish) done.completeFromRuntime(null);
+            if (publish) publishCompletion();
         }
     }
 
@@ -124,6 +189,24 @@ public final class TaskScope implements AutoCloseable {
      */
     public OresFuture<Void> getDone() {
         return done;
+    }
+
+    /** Child logical-lease release failures, fixed before scope retirement. */
+    public OresFuture<List<Throwable>> cleanupFailures() {
+        return cleanupFailures;
+    }
+
+    /**
+     * First failed/cancelled child observed by this scope, if any.
+     *
+     * <p>Callers using this for source structured-concurrency semantics should
+     * inspect it only after {@link #getDone()} has settled. It carries no
+     * cancellation or retirement authority.</p>
+     */
+    public TaskHandle.TaskOutcome<?> firstNonSuccessOutcome() {
+        synchronized (admissionLock) {
+            return firstNonSuccess;
+        }
     }
 
     /** Requests cancellation without joining; notification hooks may still take time. */
