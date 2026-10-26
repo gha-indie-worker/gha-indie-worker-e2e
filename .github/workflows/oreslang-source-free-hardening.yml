@@ -69,3 +69,6 @@ jobs:
           set -euo pipefail
           rustc --version
           cargo --version
+      - name: Prove source-free semantic hardening invariants
+        shell: bash
+        run: bash source-free-carrier/semantic-invariants.sh
