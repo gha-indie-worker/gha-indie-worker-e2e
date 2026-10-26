@@ -189,7 +189,52 @@ struct SourceFuturePipelineI64Binding {
     // Set only after the complete ownership pass succeeds for the compilation
     // unit. Codegen must never consume a merely type-staged plan.
     bool ownership_admitted = false;
+    // Deterministic compiler-only snapshot of the exact producer/stage/plan
+    // shape authorized by ownership. Any post-admission rewrite must change
+    // this value and therefore lose lowering authority.
+    std::uint64_t ownership_authority_fingerprint = 0;
 };
+
+inline std::uint64_t future_pipeline_authority_fingerprint(
+        const SourceFuturePipelineI64Binding& pipeline) noexcept {
+    // FNV-1a is used only as a compact stale-proof detector inside one
+    // compilation. This is not a cryptographic capability or persisted ABI.
+    std::uint64_t hash = UINT64_C(1469598103934665603);
+    const auto byte = [&](std::uint8_t value) {
+        hash ^= value;
+        hash *= UINT64_C(1099511628211);
+    };
+    const auto u64 = [&](std::uint64_t value) {
+        for (unsigned shift = 0; shift < 64; shift += 8)
+            byte(static_cast<std::uint8_t>(value >> shift));
+    };
+    const auto text = [&](std::string_view value) {
+        u64(static_cast<std::uint64_t>(value.size()));
+        for (unsigned char ch : value) byte(ch);
+    };
+
+    text(pipeline.name);
+    text(pipeline.producer_function);
+    byte(pipeline.root_consumed ? 1u : 0u);
+    u64(static_cast<std::uint64_t>(pipeline.stages.size()));
+    for (const auto& stage : pipeline.stages) text(stage);
+    u64(static_cast<std::uint64_t>(pipeline.plans.size()));
+    for (const auto& plan : pipeline.plans) {
+        u64(plan.declaration_identity);
+        u64(plan.pipeline_node_identity);
+        u64(static_cast<std::uint64_t>(plan.prior_effects.bits));
+        u64(static_cast<std::uint64_t>(plan.stage_effects.bits));
+        u64(static_cast<std::uint64_t>(plan.cumulative_effects.bits));
+        byte(static_cast<std::uint8_t>(plan.effect_provenance));
+        byte(static_cast<std::uint8_t>(plan.input_ownership));
+        byte(static_cast<std::uint8_t>(plan.produced_future_ownership));
+        byte(static_cast<std::uint8_t>(plan.produced_future_provenance));
+        byte(plan.flattens_future ? 1u : 0u);
+        byte(plan.root_stage ? 1u : 0u);
+    }
+    // Reserve zero for "never authorized".
+    return hash == 0 ? UINT64_C(1) : hash;
+}
 
 struct ActorSend {
     std::string reference;
