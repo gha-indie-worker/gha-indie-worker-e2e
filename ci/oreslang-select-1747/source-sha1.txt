@@ -1,4 +1,4 @@
-# Exact blobs from oreslang-source.java 7b65b0f8e67c28de6a2e91a8dd91eaada44d8acc
+# Exact blobs from oreslang-source.java 773e09aa26b7909d3b55d38104f8ee7d50f2f011
 8cf5eb37b685834ba79860d2fb693efc319c51e3 pom.xml
 cfedb13b9c5dbe672a7ebcc06fcabfe2e7445414 src/main/java/dev/oreslang/ast/AnnotationExpander.java
 8dda8b0aecb15b729f7a7229f0c6f77dede3c384 src/main/java/dev/oreslang/ast/Ast.java
@@ -145,18 +145,22 @@ ec9d0cacda9ca77863d916bfecc8cf5fffecc34f src/main/java/dev/oreslang/types/EcsAcc
 d8ead1ba509a5944ac09bc90ab8f32eda4189b50 src/main/java/dev/oreslang/types/EffectContracts.java
 4d67876a059751bd944bc654c5636b1611d8e096 src/main/java/dev/oreslang/types/GenericCallArguments.java
 386789e9fb35a43a36e37e2fa49201de7c7b67f2 src/main/java/dev/oreslang/types/NativeArrayResultWire.java
+b42eb370b486b7c69810b009994ff0c304cc4d19 src/main/java/dev/oreslang/types/OwnershipChecker.java
 ac13e5906aa17e43759df4067ea254f692ddae8b src/main/java/dev/oreslang/types/ReturnCleanupChecker.java
 ac58abf9328959e809522f050ad067879c76339d src/main/java/dev/oreslang/types/ScopedRequestBorrowPreflight.java
 36765943d51e2622792d043bd66fa00377c5f654 src/main/java/dev/oreslang/types/ScopedTaskReadAuthority.java
 afc7b5a7e5d156cb66c56f1de66d78d0189b681d src/main/java/dev/oreslang/types/ThreadSafetyTraits.java
 6b6183da332f44de84ae9e6e17e73a910b459aae src/main/java/dev/oreslang/types/TypeAutoTraits.java
+cd7ec0ee79fed931819725392c3117211e18e09d src/main/java/dev/oreslang/types/TypeChecker.java
 448b0add530e84adb0161b3f2bcf2def10a4d409 src/main/java/dev/oreslang/types/TypeclassRegistry.java
 71dce151c2348e69bec42ae8b80111a355eb2b08 src/main/java/dev/oreslang/types/Types.java
 44e23c91c50f034ca3c7f4fc315b97f45c7c1eac src/main/java/module-info.java
 b7d162e2377f6c75c883fdcbbee71b7ccfeb892a src/main/resources/META-INF/native-image/dev.oreslang/oreslang/native-image.properties
 fe79bd59fe84643d6ff8dc3c4415b36d9d0721e4 src/main/resources/META-INF/native-image/dev.oreslang/oreslang/reachability-metadata.json
 b955e41c44c30d2e58a52ce6b91918ee5beb1591 src/test/java/dev/oreslang/parser/FuturePipelineProvenanceCheck.java
-e1829ca69dd5aac7fd45fe0d0e47f5bdbe2d7cd8 src/test/java/dev/oreslang/runtime/TaskPipelineTest.java
+b375c74302fb4fc41c6418f142c5846f2d7b613a src/test/java/dev/oreslang/parser/FuturePipelineTypingCheck.java
+f45ec2301c81702436acc2858b66a538019b1714 src/test/java/dev/oreslang/runtime/TaskPipelineTest.java
+44c5a03d25bf2bbe6609404f0f4fb63f2dee3e8b src/test/java/dev/oreslang/SourcePureFuturePipelineExecutionTest.java
 fec71c8ae3e9c0e8828b712a1a9d78a26948e0ea stdlib/actor_persistence.ores
 dd5e64e09e9a4b2606e4a685a60ad0bc00f45aea stdlib/assert.ores
 a23eb7feff83028225317c246be8ec516856c29f stdlib/compute.ores

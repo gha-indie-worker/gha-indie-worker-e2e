@@ -36,18 +36,13 @@ jobs:
             test "$(git hash-object "$file")" = "$expected"
             n=$((n+1))
           done < source-sha1.txt
-          test "$n" -eq 167
+          test "$n" -eq 171
           echo "verified $n source blob SHAs"
-      - name: Verify proposed compiler/test blobs and hardened runtime
+      - name: Verify proposed source fixes
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/runtime/TaskPipeline.java)" = "87be82c4dfbf6231d70aad9197f9fcaf255cd74d"
-          test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/types/TypeChecker.java)" = "48e2c81bc1582212c5b12d3352e54f7277a1c05b"
-          test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/types/OwnershipChecker.java)" = "5e99a657c3cdb4ad9a1079adf039b47accbc7c30"
-          test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/nodes/OresEvalRootNode.java)" = "e9f51ec880f448a1fd5c2576165987f25181c3d2"
-          test "$(git hash-object ci/oreslang-select-1747/src/test/java/dev/oreslang/parser/FuturePipelineTypingCheck.java)" = "b29c22efb6d357d4706446143abae20561e70231"
-          test "$(git hash-object ci/oreslang-select-1747/src/test/java/dev/oreslang/SourcePureFuturePipelineExecutionTest.java)" = "8971b4084474f4395e5bb6249dbaa911d7042ff1"
+          test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/nodes/OresEvalRootNode.java)" = "7ee3f8a595132027b42cda77795fd8029a26c486"
           test "$(git hash-object ci/oreslang-select-1747/src/test/java/dev/oreslang/parser/FuturePipelineProvenanceTest.java)" = "a8e25eae205782a188bd3835d7a14b0d79162cfe"
       - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:

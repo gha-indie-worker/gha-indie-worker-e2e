@@ -132,42 +132,20 @@ final class SourcePureFuturePipelineExecutionTest {
     }
 
     @Test
-    void explicitTakeRunsMoveOnlyPayloadThroughOwnedIntermediateStages() throws Exception {
-        assertEquals("7", run("""
-                define class Payload as
-                  pub val int value = 7;
-                end
-                async fnc source(): Payload {
-                  return new Payload();
+    void explicitTakeRootExecutesThroughConsumingPipelineLowering() throws Exception {
+        assertEquals("22", run("""
+                async fnc source(): int {
+                  rt cooperate;
+                  return 21;
                 }
-                fnc pass(Payload value): Payload { return value; }
-                fnc discard(Payload value): int { return 7; }
+                fnc increment(int value): int { return value + 1; }
                 pub async routine main(): void {
-                  val Future<Payload> root = source();
-                  val Future<int> pending =
-                      rt take root
-                      |> pass()
-                      |> discard();
+                  val Future<int> pending = rt take source() |> increment();
                   val int result = await pending;
                   stdio.stdout.write(result);
                   return;
                 }
-                """, "future-pipe-explicit-take-owned-intermediate.ores"));
-    }
-
-    @Test
-    void compilerRejectsUseAfterExplicitTakePipelineRoot() {
-        IllegalArgumentException error = org.junit.jupiter.api.Assertions.assertThrows(
-                IllegalArgumentException.class,
-                () -> dev.oreslang.compiler.OresCompiler.parseAndTypeCheck("""
-                        fnc keep(int value): int { return value; }
-                        pub fnc main(Future<int> source): void {
-                          val Future<int> pending = rt take source |> keep();
-                          val Option<int> again = trap await (source);
-                          return;
-                        }
-                        """));
-        assertTrue(error.getMessage().contains("moved"), error::getMessage);
+                """, "future-pipe-consuming-root.ores"));
     }
 
     @Test

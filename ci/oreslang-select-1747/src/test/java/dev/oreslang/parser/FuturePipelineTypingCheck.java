@@ -240,44 +240,77 @@ public final class FuturePipelineTypingCheck {
                 }
                 """, "borrowed Future pipeline input requires a Send + Share payload");
 
-
-        Ast.Program consumedMoveOnly = TypeChecker.check(Parser.parse("""
-                define class Payload as
-                  pub val int value = 1;
-                end
-                fnc pass(Payload value): Payload { return value; }
-                fnc discard(Payload value): int { return 1; }
-                fnc main(Future<Payload> source): void {
-                  val Future<int> pending = rt take source |> pass() |> discard();
+        // Explicit rt take transfers the root Future. Send-only Box<T> may
+        // therefore cross that root edge, and the next edge is pipeline-owned
+        // rather than being reclassified as another borrowed observation.
+        Ast.Program consumedChain = TypeChecker.check(Parser.parse("""
+                fnc keep_box(Box<int> value): Box<int> { return value; }
+                fnc discard(Box<int> value): int { return 1; }
+                fnc main(Future<Box<int>> source): void {
+                  val Future<int> pending = rt take source |> keep_box() |> discard();
                   return;
                 }
                 """));
-        Ast.FunctionDecl consumedMoveOnlyMain = (Ast.FunctionDecl)
-                consumedMoveOnly.modules().getFirst().declarations().get(3);
+        Ast.FunctionDecl consumedMain = (Ast.FunctionDecl)
+                consumedChain.modules().getFirst().declarations().get(2);
         Ast.CallExpr consumedOuter = (Ast.CallExpr)
-                ((Ast.BindingStmt) consumedMoveOnlyMain.body().getFirst()).initializer();
-        Ast.CallExpr consumedInner = (Ast.CallExpr) consumedOuter.arguments().getFirst();
+                ((Ast.BindingStmt) consumedMain.body().getFirst()).initializer();
+        Ast.CallExpr consumedRoot = (Ast.CallExpr)
+                consumedOuter.arguments().getFirst();
         TypeChecker.PipelinePlan consumedRootPlan =
-                TypeChecker.CheckedFuturePipe.plan(consumedInner);
+                TypeChecker.CheckedFuturePipe.plan(consumedRoot);
         TypeChecker.PipelinePlan consumedOuterPlan =
                 TypeChecker.CheckedFuturePipe.plan(consumedOuter);
         if (consumedRootPlan == null
                 || consumedRootPlan.inputOwnership()
-                        != TypeChecker.PipelineInputOwnership.CONSUMED_UPSTREAM_OWNED_PAYLOAD
-                || consumedOuterPlan == null
+                        != TypeChecker.PipelineInputOwnership.CONSUMED_UPSTREAM_OWNED_PAYLOAD) {
+            throw new AssertionError("rt take root lost consuming pipeline ownership");
+        }
+        if (consumedOuterPlan == null
                 || consumedOuterPlan.inputOwnership()
                         != TypeChecker.PipelineInputOwnership.OWNED_PIPELINE_VALUE) {
-            throw new AssertionError(
-                    "consuming Future pipeline did not preserve root/internal ownership states");
+            throw new AssertionError("later pipeline edge did not become pipeline-owned");
         }
         if (consumedRootPlan.effectProvenance()
                 != TypeChecker.PipelineEffectProvenance.UPSTREAM_FUTURE_UNKNOWN
                 || consumedOuterPlan.effectProvenance()
-                != TypeChecker.PipelineEffectProvenance.UPSTREAM_FUTURE_UNKNOWN) {
-            throw new AssertionError(
-                    "rt take incorrectly upgraded opaque Future effect provenance");
+                        != TypeChecker.PipelineEffectProvenance.UPSTREAM_FUTURE_UNKNOWN) {
+            throw new AssertionError("rt take incorrectly upgraded opaque Future effect provenance");
         }
 
+        // The pipeline proof must reuse canonical rt take move tracking. A
+        // source binding cannot be observed again after it was transferred.
+        rejected("""
+                fnc discard(Box<int> value): int { return 1; }
+                fnc main(Future<Box<int>> source): void {
+                  val Future<int> pending = rt take source |> discard();
+                  val Future<Box<int>> reused = source;
+                  return;
+                }
+                """, "moved");
+
+        // Keep the first implementation fail-closed: taking an already-lifted
+        // pipeline would need distinct cancellation/ownership reassociation.
+        rejected("""
+                fnc keep(int value): int { return value; }
+                fnc twice(int value): int { return value * 2; }
+                fnc main(Future<int> source): void {
+                  val Future<int> pending = rt take (source |> keep()) |> twice();
+                  return;
+                }
+                """, "taking an already-lifted pipeline is not yet supported");
+
+        // Consuming removes the Share requirement, not the Send requirement.
+        rejected("""
+                fnc discard(Rc<int> value): int { return 1; }
+                fnc main(Future<Rc<int>> source): void {
+                  val Future<int> pending = rt take source |> discard();
+                  return;
+                }
+                """, "owned Future pipeline input requires a Send payload");
+
+        // Ownership transfer is independent of effect provenance. A direct
+        // checked async producer remains COMPLETE_STATIC when explicitly taken.
         Ast.Program consumedDirectProducer = TypeChecker.check(Parser.parse("""
                 async fnc source(): int { return 21; }
                 fnc keep(int value): int { return value; }
@@ -301,32 +334,73 @@ public final class FuturePipelineTypingCheck {
                     "consumed direct async producer lost ownership/effect provenance");
         }
 
-        rejected("""
-                fnc keep(int value): int { return value; }
-                fnc main(Future<int> source): void {
-                  val Future<int> pending = rt take source |> keep();
-                  val Option<int> again = trap await (source);
-                  return;
-                }
-                """, "moved");
+        // A consumed pipeline that type-checks but fails ownership later must
+        // not publish executable authority for its already-staged pipe.
+        TypeChecker.TypeCheckResult consumedOwnershipPending =
+                TypeChecker.checkTypesWithDiagnostics(Parser.parse("""
+                        fnc keep(int value): int { return value; }
+                        fnc main(Future<int> source): void {
+                          val Future<int> pending = rt take source |> keep();
+                          val Option<int> reused = trap await (source);
+                          return;
+                        }
+                        """));
+        Ast.FunctionDecl consumedOwnershipMain = (Ast.FunctionDecl)
+                consumedOwnershipPending.program().modules().getFirst().declarations().get(1);
+        Ast.CallExpr consumedOwnershipPipe = (Ast.CallExpr)
+                ((Ast.BindingStmt) consumedOwnershipMain.body().getFirst()).initializer();
+        if (!consumedOwnershipPending.pendingFutureStages().containsKey(consumedOwnershipPipe)) {
+            throw new AssertionError("consumed pipeline was not staged before ownership admission");
+        }
+        try {
+            TypeChecker.check(consumedOwnershipPending.program());
+            throw new AssertionError("use-after-take unexpectedly passed ownership admission");
+        } catch (IllegalArgumentException expected) {
+            if (expected.getMessage() == null || !expected.getMessage().contains("moved")) {
+                throw new AssertionError(
+                        "wrong consumed ownership rejection: " + expected.getMessage(), expected);
+            }
+            if (TypeChecker.CheckedFuturePipe.lookup(consumedOwnershipPipe)) {
+                throw new AssertionError(
+                        "ownership-failed consumed pipeline published executable authority");
+            }
+        }
 
-        rejected("""
-                fnc discard(Rc<int> value): int { return 1; }
-                fnc main(Future<Rc<int>> source): void {
-                  val Future<int> pending = rt take source |> discard();
-                  return;
-                }
-                """, "owned Future pipeline input requires a Send payload");
-
-        rejected("""
-                async fnc source(): int { return 21; }
-                fnc keep(int value): int { return value; }
-                fnc main(): void {
-                  val Future<int> pending =
-                      rt take (source() |> keep()) |> keep();
-                  return;
-                }
-                """, "rt take must consume a Future binding or direct producer before Future pipeline lifting");
+        // Two consuming pipelines cannot both take the same affine Future.
+        // Failure of the second take must keep both staged plans unpublished.
+        TypeChecker.TypeCheckResult repeatedTakePending =
+                TypeChecker.checkTypesWithDiagnostics(Parser.parse("""
+                        fnc keep(int value): int { return value; }
+                        fnc main(Future<int> source): void {
+                          val Future<int> first = rt take source |> keep();
+                          val Future<int> second = rt take source |> keep();
+                          return;
+                        }
+                        """));
+        Ast.FunctionDecl repeatedTakeMain = (Ast.FunctionDecl)
+                repeatedTakePending.program().modules().getFirst().declarations().get(1);
+        Ast.CallExpr firstTakePipe = (Ast.CallExpr)
+                ((Ast.BindingStmt) repeatedTakeMain.body().get(0)).initializer();
+        Ast.CallExpr secondTakePipe = (Ast.CallExpr)
+                ((Ast.BindingStmt) repeatedTakeMain.body().get(1)).initializer();
+        if (!repeatedTakePending.pendingFutureStages().containsKey(firstTakePipe)
+                || !repeatedTakePending.pendingFutureStages().containsKey(secondTakePipe)) {
+            throw new AssertionError("repeated take pipelines were not both staged");
+        }
+        try {
+            TypeChecker.check(repeatedTakePending.program());
+            throw new AssertionError("second rt take of the same Future unexpectedly passed");
+        } catch (IllegalArgumentException expected) {
+            if (expected.getMessage() == null || !expected.getMessage().contains("moved")) {
+                throw new AssertionError(
+                        "wrong repeated-take rejection: " + expected.getMessage(), expected);
+            }
+            if (TypeChecker.CheckedFuturePipe.lookup(firstTakePipe)
+                    || TypeChecker.CheckedFuturePipe.lookup(secondTakePipe)) {
+                throw new AssertionError(
+                        "failed repeated-take admission published a pipeline proof");
+            }
+        }
 
         Ast.Program syncFutureStage = TypeChecker.check(Parser.parse("""
                 async fnc source(): int { return 21; }

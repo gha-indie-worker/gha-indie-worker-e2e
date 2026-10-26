@@ -801,6 +801,32 @@ final class TaskPipelineTest {
     }
 
     @Test
+    void stageCannotReregisterConsumedPipelineInputAsStageOwned() throws Exception {
+        OresFuture<Integer> owned = new OresFuture<>();
+        try (OresScheduler scheduler = new OresScheduler(1)) {
+            TaskPipeline.PipelineHandle<Integer> handle =
+                    TaskPipeline.startOwnedInCurrentTaskOrRoot(
+                            scheduler,
+                            owned,
+                            List.of(value -> TaskPipeline.owned(owned)));
+            awaitWaiter(owned);
+            assertTrue(owned.completeFromRuntime(1));
+
+            ExecutionException error = assertThrows(
+                    ExecutionException.class,
+                    () -> handle.result().get(5, TimeUnit.SECONDS));
+            assertInstanceOf(IllegalArgumentException.class, error.getCause());
+            assertTrue(error.getCause().getMessage().contains(
+                    "cannot re-register its owned input Future as stage-owned work"),
+                    error::toString);
+            assertFalse(owned.isCancelled(),
+                    "completed consumed root must not be rewritten by the rejected stage claim");
+            assertInstanceOf(TaskHandle.Failure.class,
+                    handle.getDone().get(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
     void stageCannotClaimBorrowedPipelineInputAsOwned() throws Exception {
         OresFuture<Integer> shared = new OresFuture<>();
         try (OresScheduler scheduler = new OresScheduler(1)) {

@@ -5059,24 +5059,24 @@ public final class OresEvalRootNode extends RootNode {
                     });
         }
 
-        /** The direct producer, not an eagerly invoked intermediate stage. */
+        /** The root Future expression, not an eagerly invoked deferred stage. */
         private Ast.Expr checkedFuturePipeInput(Ast.CallExpr pipe) {
             Ast.Expr upstream = pipe;
             int depth = 0;
             while (upstream instanceof Ast.CallExpr stage
                     && TypeChecker.CheckedFuturePipe.lookup(stage)) {
-                if (++depth > 128) throw new IllegalStateException("checked pipeline exceeds 128 stages");
+                if (++depth > 128) {
+                    throw new IllegalStateException("checked pipeline exceeds 128 stages");
+                }
                 upstream = stage.arguments().getFirst();
             }
             return upstream;
         }
 
         /**
-         * Lower an entire checked chain into one scheduler Task. The innermost
-         * plan records whether the root Future is borrowed or explicitly moved
-         * with rt take; every later stage must consume only pipeline-owned
-         * intermediate values. No stage arguments, borrows, effects or actor
-         * continuations are admitted by this proof.
+         * Lower an entire checked chain into one scheduler Task. The first
+         * plan determines whether the root Future is borrowed or was consumed
+         * by rt take; every later edge must be pipeline-owned.
          */
         private Object startCheckedFuturePipe(Ast.CallExpr pipe, Object upstream) {
             if (ActorRuntime.inActorExecution()) {
@@ -5087,6 +5087,7 @@ public final class OresEvalRootNode extends RootNode {
                 throw new IllegalStateException(
                         "checked Future pipeline producer did not yield a Future");
             }
+
             List<Ast.CallExpr> backwards = new ArrayList<>();
             Ast.Expr current = pipe;
             while (current instanceof Ast.CallExpr stage
@@ -5097,8 +5098,23 @@ public final class OresEvalRootNode extends RootNode {
                 backwards.add(stage);
                 current = stage.arguments().getFirst();
             }
+            if (backwards.isEmpty()) {
+                throw new IllegalStateException("checked Future pipeline has no stages");
+            }
+
+            Ast.CallExpr rootStage = backwards.get(backwards.size() - 1);
+            TypeChecker.PipelinePlan rootPlan =
+                    TypeChecker.CheckedFuturePipe.plan(rootStage);
+            if (rootPlan == null
+                    || rootPlan.inputOwnership()
+                            == TypeChecker.PipelineInputOwnership.OWNED_PIPELINE_VALUE) {
+                throw new IllegalStateException(
+                        "checked Future pipeline root ownership plan is missing or invalid");
+            }
+            boolean ownsInput = rootPlan.inputOwnership()
+                    == TypeChecker.PipelineInputOwnership.CONSUMED_UPSTREAM_OWNED_PAYLOAD;
+
             List<TaskPipeline.Stage> stages = new ArrayList<>(backwards.size());
-            TypeChecker.PipelineInputOwnership rootOwnership = null;
             for (int i = backwards.size() - 1; i >= 0; i--) {
                 Ast.CallExpr call = backwards.get(i);
                 if (!(call.callee() instanceof Ast.NameExpr name)
@@ -5108,30 +5124,18 @@ public final class OresEvalRootNode extends RootNode {
                 TypeChecker.PipelinePlan plan =
                         TypeChecker.CheckedFuturePipe.plan(call);
                 Ast.FunctionDecl target = plan == null ? null : plan.target();
+                TypeChecker.PipelineInputOwnership expectedOwnership =
+                        i == backwards.size() - 1
+                                ? rootPlan.inputOwnership()
+                                : TypeChecker.PipelineInputOwnership.OWNED_PIPELINE_VALUE;
                 if (target == null || !target.name().equals(name.name())
                         || target.parameters().size() != 1
+                        || plan.inputOwnership() != expectedOwnership
                         || !plan.stageEffects().isEmpty()) {
                     throw new IllegalStateException(
                             "checked Future stage plan is missing or incompatible");
                 }
-                if (i == backwards.size() - 1) {
-                    rootOwnership = plan.inputOwnership();
-                    if (rootOwnership
-                                    != TypeChecker.PipelineInputOwnership.BORROWED_UPSTREAM_SHARED_PAYLOAD
-                            && rootOwnership
-                                    != TypeChecker.PipelineInputOwnership.CONSUMED_UPSTREAM_OWNED_PAYLOAD) {
-                        throw new IllegalStateException(
-                                "checked Future pipeline root has invalid ownership");
-                    }
-                } else if (plan.inputOwnership()
-                        != TypeChecker.PipelineInputOwnership.OWNED_PIPELINE_VALUE) {
-                    throw new IllegalStateException(
-                            "checked Future pipeline intermediate lost pipeline ownership");
-                }
-                // Invoke the exact declaration admitted by the type checker.
-                // The plan, not target.async(), decides whether the invocation
-                // produces one Future layer to flatten: synchronous functions
-                // returning Future<T> participate too.
+
                 stages.add(value -> {
                     Object produced = invoke(functionInvocation(target, List.of(value)));
                     if (plan.producedFutureOwnership()
@@ -5149,20 +5153,15 @@ public final class OresEvalRootNode extends RootNode {
                     return produced;
                 });
             }
+
             OresScheduler scheduler = OresScheduler.current();
             if (scheduler == null) scheduler = context.vm().rootScheduler();
-            if (rootOwnership
-                    == TypeChecker.PipelineInputOwnership.CONSUMED_UPSTREAM_OWNED_PAYLOAD) {
-                return TaskPipeline.<Object>startOwnedInCurrentTaskOrRoot(
-                        scheduler, input, stages).result();
-            }
-            if (rootOwnership
-                    != TypeChecker.PipelineInputOwnership.BORROWED_UPSTREAM_SHARED_PAYLOAD) {
-                throw new IllegalStateException(
-                        "checked Future pipeline root ownership was not established");
-            }
-            return TaskPipeline.<Object>startInCurrentTaskOrRoot(
-                    scheduler, input, stages).result();
+            return (ownsInput
+                    ? TaskPipeline.<Object>startOwnedInCurrentTaskOrRoot(
+                            scheduler, input, stages)
+                    : TaskPipeline.<Object>startInCurrentTaskOrRoot(
+                            scheduler, input, stages))
+                    .result();
         }
 
         private void evalSuspendableCall(
