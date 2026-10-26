@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           test ! -e private-oreslang-source
           echo "private_source_bytes=0"
-          echo "model_for_java_head=561998f15e3f804f8d1ced30f55510a425f6dbf3"
+          echo "model_for_java_head=844bb0851cb6335f05a376345495054fb445846f"
       - name: Compile and run exact-incarnation model
         shell: bash
         run: |
@@ -89,6 +89,23 @@ jobs:
                       return new Exchange(stateOwner, stateGeneration);
                   }
               }
+              static final class Group {
+                  final java.util.Map<Id, Ref> members = new java.util.HashMap<>();
+                  void join(Ref ref) {
+                      Ref existing = members.get(ref.id);
+                      if (existing == ref) return;
+                      if (existing != null) {
+                          throw new IllegalStateException("logical id already bound");
+                      }
+                      members.put(ref.id, ref);
+                  }
+                  boolean isMember(Ref ref) {
+                      return members.get(ref.id) == ref;
+                  }
+                  void leave(Ref ref) {
+                      members.remove(ref.id, ref);
+                  }
+              }
               private static void require(boolean value, String message) {
                   if (!value) throw new AssertionError(message);
               }
@@ -131,7 +148,22 @@ jobs:
                   require(!moved.accessibleBy(forgedSameFields),
                           "forged same-fields ref inherited HTTP exchange authority");
 
-                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=11 private_source_bytes=0");
+                  Group group = new Group();
+                  group.join(owner);
+                  require(group.isMember(owner), "exact group member rejected");
+                  require(!group.isMember(restarted), "same-id restart inherited group membership");
+                  require(!group.isMember(forgedSameFields), "forged ref inherited group membership");
+                  boolean collisionRejected = false;
+                  try { group.join(restarted); }
+                  catch (IllegalStateException expected) { collisionRejected = true; }
+                  require(collisionRejected, "replacement overtook live same-id group member");
+                  group.leave(owner);
+                  group.join(restarted);
+                  require(group.isMember(restarted), "replacement could not explicitly rejoin after retirement");
+                  group.leave(owner);
+                  require(group.isMember(restarted), "stale retirement evicted replacement membership");
+
+                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=17 private_source_bytes=0");
               }
           }
           JAVA
