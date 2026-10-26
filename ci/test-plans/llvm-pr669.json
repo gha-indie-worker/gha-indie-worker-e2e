@@ -1,0 +1,60 @@
+{
+  "schema": "ores-private-ci-test-plan-v1",
+  "source_repo": "ores-truffle-oreslang/oreslang-source.llvm",
+  "allowed_prs": [
+    669
+  ],
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "-I",
+        "scripts/verify_actor_carrier_exclusivity.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300
+    },
+    {
+      "argv": [
+        "python3",
+        "-I",
+        "scripts/verify_actor_dispatch_tickets.py"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300
+    },
+    {
+      "argv": [
+        "cmake",
+        "-S",
+        ".",
+        "-B",
+        "build-private-ci",
+        "-DCMAKE_BUILD_TYPE=Release"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600
+    },
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "build-private-ci",
+        "--parallel",
+        "2"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build-private-ci",
+        "--output-on-failure"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800
+    }
+  ]
+}

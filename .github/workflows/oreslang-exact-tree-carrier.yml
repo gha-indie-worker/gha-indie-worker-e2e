@@ -1,0 +1,148 @@
+name: Oreslang private carrier security
+on:
+  pull_request:
+  push:
+    branches:
+      - 'ci/oreslang-*'
+permissions:
+  contents: read
+jobs:
+  verifier-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Source-free verifier regression suite
+        run: python3 scripts/test-oreslang-private-carrier.py
+      - name: Source-free trusted-plan runner regression suite
+        run: python3 scripts/test-run-oreslang-test-plan.py
+      - name: Source-free live-main policy regression suite
+        run: python3 scripts/test-check-carrier-main-policy.py
+
+  verify-carrier:
+    if: github.event_name == 'push' && startsWith(github.ref_name, 'ci/oreslang-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Validate live carrier identity and dispatcher authorization before checkout
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "opto-sync-test/go-java-validation"
+          test "$GITHUB_REPOSITORY_ID" = "1323598177"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_REF_NAME" =~ ^ci/oreslang-[0-9a-f]{40}$ ]]
+
+          live="$RUNNER_TEMP/oreslang-live-carrier.json"
+          main_branch="$RUNNER_TEMP/oreslang-live-main.json"
+          source_commit="$RUNNER_TEMP/oreslang-source-bearing-commit.json"
+          gh api 'repos/opto-sync-test/go-java-validation' > "$live"
+          gh api 'repos/opto-sync-test/go-java-validation/branches/main' > "$main_branch"
+          gh api "repos/opto-sync-test/go-java-validation/git/commits/$GITHUB_SHA" > "$source_commit"
+          python3 scripts/check-carrier-main-policy.py \
+            --repo-json "$live" \
+            --branch-json "$main_branch" \
+            --commit-json "$source_commit" \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-id "$GITHUB_REPOSITORY_ID" \
+            --head-sha "$GITHUB_SHA"
+
+          authorization_ref="ci/authorized-$GITHUB_SHA"
+          authorization_json="$RUNNER_TEMP/oreslang-authorization-ref.json"
+          authorized=false
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            if gh api "repos/opto-sync-test/go-java-validation/git/ref/heads/$authorization_ref"                 > "$authorization_json" 2>/dev/null; then
+              python3 -I - "$authorization_json" "$authorization_ref" "$GITHUB_SHA" <<'PY'
+          import json, sys
+          from pathlib import Path
+          raw=Path(sys.argv[1]).read_bytes()
+          if not raw or len(raw)>1024*1024 or raw.startswith(b"\xef\xbb\xbf"):
+              raise SystemExit("invalid authorization-ref response")
+          def unique(pairs):
+              out={}
+              for key,value in pairs:
+                  if key in out:
+                      raise SystemExit("duplicate authorization-ref key")
+                  out[key]=value
+              return out
+          try:
+              doc=json.loads(raw.decode("utf-8"),object_pairs_hook=unique)
+          except (UnicodeError,ValueError,RecursionError) as exc:
+              raise SystemExit("invalid authorization-ref JSON") from exc
+          obj=doc.get("object") if type(doc) is dict else None
+          if (doc.get("ref") != "refs/heads/"+sys.argv[2]
+                  or type(obj) is not dict
+                  or obj.get("type") != "commit"
+                  or obj.get("sha") != sys.argv[3]):
+              raise SystemExit("authorization ref does not bind event payload")
+          PY
+              authorized=true
+              break
+            fi
+            sleep 5
+          done
+          test "$authorized" = "true" || {
+            echo "::error::Missing exact dispatcher authorization ref"
+            exit 1
+          }
+          echo "CARRIER_AUTHORIZATION_REF_PASS"
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+          clean: true
+
+      - name: Verify exact-tree carrier provenance
+        env:
+          GITHUB_REPOSITORY_ID: ${{ github.repository_id }}
+        run: python3 scripts/verify-oreslang-private-carrier.py
+
+      - name: Recheck dispatcher authorization before source tests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          live="$RUNNER_TEMP/oreslang-live-carrier-recheck.json"
+          main_branch="$RUNNER_TEMP/oreslang-live-main-recheck.json"
+          source_commit="$RUNNER_TEMP/oreslang-source-bearing-commit-recheck.json"
+          gh api 'repos/opto-sync-test/go-java-validation' > "$live"
+          gh api 'repos/opto-sync-test/go-java-validation/branches/main' > "$main_branch"
+          gh api "repos/opto-sync-test/go-java-validation/git/commits/$GITHUB_SHA" > "$source_commit"
+          python3 scripts/check-carrier-main-policy.py \
+            --repo-json "$live" \
+            --branch-json "$main_branch" \
+            --commit-json "$source_commit" \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-id "$GITHUB_REPOSITORY_ID" \
+            --head-sha "$GITHUB_SHA"
+          marker="ci/authorized-$GITHUB_SHA"
+          response="$RUNNER_TEMP/oreslang-authorization-recheck.json"
+          gh api "repos/opto-sync-test/go-java-validation/git/ref/heads/$marker" > "$response"
+          python3 -I - "$response" "$marker" "$GITHUB_SHA" <<'PY'
+          import json, sys
+          from pathlib import Path
+          raw=Path(sys.argv[1]).read_bytes()
+          if not raw or len(raw)>1024*1024 or raw.startswith(b"\xef\xbb\xbf"):
+              raise SystemExit("invalid authorization recheck response")
+          try:
+              doc=json.loads(raw.decode("utf-8"))
+          except (UnicodeError,ValueError) as exc:
+              raise SystemExit("invalid authorization recheck JSON") from exc
+          obj=doc.get("object") if isinstance(doc,dict) else None
+          if (doc.get("ref")!="refs/heads/"+sys.argv[2]
+                  or not isinstance(obj,dict)
+                  or obj.get("type")!="commit"
+                  or obj.get("sha")!=sys.argv[3]):
+              raise SystemExit("dispatcher authorization revoked or changed")
+          PY
+          echo "CARRIER_AUTHORIZATION_RECHECK_PASS"
+
+      - name: Execute immutable trusted test plan
+        run: python3 scripts/run-oreslang-test-plan.py

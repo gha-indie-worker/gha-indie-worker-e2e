@@ -1,0 +1,33 @@
+{
+  "schema": "ores-private-ci-test-plan-v1",
+  "source_repo": "ores-truffle-oreslang/oreslang-platform-conformance",
+  "allowed_prs": [
+    121
+  ],
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_actor_control_formal.py",
+        "-v"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300
+    },
+    {
+      "argv": [
+        "python3",
+        "formal/actor_control_model.py",
+        "--json"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300
+    }
+  ]
+}

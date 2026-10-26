@@ -1,0 +1,38 @@
+{
+  "schema": "ores-private-ci-test-plan-v1",
+  "source_repo": "ores-truffle-oreslang/oreslang-source.java",
+  "allowed_prs": [
+    1482
+  ],
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "-v",
+        "test_inverted_array_model"
+      ],
+      "cwd": "formal",
+      "timeout_seconds": 300
+    },
+    {
+      "argv": [
+        "python3",
+        "inverted_array_model.py"
+      ],
+      "cwd": "formal",
+      "timeout_seconds": 300
+    },
+    {
+      "argv": [
+        "mvn",
+        "-B",
+        "-ntp",
+        "test"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800
+    }
+  ]
+}

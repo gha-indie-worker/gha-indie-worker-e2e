@@ -1,0 +1,19 @@
+{
+  "schema": "ores-private-ci-test-plan-v1",
+  "source_repo": "synthetic/private",
+  "allowed_prs": [
+    1
+  ],
+  "commands": [
+    {
+      "argv": [
+        "python3",
+        "-c",
+        "print('SYNTHETIC_TRUSTED_PLAN_PASS')"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 30,
+      "stdout_contains": "SYNTHETIC_TRUSTED_PLAN_PASS"
+    }
+  ]
+}

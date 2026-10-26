@@ -1,0 +1,99 @@
+{
+  "schema": "ores-private-ci-test-plan-v1",
+  "source_repo": "ores-truffle-oreslang/oreslang-source.llvm",
+  "allowed_prs": [
+    674
+  ],
+  "commands": [
+    {
+      "argv": [
+        "g++",
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-Wpedantic",
+        "-Werror",
+        "-O2",
+        "-UNDEBUG",
+        "-I",
+        "src/main/cpp",
+        "tests/dop_multi_layout_formal_test.cpp",
+        "-o",
+        "/tmp/ores-dop-pr674-gcc"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600
+    },
+    {
+      "argv": [
+        "/tmp/ores-dop-pr674-gcc"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "stdout_contains": "NATIVE_DOP_MULTI_LAYOUT_FORMAL_PASS trials=216 subsets=7 negative=stale-write,forged-epoch,partial-write,bad-tile,absent"
+    },
+    {
+      "argv": [
+        "clang++",
+        "-std=c++20",
+        "-Wall",
+        "-Wextra",
+        "-Wpedantic",
+        "-Werror",
+        "-O1",
+        "-g",
+        "-UNDEBUG",
+        "-fsanitize=address,undefined",
+        "-fno-omit-frame-pointer",
+        "-I",
+        "src/main/cpp",
+        "tests/dop_multi_layout_formal_test.cpp",
+        "-o",
+        "/tmp/ores-dop-pr674-clang"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600
+    },
+    {
+      "argv": [
+        "/tmp/ores-dop-pr674-clang"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 300,
+      "stdout_contains": "NATIVE_DOP_MULTI_LAYOUT_FORMAL_PASS trials=216 subsets=7 negative=stale-write,forged-epoch,partial-write,bad-tile,absent"
+    },
+    {
+      "argv": [
+        "cmake",
+        "-S",
+        ".",
+        "-B",
+        "build-private-ci",
+        "-DCMAKE_BUILD_TYPE=Release"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 600
+    },
+    {
+      "argv": [
+        "cmake",
+        "--build",
+        "build-private-ci",
+        "--parallel",
+        "2"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800
+    },
+    {
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "build-private-ci",
+        "--output-on-failure"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800
+    }
+  ]
+}

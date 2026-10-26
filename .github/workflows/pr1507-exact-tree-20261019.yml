@@ -1,0 +1,36 @@
+name: Exact Oreslang PR1507 tree gate
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  exact-tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: feat/pr1507-exact-tree-e68ee52c-20261019
+          persist-credentials: false
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+      - name: Verify exact source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^{tree})" = "a035775278dfa8e90c3587f7588bb2c72f2f817e"
+          bash scripts/check-record-parser.sh
+          bash scripts/check-record-frontend.sh
+          mvn -B -ntp -Dtest=ComputedAggregateIndexBoundaryTest,DynamicPropertyAccessRuntimeTest,InferredRecordRuntimeTest test
+          mvn -B -ntp -Dtest=DynamicPropertyAccessBoundaryTest#entryIsNamedKeyValueProductAndPairShapeUsesTupleIndexing test
+          mvn -B -ntp -Dtest=NativeCliIoTest#parsesFullNativeStackCliSource test

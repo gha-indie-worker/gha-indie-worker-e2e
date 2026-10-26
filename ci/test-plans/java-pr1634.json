@@ -1,0 +1,30 @@
+{
+  "schema": "ores-private-ci-test-plan-v1",
+  "source_repo": "ores-truffle-oreslang/oreslang-source.java",
+  "allowed_prs": [
+    1634
+  ],
+  "commands": [
+    {
+      "argv": [
+        "mvn",
+        "-B",
+        "-ntp",
+        "-Dtest=EndDelimitedFunctionSyntaxTest",
+        "test"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1200
+    },
+    {
+      "argv": [
+        "mvn",
+        "-B",
+        "-ntp",
+        "test"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800
+    }
+  ]
+}

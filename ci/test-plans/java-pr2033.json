@@ -1,0 +1,44 @@
+{
+  "schema": "ores-private-ci-test-plan-v1",
+  "source_repo": "ores-truffle-oreslang/oreslang-source.java",
+  "allowed_prs": [
+    2033
+  ],
+  "required_source_blobs": {
+    "pom.xml": "8cf5eb37b685834ba79860d2fb693efc319c51e3",
+    "src/main/java/dev/oreslang/runtime/ActorRuntime.java": "66b9a4ab5ebb4006e65a1caef74e33cc66c3fd5f",
+    "src/main/java/dev/oreslang/runtime/ActorPipeTransport.java": "f5de9901364ad3f9282be735a336ad8c1bed70f7",
+    "src/test/java/dev/oreslang/runtime/ActorGroupCleanupFailureTest.java": "acfaf0658fdecbce99f39dbef9dcee1805fa5547",
+    "src/test/java/dev/oreslang/runtime/ActorPipeTransportTest.java": "7d25fa302572ce5f3afd929d82f4f428b08ab4b5",
+    "src/test/java/dev/oreslang/runtime/ActorGroupManagedWorkersReconciliationTest.java": "1c4f8b6493e5bcd046ad1a963afeb5ee6dfaaf04",
+    "src/test/java/dev/oreslang/runtime/ActorOutputStreamTest.java": "f9079cdcd2615b3716dd923c640c3a72b568acac"
+  },
+  "maven_pom_blob_sha": "8cf5eb37b685834ba79860d2fb693efc319c51e3",
+  "commands": [
+    {
+      "argv": [
+        "mvn",
+        "-B",
+        "-ntp",
+        "-o",
+        "-C",
+        "-Dtest=ActorGroupManagedWorkersReconciliationTest,ActorGroupCleanupFailureTest,ActorOutputStreamTest,ActorPipeTransportTest,ActorStopCleanupAdmissionTest,ActorSourceTearDownTest,ActorEndCleanupTest,ActorAsyncFinalizationBarrierTest,ActorCarrierIdentityCleanupTest,ActorAsyncTeardownGateTest,ActorTwoPhaseSourceSchedulerCloseTest,OresFutureHostRegistrationFailureTest,OresFutureTerminalAdmissionRetentionTest,OresFutureTerminalNotificationRaceTest,SupervisorCodeSlotTest,SupervisorStartCloseRaceTest",
+        "test"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1200
+    },
+    {
+      "argv": [
+        "mvn",
+        "-B",
+        "-ntp",
+        "-o",
+        "-C",
+        "test"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 1800
+    }
+  ]
+}
