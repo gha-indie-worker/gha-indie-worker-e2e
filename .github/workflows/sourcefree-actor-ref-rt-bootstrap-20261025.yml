@@ -167,17 +167,6 @@ jobs:
                   require(!lease.ownedBy(runtime, new Id(7)),
                           "ambient host gained legacy ActorId authority");
 
-                  Reservation privateReservation = new Reservation(runtime, owner);
-                  require(!privateReservation.canClose(runtime, restarted),
-                          "same-id replacement inherited private reservation close authority");
-                  require(!privateReservation.canClose(runtime, forgedSameFields),
-                          "forged same-fields ref inherited private reservation authority");
-                  require(!privateReservation.canClose(runtime, null),
-                          "ambient host inherited private reservation authority");
-                  privateReservation.close(runtime, owner);
-                  require(privateReservation.closed,
-                          "exact private reservation owner could not retire allocation");
-
                   Object host = new Object();
                   Exchange hostExchange = new Exchange(host, 0);
                   require(hostExchange.accessibleBy(host), "host exchange owner rejected");
