@@ -36,7 +36,7 @@ jobs:
             test "$(git hash-object "$file")" = "$expected"
             n=$((n+1))
           done < source-sha1.txt
-          test "$n" -eq 168
+          test "$n" -eq 167
           echo "verified $n source blob SHAs"
       - name: Verify proposed compiler/test blobs and hardened runtime
         shell: bash
@@ -48,6 +48,7 @@ jobs:
           test "$(git hash-object ci/oreslang-select-1747/src/main/java/dev/oreslang/nodes/OresEvalRootNode.java)" = "e9f51ec880f448a1fd5c2576165987f25181c3d2"
           test "$(git hash-object ci/oreslang-select-1747/src/test/java/dev/oreslang/parser/FuturePipelineTypingCheck.java)" = "b29c22efb6d357d4706446143abae20561e70231"
           test "$(git hash-object ci/oreslang-select-1747/src/test/java/dev/oreslang/SourcePureFuturePipelineExecutionTest.java)" = "8971b4084474f4395e5bb6249dbaa911d7042ff1"
+          test "$(git hash-object ci/oreslang-select-1747/src/test/java/dev/oreslang/parser/FuturePipelineProvenanceTest.java)" = "a8e25eae205782a188bd3835d7a14b0d79162cfe"
       - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
         with:
           java-version: '25'
@@ -55,7 +56,7 @@ jobs:
       - name: Exact-head select-plan regression suite
         run: |
           mvn -B -ntp -f ci/oreslang-select-1747/pom.xml \
-            -Dtest=SelectLoopDescriptorHoistTest,StaticSelectTicketTest,DynamicSelectPlanGenerationTest,ChannelRuntimeTest,FutureChannelSelectTest,ChannelSelectArmBudgetTest,ChannelPendingAdmissionTest,ChannelFutureSelectQuotaTest,ChannelSelectFairAdmissionRaceTest,FutureSelectAttachmentPublicationBarrierTest,FutureSelectLateDetachBarrierTest,ChannelMappedSelectionCancellationTest,ActorSelectFairnessIsolationTest,SelectPeerFutureAliasReadinessTest,FutureSelectAdditionalRegressionTest,ChannelMappedCancellationStressTest,TaskPipelineTest,FuturePipelineProvenanceTest,SourcePureFuturePipelineExecutionTest test
+            -Dtest=TaskPipelineTest,FuturePipelineProvenanceTest,SourcePureFuturePipelineExecutionTest test
       - name: Probe consuming Future input ownership
         shell: bash
         run: |

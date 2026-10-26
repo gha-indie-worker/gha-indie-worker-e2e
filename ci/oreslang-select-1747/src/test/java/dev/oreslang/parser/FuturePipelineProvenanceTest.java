@@ -10,7 +10,14 @@ final class FuturePipelineProvenanceTest {
     @Test void chainedStagesKeepSeparateOrigins() { FuturePipelineProvenanceCheck.chainedStagesKeepSeparateOrigins(); }
     @Test void explicitTypeArgumentsAndArgumentOrderSurvive() { FuturePipelineProvenanceCheck.explicitTypeArgumentsAndArgumentOrderSurvive(); }
     @Test void sumCombinatorsKeepReceiverOrigins() { FuturePipelineProvenanceCheck.sumCombinatorsKeepReceiverOrigins(); }
-    @Test void actorPipeStaysDistinct() { FuturePipelineProvenanceCheck.actorPipeStaysDistinct(); }
+    @Test void actorPipeStaysDistinct() {
+        IllegalArgumentException error = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                FuturePipelineProvenanceCheck::actorPipeStaysDistinct);
+        org.junit.jupiter.api.Assertions.assertTrue(
+                error.getMessage().contains("actor pipe expressions require compiler-checked"),
+                error::getMessage);
+    }
     @Test void typedLambdaStageKeepsOrigin() { FuturePipelineProvenanceCheck.typedLambdaStageKeepsOrigin(); }
     @Test void trapAwaitOrderSurvives() { FuturePipelineProvenanceCheck.trapAwaitOrderSurvives(); }
     @Test void stageLimitStillApplies() { FuturePipelineProvenanceCheck.stageLimitStillApplies(); }
