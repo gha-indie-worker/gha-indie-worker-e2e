@@ -1,5 +1,6 @@
 # exact source blobs from ores-truffle-oreslang/oreslang-source.llvm
-# source commit 48f135c5c184db571be963ce66eb6350e4632367
+# source commit 127dd07b020ec509c53a4f6259fec4e766dcc14a
+b6965740cf101240cdb0f322843d5fa4fd5a8e70 docs/FUTURE_PIPELINE_OWNERSHIP_CONTRACT.md
 ab138a3304655384072c73f6595f84d907ab8fb9 src/main/cpp/oreslang/backend/LlvmCodegen.cpp
 d6b888fd32e912c15acf5c20015f59af7acfacef src/main/cpp/oreslang/backend/LlvmCodegen.hpp
 798c9f6c01d375396d6b757b8e5cdf8ee739375a src/main/cpp/oreslang/backend/LlvmCompat.hpp
