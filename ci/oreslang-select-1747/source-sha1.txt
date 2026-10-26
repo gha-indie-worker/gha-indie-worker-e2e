@@ -69,11 +69,11 @@ eed5519d815855603cefc241b34dc5f2f4ba6ece src/main/java/dev/oreslang/runtime/Http
 66515ecf221bacace934d0b7022bebe299ee5126 src/main/java/dev/oreslang/runtime/NativeHttp.java
 b3c720a3a63676bfdfa6336d722827185350e3aa src/main/java/dev/oreslang/runtime/NativeIo.java
 ce0e3887a3138cdc4569db9e726eade540821441 src/main/java/dev/oreslang/runtime/OresContext.java
-03db207130854edceb98682f4846e6c3d8c38f34 src/main/java/dev/oreslang/runtime/OresFuture.java
+edb8a1b0b5eaa0fc5eff9f73d0f945106c9f4255 src/main/java/dev/oreslang/runtime/OresFuture.java
 cbb809b41b58fea3cd8732eb85a86a3c39ce2e31 src/main/java/dev/oreslang/runtime/OresFutures.java
 d2e51c0bcefb1ec7c29f5c6768e01c28cf25b05b src/main/java/dev/oreslang/runtime/OresMutex.java
 14a4adf94738ac42311bb1777c576e761804d402 src/main/java/dev/oreslang/runtime/OresNull.java
-ba572187b390f7e789ad614ccc497c8d94dfc98c src/main/java/dev/oreslang/runtime/OresScheduler.java
+327507a7d0a722f7080803c37706b9d09d0e570d src/main/java/dev/oreslang/runtime/OresScheduler.java
 7b8761d25e3f5fd8b5d37a9b3ad0946af0b8af2d src/main/java/dev/oreslang/runtime/OresSmartPointers.java
 bac21834c4dda78604f5a49fde677e19a08c3bbe src/main/java/dev/oreslang/runtime/OresSymbol.java
 2a0620a6c91105b2d05c9aec85f4d2276d0de823 src/main/java/dev/oreslang/runtime/OresVM.java
@@ -86,8 +86,8 @@ db0d306c81216556fd39840108eef67208a995c2 src/main/java/dev/oreslang/runtime/Shar
 a4ff2a81cff4ec90cf565e94ec2cd0359b5514c0 src/main/java/dev/oreslang/runtime/SourceAdmissionBudget.java
 5e58266c32812c3e68b23ee6c69d13e3073fbb7e src/main/java/dev/oreslang/runtime/SourceBoundaryTrace.java
 b9b615f19d14b628037d41e2277f7c708d6c3982 src/main/java/dev/oreslang/runtime/SourceCooperationQuantum.java
-21772decc2d19b8da5478b9b1bc77852e4f5b583 src/main/java/dev/oreslang/runtime/TaskCancellation.java
-3c60dec717c9c64e2569108906852315a8d313f8 src/main/java/dev/oreslang/runtime/TaskHandle.java
+fa91174a0c3b88158561af596822fe73b2fd2971 src/main/java/dev/oreslang/runtime/TaskCancellation.java
+c29c45dacbef42127541cdb30b68a77c858d3995 src/main/java/dev/oreslang/runtime/TaskHandle.java
 211b5812183e9e35f7a9d7358b1a6f2ccebd024b src/main/java/dev/oreslang/runtime/TaskScope.java
 ee2ca924b0747cca21097f30d824d6db17a30087 src/main/java/dev/oreslang/runtime/TrapFailurePolicy.java
 8a634db95bbe6aed9dac19135f6e47ead7336d04 src/main/java/dev/oreslang/runtime/VersionedActorCell.java

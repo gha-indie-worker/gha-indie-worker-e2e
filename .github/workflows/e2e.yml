@@ -18,7 +18,7 @@ jobs:
       - run: npm test
 
   select-plan-exact:
-    if: github.ref == 'refs/heads/test/oreslang-select-hoist-exact-20261020'
+    if: github.ref == 'refs/heads/tmp/oreslang-java2048-consume-runtime-20261025'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
