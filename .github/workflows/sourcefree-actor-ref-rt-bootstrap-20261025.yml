@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           test ! -e private-oreslang-source
           echo "private_source_bytes=0"
-          echo "model_for_java_head=03c2d8b9d81925ff38ca03490212bd25013ff0e2"
+          echo "model_for_java_head=8a0ed171f5e10e71eac182e1bc4d35f633447e31"
       - name: Compile and run exact-incarnation model
         shell: bash
         run: |
@@ -125,6 +125,16 @@ jobs:
                       if (owner == ref) closed = true;
                   }
               }
+              static final class Reservation {
+                  final Ref owner;
+                  boolean released;
+                  Reservation(Ref owner) { this.owner = owner; }
+                  boolean close(Ref current) {
+                      if (current != owner) return false;
+                      released = true;
+                      return true;
+                  }
+              }
               private static void require(boolean value, String message) {
                   if (!value) throw new AssertionError(message);
               }
@@ -203,7 +213,17 @@ jobs:
                   require(subscription.closed,
                           "exact owner retirement failed to close subscription");
 
-                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=23 private_source_bytes=0");
+                  Reservation reservation = new Reservation(owner);
+                  require(!reservation.close(restarted),
+                          "same-id replacement retired private reservation");
+                  require(!reservation.close(forgedSameFields),
+                          "forged same-fields ref retired private reservation");
+                  require(!reservation.close(null),
+                          "ambient host retired private reservation");
+                  require(reservation.close(owner),
+                          "exact private reservation owner was rejected");
+
+                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=27 private_source_bytes=0");
               }
           }
           JAVA
