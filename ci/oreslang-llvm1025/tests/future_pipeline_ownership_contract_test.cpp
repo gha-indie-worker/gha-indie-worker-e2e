@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 using oreslang::FunctionEffect;
@@ -13,7 +14,9 @@ using namespace oreslang::types;
 namespace {
 
 AutoType scalar() {
-    return AutoType{AutoTypeKind::Scalar};
+    AutoType result;
+    result.kind = AutoTypeKind::Scalar;
+    return result;
 }
 
 AutoType boxed(AutoType value) {
