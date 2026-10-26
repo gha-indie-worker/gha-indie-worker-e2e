@@ -3,3 +3,4 @@ private_source_bytes=0
 java_head=44f73f06656d11f95591afe44eda58a876e9bd54
 llvm_nio_head=459c46b084462f427bbb66bb7599473b1bc7e897
 llvm_envelope_head=ecd1b9883b8363d07da559aa02d8701cb3f3f8d6
+repin_trigger=final-java-head
