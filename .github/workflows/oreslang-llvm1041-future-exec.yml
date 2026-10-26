@@ -61,6 +61,21 @@ jobs:
           clang++ -std=c++17 -fexceptions             -I"$ROOT/src/main/cpp" "${LLVM_CXX[@]}" "${ARGS[@]}"             $("$LLVM_CONFIG" --ldflags --system-libs --libs core support)             -o /tmp/oreslang-llvmc
           test -x /tmp/oreslang-llvmc
 
+      - name: Probe canonical Future pipeline compiler exit
+        shell: bash
+        run: |
+          set -uo pipefail
+          ROOT="$PWD/ci/oreslang-llvm1041/repo"
+          set +e
+          /tmp/oreslang-llvmc "$ROOT/tests/fixtures/source-future-pipeline-i64.ores"             >/tmp/future.ll 2>/tmp/future.err
+          status=$?
+          set -e
+          echo "compiler_status=$status"
+          echo "stderr_bytes=$(wc -c </tmp/future.err)"
+          cat /tmp/future.err
+          test "$status" -eq 0
+          test -s /tmp/future.ll
+
       - name: Build Rust end-to-end harness
         shell: bash
         run: |
