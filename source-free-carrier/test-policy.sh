@@ -134,4 +134,13 @@ if find "$tmp/carrier" -type f \( -name '*.ores' -o -name '*.java' -o -name '*.c
   fail "source-free carrier contains a private-source-like file"
 fi
 
+# Check the real checked-out carrier too; the synthetic directory above is
+# only a negative fixture and cannot establish source-free provenance by itself.
+if find source-free-carrier -type f \( -name '*.ores' -o -name '*.java' -o -name '*.cpp' -o -name '*.cs' -o -name '*.rs' -o -name '*.wasm' \) | grep -q .; then
+  fail "checked-out carrier contains source-like files"
+fi
+if grep -REq 'model_for_(llvm|java)_h[e]ad=[0-9a-f]{40}' source-free-carrier; then
+  fail "checked-out carrier embeds an exact private compiler head"
+fi
+
 printf '%s\n' "source-free private-CI security primitive probe: PASS"
