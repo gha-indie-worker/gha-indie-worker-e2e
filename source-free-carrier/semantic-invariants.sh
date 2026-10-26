@@ -30,7 +30,7 @@ JAVA
 javac /tmp/CleanupBoundProbe.java
 java -cp /tmp CleanupBoundProbe
 
-echo "model_for_llvm_head=8f4e3c323ca06663f13521b49b0465ad5213667a"
+echo "source_free_semantic_model=true"
 echo "private_source_bytes=0"
 
 cat >/tmp/prepublication_binding.cpp <<'CPP'
