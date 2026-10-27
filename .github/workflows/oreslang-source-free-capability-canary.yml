@@ -49,3 +49,31 @@ jobs:
           print("SOURCE_FREE_CAPABILITY_BOUNDARY_PASS", flush=True)
           print("SOURCE_FREE_UID_GID_CREDENTIALS_PASS", flush=True)
           '
+      - name: Source-free negative tests for mixed guest identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          def admit(uids, gids, supplementary, expected=23145):
+              return (uids == (expected, expected, expected)
+                      and len(gids) == 3
+                      and gids[0] != 0
+                      and gids == (gids[0],) * 3
+                      and all(g == gids[0] for g in supplementary))
+
+          assert admit((23145,) * 3, (23145,) * 3, [])
+          assert admit((23145,) * 3, (23145,) * 3, [23145])
+          bad = (
+              ((23145, 0, 23145), (23145,) * 3, []),
+              ((23145, 23145, 0), (23145,) * 3, []),
+              ((0, 23145, 23145), (23145,) * 3, []),
+              ((23145,) * 3, (0, 23145, 23145), []),
+              ((23145,) * 3, (23145, 0, 23145), []),
+              ((23145,) * 3, (23145, 23145, 0), []),
+              ((23145,) * 3, (23145, 23146, 23145), []),
+              ((23145,) * 3, (23145,) * 3, [0]),
+              ((23145,) * 3, (23145,) * 3, [27]),
+          )
+          assert all(not admit(*case) for case in bad)
+          print("SOURCE_FREE_UID_GID_NEGATIVE_CASES_PASS")
+          PY
