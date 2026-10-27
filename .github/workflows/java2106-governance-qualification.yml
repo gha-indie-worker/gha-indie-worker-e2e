@@ -27,6 +27,7 @@ jobs:
           test "$(git hash-object java2106/scripts/test-publish-private-ci-source-v3.py)" = "582b8cff0208a9c358e1a4b6b50d8a335222961f"
           test "$(git hash-object java2106/private-ci-approved-repositories.txt)" = "4f7dcf5a77616b28eec684f0f75616ff06ad21fe"
           test "$(git hash-object java2106/.github/private-ci-carrier-contracts.json)" = "efb4e4be8f6ee372c98bedb91487d8b0059b4fdc"
+          test "$(git hash-object java2106/docs/security/CI_PRIVATE_SOURCE_MIRRORING.md)" = "5c4bbc7affe2e5ad0959d3db6c64ea9b3fb34c29"
           test ! -e java2106/src
           echo JAVA2106_EXACT_CONTROL_BLOBS_PASS
       - name: Compile exact control plane
@@ -40,3 +41,14 @@ jobs:
         run: python3 java2106/scripts/test-publish-private-ci-source.py
       - name: Run V3 publisher regression suite
         run: python3 java2106/scripts/test-publish-private-ci-source-v3.py
+      - name: Verify security contract matches fail-closed implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          doc=java2106/docs/security/CI_PRIVATE_SOURCE_MIRRORING.md
+          ! grep -q 'review-attested carrier mode' "$doc"
+          grep -q 'both source and carrier protected-main enforcement' "$doc"
+          grep -q 'plan upgrade' "$doc"
+          grep -q 'last-push approval' "$doc"
+          grep -q 'conversation resolution' "$doc"
+          echo JAVA2106_SECURITY_CONTRACT_PASS
