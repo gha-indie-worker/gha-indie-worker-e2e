@@ -1,0 +1,47 @@
+name: Source-free private-runner capability boundary canary
+on:
+  push:
+    branches:
+      - 'ci/source-free-capability-boundary-*'
+permissions:
+  contents: read
+jobs:
+  verify-kernel-capability-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Attest actual systemd process limits and all Linux capability sets
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo useradd --uid 23145 --no-create-home --shell /usr/sbin/nologin ores-ci-cap-probe
+          unit="oreslang-private-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$unit" =~ ^oreslang-private-[0-9]+-[0-9]+$ ]]
+          sudo systemd-run --quiet --wait --pipe --collect \
+            --unit="$unit" --uid=ores-ci-cap-probe \
+            --working-directory=/tmp \
+            --property=MemoryMax=268435456 \
+            --property=TasksMax=16 \
+            --property=CPUQuota=100% \
+            --property=KillMode=control-group \
+            --property=CapabilityBoundingSet= \
+            --property=AmbientCapabilities= \
+            --property=NoNewPrivileges=yes \
+            /usr/bin/python3 -c '
+          import os
+          from pathlib import Path
+          assert os.getuid() == 23145, "wrong guest UID"
+          status = dict(line.split(":", 1) for line in
+                        Path("/proc/self/status").read_text().splitlines() if ":" in line)
+          assert status["NoNewPrivs"].strip() == "1", "privilege escalation allowed"
+          for key in ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb"):
+              assert int(status[key].strip(), 16) == 0, "unexpected capability " + key
+          group = Path("/proc/self/cgroup").read_text().strip().split("::", 1)[1]
+          assert group.startswith("/system.slice/oreslang-private-"), "wrong cgroup"
+          root = Path("/sys/fs/cgroup") / group.lstrip("/")
+          assert 0 < int((root / "memory.max").read_text()) <= 268435456
+          assert 0 < int((root / "pids.max").read_text()) <= 16
+          quota, period = (root / "cpu.max").read_text().split()
+          assert 0 < int(quota) <= int(period), "missing CPU quota"
+          print("SOURCE_FREE_CAPABILITY_BOUNDARY_PASS", flush=True)
+          '
