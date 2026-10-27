@@ -1,0 +1,45 @@
+name: Private CI destination policy self-test
+on:
+  # This check is required by protected main, so it must exist for every PR.
+  # Path-filtering a required context can deadlock unrelated pull requests.
+  pull_request:
+  push:
+    paths:
+      - 'scripts/check-private-ci-destination.sh'
+      - 'scripts/test-private-ci-destination.sh'
+      - 'scripts/test-private-ci-codeowners-contract.sh'
+      - 'scripts/run-in-private-ci-destination.sh'
+      - 'scripts/publish-private-ci-source.py'
+      - 'scripts/publish-private-ci-source-v3.py'
+      - 'scripts/test-publish-private-ci-source.py'
+      - 'scripts/test-publish-private-ci-source-v3.py'
+      - '.github/private-ci-approved-repositories.txt'
+      - '.github/private-ci-carrier-contracts.json'
+      - '.github/CODEOWNERS'
+      - 'docs/security/CI_PRIVATE_SOURCE_MIRRORING.md'
+      - 'tools/verify-exact-source-tree.sh'
+      - 'tools/test-verify-exact-source-tree.sh'
+permissions:
+  contents: read
+jobs:
+  preflight-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Assert private CI guard fail-closed behavior
+        run: |
+          set -euo pipefail
+          bash -n scripts/check-private-ci-destination.sh scripts/test-private-ci-destination.sh scripts/run-in-private-ci-destination.sh scripts/test-private-ci-codeowners-contract.sh
+          python3 -m py_compile scripts/publish-private-ci-source.py scripts/test-publish-private-ci-source.py scripts/publish-private-ci-source-v3.py scripts/test-publish-private-ci-source-v3.py
+          bash scripts/test-private-ci-destination.sh
+          bash scripts/test-private-ci-codeowners-contract.sh
+          bash -n tools/verify-exact-source-tree.sh tools/test-verify-exact-source-tree.sh
+          bash tools/test-verify-exact-source-tree.sh
+          for attempt in 1 2 3; do
+            echo "Private publisher adversarial pass ${attempt}/3"
+            python3 scripts/test-publish-private-ci-source.py
+            python3 scripts/test-publish-private-ci-source-v3.py
+          done
