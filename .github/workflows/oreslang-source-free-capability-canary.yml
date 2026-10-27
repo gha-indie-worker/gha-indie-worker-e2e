@@ -21,6 +21,8 @@ jobs:
             --unit="$unit" --uid=ores-ci-cap-probe \
             --working-directory=/tmp \
             --property=MemoryMax=268435456 \
+            --property=MemorySwapMax=0 \
+            --property=LimitNOFILE=1024 \
             --property=TasksMax=16 \
             --property=CPUQuota=100% \
             --property=KillMode=control-group \
@@ -29,6 +31,7 @@ jobs:
             --property=NoNewPrivileges=yes \
             /usr/bin/python3 -c '
           import os
+          import resource
           from pathlib import Path
           uids, gids, extra = os.getresuid(), os.getresgid(), os.getgroups()
           assert uids == (23145, 23145, 23145), "real/effective/saved UID not confined"
@@ -44,10 +47,14 @@ jobs:
           root = Path("/sys/fs/cgroup") / group.lstrip("/")
           assert 0 < int((root / "memory.max").read_text()) <= 268435456
           assert 0 < int((root / "pids.max").read_text()) <= 16
+          assert (root / "memory.swap.max").read_text().strip() == "0", "swap not disabled"
+          soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+          assert 0 < soft <= 1024 and 0 < hard <= 1024, "open-file limits not bounded"
           quota, period = (root / "cpu.max").read_text().split()
           assert 0 < int(quota) <= int(period), "missing CPU quota"
           print("SOURCE_FREE_CAPABILITY_BOUNDARY_PASS", flush=True)
           print("SOURCE_FREE_UID_GID_CREDENTIALS_PASS", flush=True)
+          print("SOURCE_FREE_SWAP_NOFILE_BOUNDARY_PASS", flush=True)
           '
       - name: Source-free negative tests for mixed guest identities
         shell: bash
