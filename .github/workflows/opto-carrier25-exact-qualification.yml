@@ -1,0 +1,48 @@
+name: Exact opto carrier25 mirror qualification
+
+on:
+  push:
+    branches:
+      - validation/opto-carrier25-25444ad-20261026
+
+permissions:
+  contents: read
+
+jobs:
+  exact-carrier-verifier:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact mirrored carrier tree
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: b9dca4d83fe1c71c4a7af47c7e3e64b8ec4ab389
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Prove exact source carrier tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "b9dca4d83fe1c71c4a7af47c7e3e64b8ec4ab389"
+          test "$(git rev-parse 'HEAD^{tree}')" = "dde288c6e148c89c86441f984dc9f3f930c62298"
+          test "$(git hash-object .github/workflows/oreslang-exact-tree-carrier.yml)" = "1361356ef086acd2209139cba0c638c28763faca"
+          test "$(git hash-object scripts/check-carrier-main-policy.py)" = "8fa507ba22b46c6d2af5b4ae07698084458a7ea8"
+          test "$(git hash-object scripts/test-check-carrier-main-policy.py)" = "0dc0d40cde8e6bca58b41766d2a7729b6a29de79"
+          test "$(git hash-object ci/test-plans/java-pr2033.json)" = "99719a8e764705829601fc53ad64c6e9f268a8cf"
+          echo EXACT_CARRIER_TREE_PASS
+      - name: Compile exact carrier control plane
+        run: python3 -m py_compile scripts/*.py
+      - name: Run exact carrier provenance verifier tests
+        run: python3 scripts/test-oreslang-private-carrier.py
+      - name: Run exact trusted-plan runner tests
+        run: python3 scripts/test-run-oreslang-test-plan.py
+      - name: Run exact live-main policy tests
+        run: python3 scripts/test-check-carrier-main-policy.py
+      - name: Assert required-check-compatible workflow shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^  pull_request:$' .github/workflows/oreslang-exact-tree-carrier.yml
+          grep -q '^  verifier-tests:$' .github/workflows/oreslang-exact-tree-carrier.yml
+          grep -q 'test-check-carrier-main-policy.py' .github/workflows/oreslang-exact-tree-carrier.yml
+          echo REQUIRED_CHECK_SHAPE_PASS
