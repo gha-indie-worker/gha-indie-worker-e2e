@@ -1,0 +1,42 @@
+name: Java 2106 source-free governance qualification
+
+on:
+  push:
+    branches:
+      - validation/java2106-review-completion-20261027
+
+permissions:
+  contents: read
+
+jobs:
+  java2106-governance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Verify exact source control-plane blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object java2106/scripts/publish-private-ci-source.py)" = "2601b0f9ce1cba566b112e0388ea15b5c4417c02"
+          test "$(git hash-object java2106/scripts/test-publish-private-ci-source.py)" = "ec48120addec5de7dfcd6ef6a93c89c905427bcf"
+          test "$(git hash-object java2106/scripts/publish-private-ci-source-v3.py)" = "a6732ae857b8e217054f849f34fbf920920f64d3"
+          test "$(git hash-object java2106/scripts/test-publish-private-ci-source-v3.py)" = "582b8cff0208a9c358e1a4b6b50d8a335222961f"
+          test "$(git hash-object java2106/private-ci-approved-repositories.txt)" = "4f7dcf5a77616b28eec684f0f75616ff06ad21fe"
+          test "$(git hash-object java2106/.github/private-ci-carrier-contracts.json)" = "efb4e4be8f6ee372c98bedb91487d8b0059b4fdc"
+          test ! -e java2106/src
+          echo JAVA2106_EXACT_CONTROL_BLOBS_PASS
+      - name: Compile exact control plane
+        run: |
+          python3 -m py_compile \
+            java2106/scripts/publish-private-ci-source.py \
+            java2106/scripts/test-publish-private-ci-source.py \
+            java2106/scripts/publish-private-ci-source-v3.py \
+            java2106/scripts/test-publish-private-ci-source-v3.py
+      - name: Run legacy publisher regression suite
+        run: python3 java2106/scripts/test-publish-private-ci-source.py
+      - name: Run V3 publisher regression suite
+        run: python3 java2106/scripts/test-publish-private-ci-source-v3.py
