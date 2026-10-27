@@ -28,6 +28,7 @@ jobs:
           test "$(git hash-object java2106/private-ci-approved-repositories.txt)" = "4f7dcf5a77616b28eec684f0f75616ff06ad21fe"
           test "$(git hash-object java2106/.github/private-ci-carrier-contracts.json)" = "efb4e4be8f6ee372c98bedb91487d8b0059b4fdc"
           test "$(git hash-object java2106/docs/security/CI_PRIVATE_SOURCE_MIRRORING.md)" = "5c4bbc7affe2e5ad0959d3db6c64ea9b3fb34c29"
+          test "$(git hash-object java2106/source-workflows/private-ci-mirror-preflight.yml)" = "816be93de72e3c69acffdca5f2af89a1ea9b4563"
           test ! -e java2106/src
           echo JAVA2106_EXACT_CONTROL_BLOBS_PASS
       - name: Compile exact control plane
@@ -51,4 +52,14 @@ jobs:
           grep -q 'plan upgrade' "$doc"
           grep -q 'last-push approval' "$doc"
           grep -q 'conversation resolution' "$doc"
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path("java2106/source-workflows/private-ci-mirror-preflight.yml").read_text()
+          pull = text.split("  pull_request:", 1)[1].split("  push:", 1)[0]
+          if "paths:" in pull:
+              raise SystemExit("required preflight PR trigger must not be path-filtered")
+          if "preflight-regressions:" not in text:
+              raise SystemExit("required preflight job missing")
+          print("JAVA2106_REQUIRED_PREFLIGHT_SHAPE_PASS")
+          PY
           echo JAVA2106_SECURITY_CONTRACT_PASS
