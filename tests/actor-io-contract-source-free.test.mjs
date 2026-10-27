@@ -42,7 +42,7 @@ function actorMember(type, member) {
 
 function validateActorPayload(type) {
   if (actorIoTypes.has(type)) throw new Error(`cannot use ${type} across an actor boundary`);
-  if (["Future", "Channel", "Mutex", "TcpConnection"].includes(type)) {
+  if (["Future", "Channel", "Mutex", "TcpConnection", "ActorRef", "SharedMutex"].includes(type)) {
     throw new Error(`cannot use ${type} across an actor boundary`);
   }
   return true;
@@ -105,6 +105,15 @@ test("io.out.write returns Future<void> for data", () => {
 
 test("actor io capabilities cannot be emitted as data", () => {
   for (const type of actorIoTypes) {
+    assert.throws(
+      () => ioOutWrite({ actor: true, args: 1, payloadType: type }),
+      /cannot use/,
+    );
+  }
+});
+
+test("live actor transport capabilities are not output data", () => {
+  for (const type of ["ActorRef", "SharedMutex"]) {
     assert.throws(
       () => ioOutWrite({ actor: true, args: 1, payloadType: type }),
       /cannot use/,
