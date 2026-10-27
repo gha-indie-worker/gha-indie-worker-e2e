@@ -1,0 +1,54 @@
+name: Oreslang carrier governance
+
+on:
+  # This context is intended to be required by protected main, so it must
+  # exist for every pull request. Do not add path filters here.
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verifier-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify carrier governance root
+        shell: bash
+        env:
+          REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$REPOSITORY_PRIVATE" = "true"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          expected = (
+              "* @ORESoftware\n"
+              "/.github/ @ORESoftware\n"
+              "/.github/CODEOWNERS @ORESoftware\n"
+          ).encode()
+          actual = Path(".github/CODEOWNERS").read_bytes()
+          if actual != expected:
+              raise SystemExit("DENIED: carrier CODEOWNERS contract changed")
+
+          workflow = Path(".github/workflows/oreslang-carrier-governance.yml").read_text()
+          pull = workflow.find("  pull_request:")
+          jobs = workflow.find("jobs:")
+          if pull < 0 or jobs < 0 or pull > jobs:
+              raise SystemExit("DENIED: verifier workflow no longer runs on pull_request")
+          trigger = workflow[pull:jobs]
+          if "paths:" in trigger or "paths-ignore:" in trigger:
+              raise SystemExit("DENIED: required verifier context is path-filtered")
+          print("CARRIER_GOVERNANCE_ROOT_PASS")
+          PY
+
+          test ! -e private-oreslang-source
+          test ! -e ci/oreslang-receipt.json
+          echo "NO_PRIVATE_SOURCE_ON_REVIEW_BRANCH_PASS"
