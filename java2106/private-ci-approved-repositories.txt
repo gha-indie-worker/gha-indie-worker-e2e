@@ -1,0 +1,8 @@
+# Private CI destinations explicitly approved for source transfers.
+# No repositories are approved by default.
+# Changes must receive independent @ORESoftware review and be enforced by protected source main.
+# Every carrier main must also be protected; review attestation is never a substitute.
+# Format: exact owner/repo ONE SPACE immutable numeric GitHub repository ID (e.g. trusted/ci 1234567).
+# Slug or numeric-ID changes require a new exact independent review.
+# Proposed narrow private carrier for v3 exact-tree tests; requires exact independent review before merge.
+# Review-only candidate (NOT an approved destination): ores-dummy-org-oreslang-stack/ores-dummy-org-oreslang-stack-infra
