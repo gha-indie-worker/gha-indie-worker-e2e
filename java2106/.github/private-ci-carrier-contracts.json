@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "carriers": {
+    "opto-sync-test/go-java-validation": {
+      "repository_id": 1323598177,
+      "base_sha": "f8e9f99f6c1be2a20350fe65d1a553e342fe4266",
+      "workflow_path": ".github/workflows/oreslang-exact-tree-carrier.yml",
+      "workflow_blob_sha": "a071ba75b75b3a6c784a3e0e9c6e1817a111f139",
+      "test_plans": {
+        "ci/test-plans/java-pr1482.json": {
+          "blob_sha": "28d5ecfcfe476427403de412cc84bf3811e532d5",
+          "allowed_prs": [
+            1482
+          ]
+        }
+      }
+    },
+    "ores-dummy-org-oreslang-stack/ores-dummy-org-oreslang-stack-infra": {
+      "repository_id": 1412142815,
+      "base_sha": "90ab94fc768be6b2acae313b5537f642f63321cf",
+      "workflow_path": ".github/workflows/private-oreslang-exact-tree.yml",
+      "workflow_blob_sha": "3107feea0215ae9874ff35a2249c69ab6b9e7ffe",
+      "test_plans": {
+        "ci/test-plans/java-pr616.json": {
+          "blob_sha": "4728c2ecb583a809f6978db7a0235cef771a89f7",
+          "allowed_prs": [
+            616
+          ]
+        }
+      }
+    }
+  }
+}
