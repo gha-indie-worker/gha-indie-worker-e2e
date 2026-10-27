@@ -1,0 +1,43 @@
+name: Source-free exact Git tree bridge proof
+on:
+  push:
+    branches:
+      - ci/exact-tree-sourcefree-20261027
+      - ci/exact-tree-carrier-20261027
+permissions:
+  contents: read
+jobs:
+  source-free-exact-tree:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out only this repo with its own minimal GITHUB_TOKEN
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Prove exact checked out commit/tree and no unauthorized artifacts
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_HEAD" ]]
+          [[ "$(git rev-parse 'HEAD^{tree}')" =~ ^[0-9a-f]{40}$ ]]
+          test -z "$(git status --porcelain)"
+          test ! -e private-oreslang-source
+          printf 'SOURCE_FREE_HEAD=%s\nSOURCE_FREE_ROOT_TREE=%s\n' "$EXPECTED_HEAD" "$(git rev-parse 'HEAD^{tree}')"
+      - name: Set up fixed Node 22 toolchain
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Test synthetic mirror admission negative matrix
+        shell: bash
+        run: node --test tests/source-free-exact-tree.test.mjs
+      - name: Publish scope boundary
+        run: |
+          echo 'SOURCE_FREE_EXACT_TREE_FIXTURE_PASS'
+          echo 'PRIVATE_ORESLANG_SOURCE_TRANSFERRED=false'
+          echo 'PRIVATE_ORESLANG_SOURCE_TESTED=false'
+          echo 'NO_CROSS_ORG_CHECKOUT=true'
