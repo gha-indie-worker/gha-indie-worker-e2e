@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "sourceRepository": "scintilla-run/scintilla-desktop-daemon",
+  "sourcePullRequest": 29,
+  "sourceBranch": "test/quota-backpressure-model-20261018",
+  "sourceHead": "975fe10d0d05d5c5bf2ff42721979a7e9f7e38b0",
+  "sourceTestPath": "tests/quota_backpressure_reference.rs",
+  "sourceTestBlobSha": "81734197bf0eb8bad1aba8a96986c097dc216085",
+  "mirroredScope": "self-contained deterministic reference test only; no production source, credentials, or secrets copied",
+  "validationScope": "standalone Rust model test only; does not certify the daemon Cargo build, Redis/Valkey admission, leases, queue semantics, or live runtime behavior"
+}
