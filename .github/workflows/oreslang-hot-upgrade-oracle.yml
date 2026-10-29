@@ -1,0 +1,89 @@
+name: Oreslang hot-upgrade source-free oracle
+
+on:
+  push:
+    branches:
+      - 'tmp/oreslang-hot-upgrade-oracle-20261019'
+    paths:
+      - 'tmp/oreslang-hot-upgrade-oracle/**'
+      - '.github/workflows/oreslang-hot-upgrade-oracle.yml'
+  pull_request:
+    paths:
+      - 'tmp/oreslang-hot-upgrade-oracle/**'
+      - '.github/workflows/oreslang-hot-upgrade-oracle.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Compile with warnings as errors
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/HotUpgradeInvariantOracle.java
+      - name: Run lifecycle oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle HotUpgradeInvariantOracle
+      - name: Compile independent admission lease oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/AdmissionLeaseOracle.java
+      - name: Run admission lease race oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle AdmissionLeaseOracle
+      - name: Compile source-free candidate quarantine oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/CandidateQuarantineOracle.java
+      - name: Run candidate quarantine and physical release oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle CandidateQuarantineOracle
+      - name: Compile source-free proxy rollback oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/ProxyRollbackOracle.java
+      - name: Run proxy freeze rollback recovery race oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle ProxyRollbackOracle
+      - name: Compile source-free ghost child lifetime oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/GhostChildLifetimeOracle.java
+      - name: Run ghost child lifecycle fault oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle GhostChildLifetimeOracle
+      - name: Compile source-free pre-return transfer freeze oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/TransferFreezeOracle.java
+      - name: Run pre-return transfer freeze and retirement races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle TransferFreezeOracle
+      - name: Compile source-free proxy setup rollback oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/SetupProxyRollbackOracle.java
+      - name: Run proxy setup freeze retry and concurrent reconciliation
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle SetupProxyRollbackOracle
+      - name: Compile independent retired physical stop retry oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/RetiredStopRetryOracle.java
+      - name: Run retired stop recovery and concurrency oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle RetiredStopRetryOracle
+      - name: Compile source-free physical unregister oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/UnregisterFaultOracle.java
+      - name: Run physical registry removal before-after failure oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle UnregisterFaultOracle
+      - name: Compile source-free private memory finalization oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/MemorySliceCloseOracle.java
+      - name: Run private memory seal and cleanup retry oracle
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle MemorySliceCloseOracle
+      - name: Compile source-free TaskScope retirement retry oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/TaskRetirementRetryOracle.java
+      - name: Run TaskScope physical retirement retry races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle TaskRetirementRetryOracle
+      - name: Compile source-free event cleanup retry oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/EventCleanupRetryOracle.java
+      - name: Run event cleanup retry races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle EventCleanupRetryOracle
+      - name: Compile source-free RELIABLE pending release oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/ReliablePendingReleaseOracle.java
+      - name: Run RELIABLE pending release retry races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle ReliablePendingReleaseOracle
+      - name: Compile source-free actor output release oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/ActorOutputReleaseOracle.java
+      - name: Run actor output release retry races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle ActorOutputReleaseOracle
+      - name: Compile source-free generation retirement retry oracle
+        run: javac --release 25 -Xlint:all -Werror tmp/oreslang-hot-upgrade-oracle/GenerationRetirementRetryOracle.java
+      - name: Run generation retirement retry races
+        run: java -ea -cp tmp/oreslang-hot-upgrade-oracle GenerationRetirementRetryOracle
