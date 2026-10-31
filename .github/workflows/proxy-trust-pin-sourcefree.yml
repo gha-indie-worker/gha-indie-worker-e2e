@@ -1,0 +1,25 @@
+name: Oreslang proxy synthetic verifier pin (source-free)
+on:
+  push:
+    branches:
+      - ci/oreslang-proxy-sourcefree-trust-pin-20261031
+permissions:
+  contents: read
+jobs:
+  source-free-verifier-pin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout only this public synthetic repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Execute source-free verifier pin regression
+        shell: /bin/bash -e -o pipefail {0}
+        run: /bin/bash ci/test-proxy-trust-pin-sourcefree.sh
+      - name: Explicitly classify evidence as non-native
+        shell: /bin/bash -e -o pipefail {0}
+        run: |
+          echo 'evidence_class=public_source_free_synthetic'
+          echo 'native_oreslang_execution=false'
+          echo 'source_tree_mirror=false'
