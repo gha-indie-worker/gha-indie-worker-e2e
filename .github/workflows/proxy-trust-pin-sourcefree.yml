@@ -17,6 +17,9 @@ jobs:
       - name: Execute source-free verifier pin regression
         shell: /bin/bash -e -o pipefail {0}
         run: /bin/bash ci/test-proxy-trust-pin-sourcefree.sh
+      - name: Verify Git hidden-index admission traps (public source-free)
+        shell: /bin/bash -e -o pipefail {0}
+        run: /bin/bash ci/test-proxy-hidden-index-sourcefree.sh
       - name: Explicitly classify evidence as non-native
         shell: /bin/bash -e -o pipefail {0}
         run: |
