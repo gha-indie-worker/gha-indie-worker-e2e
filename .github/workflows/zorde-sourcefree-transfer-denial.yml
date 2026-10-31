@@ -31,7 +31,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B source-free-carrier/test-zorde-transfer-admission.py
-          echo "SOURCE_FREE_SYNTHETIC_TESTS=10"
+          python3 -B source-free-carrier/test-synthetic-review-gates.py
+          echo "SOURCE_FREE_SYNTHETIC_TESTS=19"
           echo "PRIVATE_SOURCE_BLOBS_TRANSFERRED=0"
           echo "PRIVATE_TRANSFER_AUTHORIZED=false"
       - name: Prevent synthetic evidence from being labeled compiler conformance
