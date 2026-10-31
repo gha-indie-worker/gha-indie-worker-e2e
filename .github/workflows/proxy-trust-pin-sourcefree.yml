@@ -20,6 +20,9 @@ jobs:
       - name: Verify Git hidden-index admission traps (public source-free)
         shell: /bin/bash -e -o pipefail {0}
         run: /bin/bash ci/test-proxy-hidden-index-sourcefree.sh
+      - name: Verify immutable source execution boundary (public synthetic only)
+        shell: /bin/bash -e -o pipefail {0}
+        run: sudo -n /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /bin/bash ci/test-proxy-source-toctou-sourcefree.sh
       - name: Explicitly classify evidence as non-native
         shell: /bin/bash -e -o pipefail {0}
         run: |
