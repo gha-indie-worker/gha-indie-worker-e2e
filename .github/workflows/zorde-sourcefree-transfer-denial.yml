@@ -1,0 +1,43 @@
+name: Synthetic Zorde transfer denial (source-free only)
+on:
+  push:
+    branches:
+      - ci/zorde-public-synthetic-20261031
+permissions:
+  contents: read
+jobs:
+  source-free-transfer-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact public synthetic checkout
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --quiet HEAD --
+          test -z "$(git ls-files --others --exclude-standard)"
+          echo "PUBLIC_SYNTHETIC_COMMIT=$EXPECTED_SHA"
+          echo "PUBLIC_SYNTHETIC_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - name: Execute bounded source-free approval regression matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B source-free-carrier/test-zorde-transfer-admission.py
+          echo "SOURCE_FREE_SYNTHETIC_TESTS=10"
+          echo "PRIVATE_SOURCE_BLOBS_TRANSFERRED=0"
+          echo "PRIVATE_TRANSFER_AUTHORIZED=false"
+      - name: Prevent synthetic evidence from being labeled compiler conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ZORDE_NATIVE_GUEST_EXECUTED=false"
+          echo "FIVE_BACKEND_PARITY_VERIFIED=false"
+          echo "SYNTHETIC_ONLY_NOT_PROMOTABLE=true"
