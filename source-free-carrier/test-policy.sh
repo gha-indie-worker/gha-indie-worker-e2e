@@ -36,6 +36,24 @@ validate_codeowners() {
   ' "$file"
 }
 
+# A source-free carrier must have a closed filesystem shape: Git checkout
+# symlinks (including a symlinked root) cannot hide a source file or escape
+# the inspected tree. Find errors must fail closed.
+validate_source_free_tree() {
+  local root="$1" unexpected source_files
+  [[ -d "$root" && ! -L "$root" ]] || return 1
+  unexpected="$(find "$root" ! -type d ! -type f -print)" || return 1
+  [[ -z "$unexpected" ]] || return 1
+  source_files="$(find "$root" -type f \( \
+    -iname '*.ores' -o -iname '*.java' -o -iname '*.cpp' -o \
+    -iname '*.cs' -o -iname '*.rs' -o -iname '*.wasm' -o \
+    -iname '*.py' -o -iname '*.js' -o -iname '*.ts' -o \
+    -iname '*.go' -o -iname '*.c' -o -iname '*.h' -o \
+    -iname '*.kt' -o -iname '*.swift' \
+  \) -print)" || return 1
+  [[ -z "$source_files" ]]
+}
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -143,18 +161,42 @@ if validate_codeowners "$tmp/CODEOWNERS.bad"; then
   fail "missing private CI workflow ownership was accepted"
 fi
 
-# A source-free carrier may carry this probe, but not a private source snapshot.
+# Positive inventory and adversarial filesystem fixtures.
 mkdir -p "$tmp/carrier"
 printf '%s\n' 'security-primitives-only' >"$tmp/carrier/manifest.txt"
-if find "$tmp/carrier" -type f \( -name '*.ores' -o -name '*.java' -o -name '*.cpp' -o -name '*.cs' -o -name '*.rs' -o -name '*.wasm' \) | grep -q .; then
-  fail "source-free carrier contains a private-source-like file"
-fi
+validate_source_free_tree "$tmp/carrier" ||
+  fail "safe source-free inventory was rejected"
 
-# Check the real checked-out carrier too; the synthetic directory above is
-# only a negative fixture and cannot establish source-free provenance by itself.
-if find source-free-carrier -type f \( -name '*.ores' -o -name '*.java' -o -name '*.cpp' -o -name '*.cs' -o -name '*.rs' -o -name '*.wasm' \) | grep -q .; then
-  fail "checked-out carrier contains source-like files"
+printf '%s\n' 'private-source-like' >"$tmp/carrier/renamed.RS"
+if validate_source_free_tree "$tmp/carrier"; then
+  fail "case-variant source extension was accepted"
 fi
+rm "$tmp/carrier/renamed.RS"
+
+ln -s manifest.txt "$tmp/carrier/alias"
+if validate_source_free_tree "$tmp/carrier"; then
+  fail "symlink inside source-free carrier was accepted"
+fi
+rm "$tmp/carrier/alias"
+
+ln -s "$tmp/carrier" "$tmp/linked-carrier"
+if validate_source_free_tree "$tmp/linked-carrier"; then
+  fail "symlinked carrier root was accepted"
+fi
+rm "$tmp/linked-carrier"
+
+mkfifo "$tmp/carrier/pipe"
+if validate_source_free_tree "$tmp/carrier"; then
+  fail "special file inside carrier was accepted"
+fi
+rm "$tmp/carrier/pipe"
+
+validate_source_free_tree "$tmp/carrier" ||
+  fail "negative fixtures left the safe carrier invalid"
+
+# Synthetic fixtures alone never prove checked-out source-free provenance.
+validate_source_free_tree source-free-carrier ||
+  fail "checked-out carrier contains symlinks, special files, or source-like files"
 if grep -REq 'model_for_(llvm|java)_h[e]ad=[0-9a-f]{40}' source-free-carrier; then
   fail "checked-out carrier embeds an exact private compiler head"
 fi
