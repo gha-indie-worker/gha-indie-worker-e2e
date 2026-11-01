@@ -7,3 +7,9 @@ Oreslang source snapshot.
 
 It intentionally contains no Oreslang source files, private tree hashes, repository
 IDs, proprietary fixtures, or cross-organization credentials.
+
+The carrier inventory rejects symlinks (including the carrier root), special files,
+and case-variant source-code extensions. Synthetic positive/negative fixtures only
+exercise that policy; real checkout identity, exact-head CI steps, and authorization
+must be verified separately. A source-free pass never certifies private guest code.
+
