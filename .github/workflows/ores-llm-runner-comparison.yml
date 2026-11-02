@@ -1,0 +1,20 @@
+name: OresLLM runner comparison canary (source-free)
+on:
+  push:
+    branches:
+      - diag/ores-llm-runner-compare-20261102
+permissions: {}
+jobs:
+  runner-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Prove hosted runner assignment without source checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNNER_NAME:-}"
+          test -n "${RUNNER_OS:-}"
+          test -n "${RUNNER_ARCH:-}"
+          printf 'SOURCE_FREE_RUNNER_COMPARISON_PASS os=%s arch=%s\n' "$RUNNER_OS" "$RUNNER_ARCH"
+          test ! -e "$GITHUB_WORKSPACE/.git" || { echo 'UNEXPECTED_SOURCE_CHECKOUT'; exit 1; }
