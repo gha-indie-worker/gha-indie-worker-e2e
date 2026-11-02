@@ -1,0 +1,32 @@
+name: AttoLang source-free runner admission
+on:
+  push:
+    branches:
+      - ci/attolang-source-free-runner-probe-20261102
+  workflow_dispatch:
+permissions: {}
+jobs:
+  source-free-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify runner identity and no checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "gha-indie-worker/gha-indie-worker-e2e"
+          test "$GITHUB_REF" = "refs/heads/ci/attolang-source-free-runner-probe-20261102"
+          test -n "$GITHUB_SHA"
+          test -n "$RUNNER_NAME"
+          echo "ATTO_SOURCE_FREE_RUNNER_ADMITTED=1"
+      - name: Check stock native toolchain availability
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v node
+          command -v cmake
+          command -v clang
+          node --version
+          cmake --version | head -1
+          clang --version | head -1
+          echo "ATTO_SOURCE_FREE_TOOLCHAIN_PROBE=PASS"
