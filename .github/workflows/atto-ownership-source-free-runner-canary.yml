@@ -33,3 +33,21 @@ jobs:
           [[ "$actual" != *$'\n'* ]]
           echo "ATTO_CANARY_SYNTHETIC_CHECKS=2"
           echo "ATTO_CANARY_NATIVE_COMPILER_EXECUTED=false"
+      - name: Compile and execute source-free native Rust and C smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
+          cmake --version | head -1
+          clang --version | head -1
+          dir="$(mktemp -d)"
+          trap 'rm -rf "$dir"' EXIT
+          printf 'fn main() { assert_eq!(6 * 7, 42); println!("RUST_SOURCE_FREE_NATIVE_PASS"); }\n' > "$dir/smoke.rs"
+          rustc --edition=2021 -O "$dir/smoke.rs" -o "$dir/smoke-rust"
+          "$dir/smoke-rust"
+          printf '#include <stdio.h>\nint main(void) { puts("CLANG_SOURCE_FREE_NATIVE_PASS"); return 0; }\n' > "$dir/smoke.c"
+          clang -O2 "$dir/smoke.c" -o "$dir/smoke-c"
+          "$dir/smoke-c"
+          echo "ATTO_CANARY_PRIVATE_COMPILER_EXECUTED=false"
+          echo "ATTO_CANARY_PUBLIC_SOURCE_ONLY=true"
