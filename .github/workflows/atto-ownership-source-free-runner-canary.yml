@@ -1,0 +1,35 @@
+name: AttoLang source-free runner admission canary
+on:
+  push:
+    branches:
+      - ci/atto-ownership-runner-canary-20261102
+    paths:
+      - .github/workflows/atto-ownership-source-free-runner-canary.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source-free-runner-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify isolated source-free runner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = "gha-indie-worker/gha-indie-worker-e2e"
+          test "${GITHUB_REF_NAME}" = "ci/atto-ownership-runner-canary-20261102"
+          test ! -d .git
+          echo "ATTO_CANARY_SOURCE_TRANSFER=none"
+          echo "ATTO_CANARY_NO_CHECKOUT=true"
+          echo "ATTO_CANARY_RUN_ID=${GITHUB_RUN_ID}"
+          echo "ATTO_CANARY_RUN_ATTEMPT=${GITHUB_RUN_ATTEMPT}"
+      - name: Execute source-free synthetic contract checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="oreslang-llvmc: native rt mut share requires verified SharedMutex<T> capability, guarded lowering and allocation-domain proof; refusing unsynchronized alias at byte 49"
+          [[ "$actual" =~ ^oreslang-llvmc:\ native\ rt\ mut\ share\ requires\ verified\ SharedMutex\<T\>\ capability,\ guarded\ lowering\ and\ allocation-domain\ proof\;\ refusing\ unsynchronized\ alias\ at\ byte\ [0-9]+$ ]]
+          [[ "$actual" != *$'\n'* ]]
+          echo "ATTO_CANARY_SYNTHETIC_CHECKS=2"
+          echo "ATTO_CANARY_NATIVE_COMPILER_EXECUTED=false"
