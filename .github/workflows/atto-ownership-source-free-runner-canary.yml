@@ -51,3 +51,55 @@ jobs:
           "$dir/smoke-c"
           echo "ATTO_CANARY_PRIVATE_COMPILER_EXECUTED=false"
           echo "ATTO_CANARY_PUBLIC_SOURCE_ONLY=true"
+
+      - name: Execute independent synthetic Rust denial-oracle tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          cat > "$scratch/oracle.rs" <<'RUST'
+          // Source-free oracle model: this does NOT compile private AttoLang code.
+          fn accepts(exit_code: i32, stdout: &str, stderr: &str) -> bool {
+              if exit_code != 1 || !stdout.is_empty() { return false; }
+              let mut lines = stderr.lines();
+              let first = match lines.next() { Some(line) => line, None => return false };
+              if lines.next().is_some() { return false; }
+              let offset = match first.strip_prefix("ownership capability denial at byte ") {
+                  Some(value) => value,
+                  None => return false
+              };
+              !offset.is_empty() && offset.bytes().all(|b| b.is_ascii_digit())
+          }
+          #[test] fn normal_denial() {
+              assert!(accepts(1, "", "ownership capability denial at byte 49\n"));
+          }
+          #[test] fn no_terminating_newline() {
+              assert!(accepts(1, "", "ownership capability denial at byte 49"));
+          }
+          #[test] fn mismatched_exit_status() {
+              assert!(!accepts(2, "", "ownership capability denial at byte 49"));
+          }
+          #[test] fn stdout_leak() {
+              assert!(!accepts(1, "define i64 @main() {", "ownership capability denial at byte 49"));
+          }
+          #[test] fn extra_error_line() {
+              assert!(!accepts(1, "", "ownership capability denial at byte 49\nunexpected parser error\n"));
+          }
+          #[test] fn same_line_spoof() {
+              assert!(!accepts(1, "", "ownership capability denial at byte 49; unrelated failure"));
+          }
+          #[test] fn malformed_offset() {
+              assert!(!accepts(1, "", "ownership capability denial at byte X49"));
+          }
+          #[test] fn empty_offset() {
+              assert!(!accepts(1, "", "ownership capability denial at byte "));
+          }
+          #[test] fn missing_ownership_diagnostic() {
+              assert!(!accepts(1, "", "usage error at byte 49"));
+          }
+          RUST
+          rustc --edition=2021 --test "$scratch/oracle.rs" -o "$scratch/oracle-tests"
+          "$scratch/oracle-tests" --nocapture
+          echo "ATTO_CANARY_SOURCE_FREE_RUST_TESTS=9"
+          echo "ATTO_CANARY_PRIVATE_SOURCE_BYTES=0"
