@@ -103,3 +103,51 @@ jobs:
           "$scratch/oracle-tests" --nocapture
           echo "ATTO_CANARY_SOURCE_FREE_RUST_TESTS=9"
           echo "ATTO_CANARY_PRIVATE_SOURCE_BYTES=0"
+
+      - name: Synthetic file-identity tamper probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          cat > "$work/identity.rs" <<'RUST'
+          use std::fs;
+          use std::os::unix::fs::{symlink, MetadataExt};
+          use std::path::Path;
+          fn safe(original: &fs::Metadata, path: &Path) -> bool {
+              let Ok(current) = fs::symlink_metadata(path) else { return false };
+              current.is_file() && (current.dev(), current.ino()) == (original.dev(), original.ino())
+          }
+          fn fixture() -> (std::path::PathBuf, fs::Metadata) {
+              use std::sync::atomic::{AtomicUsize, Ordering};
+              static SERIAL: AtomicUsize = AtomicUsize::new(0);
+              let i = SERIAL.fetch_add(1, Ordering::Relaxed);
+              let path = std::env::temp_dir().join(format!("source-free-capture-{}-{}", std::process::id(), i));
+              fs::write(&path, b"log").unwrap();
+              let original = fs::symlink_metadata(&path).unwrap();
+              (path, original)
+          }
+          #[test] fn original_regular_file_is_accepted() {
+              let (path, original) = fixture();
+              assert!(safe(&original, &path));
+              fs::remove_file(path).unwrap();
+          }
+          #[test] fn replaced_regular_file_is_denied() {
+              let (path, original) = fixture();
+              fs::remove_file(&path).unwrap();
+              fs::write(&path, b"forged").unwrap();
+              assert!(!safe(&original, &path));
+              fs::remove_file(path).unwrap();
+          }
+          #[test] fn replaced_symlink_is_denied() {
+              let (path, original) = fixture();
+              fs::remove_file(&path).unwrap();
+              symlink("/dev/null", &path).unwrap();
+              assert!(!safe(&original, &path));
+              fs::remove_file(path).unwrap();
+          }
+          RUST
+          rustc --edition=2021 --test "$work/identity.rs" -o "$work/identity-tests"
+          "$work/identity-tests"
+          echo "ATTO_CANARY_CAPTURE_INTEGRITY_TESTS=3"
+          echo "ATTO_CANARY_PRIVATE_SOURCE_BYTES=0"
