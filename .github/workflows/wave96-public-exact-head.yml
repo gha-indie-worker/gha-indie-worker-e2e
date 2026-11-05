@@ -1,0 +1,54 @@
+name: Wave96 public exact-source validation
+on:
+  push:
+    branches:
+      - ci/wave96-public-exact-head-20261105
+permissions: {}
+jobs:
+  source-owned-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Verify exact public Git source heads and immutable trees, no token
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          export GIT_CONFIG_NOSYSTEM=1
+          mkdir -p "$RUNNER_TEMP/wave96"
+          while read -r id repo head tree; do
+            test -n "$id" || continue
+            d="$RUNNER_TEMP/wave96/$id"
+            mkdir "$d"
+            git -C "$d" init -q
+            git -C "$d" -c credential.helper= fetch -q --depth 1 "https://github.com/$repo.git" "$head"
+            git -C "$d" checkout -q --detach FETCH_HEAD
+            test "$(git -C "$d" rev-parse HEAD)" = "$head"
+            test "$(git -C "$d" rev-parse 'HEAD^{tree}')" = "$tree"
+            test -z "$(git -C "$d" status --porcelain --untracked-files=all)"
+            echo "PUBLIC_EXACT_TREE_PASS $id $head $tree"
+          done <<'GITRECEIPTS'
+          high77 ores-truffle-oreslang/html-js-css-syntax-highlighter 974c8ed04b210969222f31e81b4f25ca2b34e71e c687044a0d2a35182d7ff2b5f7410bf69076e82f
+          high78 ores-truffle-oreslang/html-js-css-syntax-highlighter 94f3b5176f47659f461a9ef5d80362a9a4c56ef3 1a95aaee177c6261526a02d5f47902ca6fe71b49
+          editor75 ores-truffle-oreslang/vscode-plugins 7e5ffefe1329036fda795c6fee9698b17761d678 b0c0c4a0527586a073ef97845bd216efbea06015
+          editor76 ores-truffle-oreslang/vscode-plugins b07133fb721ee13124b78a44a4471cfa5d3e86c1 a730dc360446c07adbecf4ade65564fc29dd0825
+          cli76 ores-truffle-oreslang/oreslang-cli 9ef729356ee675c8d56280dd68e6e175e8ac62d0 8ffff72385395dad1965dee7460120c0fc9f32a7
+          GITRECEIPTS
+      - name: Run both exact highlighter regression suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP/wave96/high77" && node --test test/wave96-gpt6-anchored-multiline-boundary-20261105.test.js)
+          (cd "$RUNNER_TEMP/wave96/high78" && node --test test/wave96-gpt6-independent-registered-languages-20261105.test.js)
+      - name: Run both exact editor regression suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP/wave96/editor75" && node --test test/wave96-gpt6-legacy-mixed-newlines-20261105.test.js)
+          (cd "$RUNNER_TEMP/wave96/editor76" && node --test test/wave96-gpt6-machine-range-peer-isolation-20261105.test.js)
+      - name: Execute exact release publisher negative controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/wave96/cli76"
+          python3 -m unittest discover -s scripts -p 'test_release_archive_wave96_gpt6_zip_member_paths_20261105.py' -v
