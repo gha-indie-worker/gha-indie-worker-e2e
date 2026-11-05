@@ -46,6 +46,30 @@ jobs:
           set -euo pipefail
           (cd "$RUNNER_TEMP/wave96/editor75" && node --test test/wave96-gpt6-legacy-mixed-newlines-20261105.test.js)
           (cd "$RUNNER_TEMP/wave96/editor76" && node --test test/wave96-gpt6-machine-range-peer-isolation-20261105.test.js)
+      - name: Run repository-owned highlighter full Node CI and release tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repo in high77 high78; do
+            cd "$RUNNER_TEMP/wave96/$repo"
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm run ci
+            node scripts/check-upstream-syntax.mjs
+            npm run pack:verify
+          done
+      - name: Run repository-owned editor full Node and portable packaging suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repo in editor75 editor76; do
+            cd "$RUNNER_TEMP/wave96/$repo"
+            npm ci --ignore-scripts --no-audit --no-fund
+            npm test
+            node scripts/check-upstream-syntax.mjs
+            node tools/export-portable-textmate.js
+            python3 -m unittest discover -s tools -p 'test_*.py' -v
+            python3 tools/package-portable-textmate.py
+          done
       - name: Execute exact release publisher negative controls
         shell: bash
         run: |
