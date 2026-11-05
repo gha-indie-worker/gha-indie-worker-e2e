@@ -1,0 +1,69 @@
+name: Wave95 public PR exact-head host verification
+on:
+  push:
+    branches:
+      - ci/wave95-public-heads-20261105
+permissions: {}
+jobs:
+  sublime-three-heads:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Verify three public immutable Sublime PR trees and run host suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          for case in \
+            "15 fa2db4fe287e7e0f282b8bc9d292697b8dbc106a b31e847ed80821b975dcfcacf530241524929e09" \
+            "16 ec0ec06f02bef743f8458029f224c9269b82e57f d0493ac5642049657df640e435a95a4be16bc29e" \
+            "17 110631bf02af0c4b6975f88e2d06f03bdb83e88c 47c86c5ab4a2f26dd937a5cb092f2e3f6ca67698"
+          do
+            read -r pr sha tree <<< "$case"
+            dir="$(mktemp -d)"
+            git -c credential.helper= clone -q --no-checkout --depth=1 https://github.com/ores-truffle-oreslang/sublime-text-plugins.git "$dir"
+            git -C "$dir" -c credential.helper= fetch -q --no-tags --depth=1 origin "refs/pull/$pr/head"
+            git -C "$dir" checkout -q --detach "$sha"
+            test "$(git -C "$dir" rev-parse HEAD)" = "$sha"
+            test "$(git -C "$dir" rev-parse 'HEAD^{tree}')" = "$tree"
+            test -z "$(git -C "$dir" status --porcelain --untracked-files=all)"
+            echo "WAVE95_EXACT_HEAD=$sha TREE=$tree SOURCE_PUBLIC=true"
+            (cd "$dir" && python3 -m unittest discover -s tests -v && node --test tests/*.test.cjs && python3 tools/package_sublime.py)
+            rm -rf -- "$dir"
+          done
+  highlighter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Run exact public highlighter PR head unit, browser, and package gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          dir="$(mktemp -d)"
+          git -c credential.helper= clone -q --no-checkout --depth=1 https://github.com/ores-truffle-oreslang/html-js-css-syntax-highlighter.git "$dir"
+          git -C "$dir" -c credential.helper= fetch -q --no-tags --depth=1 origin refs/pull/70/head
+          git -C "$dir" checkout -q --detach 4c9a10d8d0848e8369e16477f7daf9a9b64b6ff5
+          test "$(git -C "$dir" rev-parse HEAD)" = 4c9a10d8d0848e8369e16477f7daf9a9b64b6ff5
+          test "$(git -C "$dir" rev-parse 'HEAD^{tree}')" = be2219c0e2204ca9f04d66e798a0d9cdef89ff82
+          test -z "$(git -C "$dir" status --porcelain --untracked-files=all)"
+          echo WAVE95_HIGHLIGHTER_EXACT_HEAD=4c9a10d8d0848e8369e16477f7daf9a9b64b6ff5
+          (cd "$dir" && npm ci --ignore-scripts --no-audit --no-fund && npm run ci && npm run pack:verify)
+  cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Run exact public CLI PR release policy negatives
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          dir="$(mktemp -d)"
+          git -c credential.helper= clone -q --no-checkout --depth=1 https://github.com/ores-truffle-oreslang/oreslang-cli.git "$dir"
+          git -C "$dir" -c credential.helper= fetch -q --no-tags --depth=1 origin refs/pull/72/head
+          git -C "$dir" checkout -q --detach 1c4c50300bae7a8c735912df88121827cd36cb00
+          test "$(git -C "$dir" rev-parse HEAD)" = 1c4c50300bae7a8c735912df88121827cd36cb00
+          test "$(git -C "$dir" rev-parse 'HEAD^{tree}')" = 24d57749aac453151a77857e4e275bf6e76636fd
+          test -z "$(git -C "$dir" status --porcelain --untracked-files=all)"
+          echo WAVE95_CLI_EXACT_HEAD=1c4c50300bae7a8c735912df88121827cd36cb00
+          (cd "$dir" && python3 -m unittest discover -s scripts -p 'test_release_archive*.py' -v && cargo fmt --all -- --check && cargo test --workspace --locked)
