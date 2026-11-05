@@ -30,8 +30,8 @@ jobs:
           done <<'GITRECEIPTS'
           high77 ores-truffle-oreslang/html-js-css-syntax-highlighter 974c8ed04b210969222f31e81b4f25ca2b34e71e c687044a0d2a35182d7ff2b5f7410bf69076e82f
           high78 ores-truffle-oreslang/html-js-css-syntax-highlighter 94f3b5176f47659f461a9ef5d80362a9a4c56ef3 1a95aaee177c6261526a02d5f47902ca6fe71b49
-          editor75 ores-truffle-oreslang/vscode-plugins 7e5ffefe1329036fda795c6fee9698b17761d678 b0c0c4a0527586a073ef97845bd216efbea06015
-          editor76 ores-truffle-oreslang/vscode-plugins b07133fb721ee13124b78a44a4471cfa5d3e86c1 a730dc360446c07adbecf4ade65564fc29dd0825
+          editor75 ores-truffle-oreslang/vscode-plugins 609580faf0360fb8b00a8ff97aecf620f4857a05 c4a86a25a6775ac978d10e5f97a9d11a4ee5a43f
+          editor76 ores-truffle-oreslang/vscode-plugins 533e75b829f5f7adea149a41232b3ad43b7fe09b 84c71a0ddbb6f24f6a17e37a00ec13067294a945
           cli76 ores-truffle-oreslang/oreslang-cli 9ef729356ee675c8d56280dd68e6e175e8ac62d0 8ffff72385395dad1965dee7460120c0fc9f32a7
           GITRECEIPTS
       - name: Run both exact highlighter regression suites
