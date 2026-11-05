@@ -1,0 +1,53 @@
+name: Public Atto demos exact-head alternate runner proof
+on:
+  push:
+    branches:
+      - ci/public-atto-demos-exact-head-20261105
+permissions:
+  contents: read
+jobs:
+  host-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch public Oreslang demos at exact immutable SHA without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir public-atto-demos
+          git -C public-atto-demos init -q
+          git -C public-atto-demos remote add origin https://github.com/ores-truffle-oreslang/oreslang-demos.git
+          git -C public-atto-demos -c credential.helper= -c core.askPass=true fetch --no-tags --depth=1 origin 9fd52b90584541c87d4526a965919149dc84c30f
+          git -C public-atto-demos checkout -q --detach FETCH_HEAD
+      - name: Verify immutable source commit and full Git tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd public-atto-demos
+          test "$(git rev-parse HEAD)" = "9fd52b90584541c87d4526a965919149dc84c30f"
+          test "$(git rev-parse HEAD^{tree})" = "aadf3c4b2aa67b2b1bfb7a75c0defd7a26c064a5"
+          test -z "$(git status --porcelain)"
+          printf 'PUBLIC_ATTO_EXACT_TREE_VERIFIED=PASS\n'
+      - name: Install JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Execute real public source-owned host tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd public-atto-demos
+          javac -Xlint:all desktop-app/DesktopHost.java desktop-app/DesktopHostContractTest.java
+          java -cp desktop-app DesktopHostContractTest
+          javac -Xlint:all web-server/HttpHost.java web-server/HttpHostContractTest.java
+          java -cp web-server HttpHostContractTest
+          sh scripts/test-stitch.sh
+          bash ci/test-source-policy.sh
+          node --test ai/check-examples.test.mjs
+          printf 'PUBLIC_ATTO_SOURCE_HOST_TESTS=PASS\n'
+      - name: Declare guest evidence boundary
+        shell: bash
+        run: |
+          echo 'PRIVATE_SOURCE_BYTES=0'
+          echo 'COMPILER_BACKED_GUEST=NOT_EXECUTED'
