@@ -112,35 +112,45 @@ jobs:
           trap 'rm -rf "$work"' EXIT
           cat > "$work/identity.rs" <<'RUST'
           use std::fs;
+          use std::io::Read;
           use std::os::unix::fs::{symlink, MetadataExt};
           use std::path::Path;
           fn safe(original: &fs::Metadata, path: &Path) -> bool {
               let Ok(current) = fs::symlink_metadata(path) else { return false };
               current.is_file() && (current.dev(), current.ino()) == (original.dev(), original.ino())
           }
-          fn fixture() -> (std::path::PathBuf, fs::Metadata) {
+          fn fixture() -> (std::path::PathBuf, fs::File, fs::Metadata) {
               use std::sync::atomic::{AtomicUsize, Ordering};
               static SERIAL: AtomicUsize = AtomicUsize::new(0);
               let i = SERIAL.fetch_add(1, Ordering::Relaxed);
-              let path = std::env::temp_dir().join(format!("source-free-capture-{}-{}", std::process::id(), i));
+              // The runner's private mktemp(1) directory prevents public /tmp races.
+              let root = std::path::PathBuf::from(std::env::var_os("ATTO_CANARY_SCRATCH_DIR").expect("private canary scratch"));
+              let path = root.join(format!("source-free-capture-{}-{}", std::process::id(), i));
               fs::write(&path, b"log").unwrap();
-              let original = fs::symlink_metadata(&path).unwrap();
-              (path, original)
+              // Keep the original descriptor open across unlink/recreate: otherwise
+              // inode reuse makes a newly replaced file appear to be the old file.
+              let pinned = fs::File::open(&path).unwrap();
+              let original = pinned.metadata().unwrap();
+              (path, pinned, original)
           }
           #[test] fn original_regular_file_is_accepted() {
-              let (path, original) = fixture();
+              let (path, _pinned, original) = fixture();
               assert!(safe(&original, &path));
               fs::remove_file(path).unwrap();
           }
           #[test] fn replaced_regular_file_is_denied() {
-              let (path, original) = fixture();
+              let (path, mut pinned, original) = fixture();
               fs::remove_file(&path).unwrap();
               fs::write(&path, b"forged").unwrap();
               assert!(!safe(&original, &path));
+              let mut retained = String::new();
+              pinned.read_to_string(&mut retained).unwrap();
+              assert_eq!(retained, "log");
+              assert_eq!(fs::read_to_string(&path).unwrap(), "forged");
               fs::remove_file(path).unwrap();
           }
           #[test] fn replaced_symlink_is_denied() {
-              let (path, original) = fixture();
+              let (path, _pinned, original) = fixture();
               fs::remove_file(&path).unwrap();
               symlink("/dev/null", &path).unwrap();
               assert!(!safe(&original, &path));
@@ -148,6 +158,6 @@ jobs:
           }
           RUST
           rustc --edition=2021 --test "$work/identity.rs" -o "$work/identity-tests"
-          "$work/identity-tests"
+          ATTO_CANARY_SCRATCH_DIR="$work" "$work/identity-tests"
           echo "ATTO_CANARY_CAPTURE_INTEGRITY_TESTS=3"
           echo "ATTO_CANARY_PRIVATE_SOURCE_BYTES=0"
