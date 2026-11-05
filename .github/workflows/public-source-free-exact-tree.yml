@@ -1,0 +1,32 @@
+name: Public source-free exact-tree mirror
+on:
+  push:
+    branches: [ci-exact-tree-probe-20261105]
+permissions:
+  contents: read
+jobs:
+  exact-tree:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact destination commit and tree
+        shell: bash
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          echo "EXACT_SOURCE_FREE_TREE=$(git rev-parse 'HEAD^{tree}')"
+      - name: Execute eight source-free contract tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Confirm Java and native toolchains
+        run: |
+          set -euo pipefail
+          java -version
+          javac -version
+          clang++ --version
