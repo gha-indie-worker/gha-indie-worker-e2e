@@ -1,0 +1,56 @@
+name: Public Wave6116 Chromium exact-head source test
+on:
+  push:
+    branches: [ci/public-wave6116-five-exact-heads-20261106]
+permissions:
+  contents: read
+jobs:
+  chromium:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: grammar
+            sha: 4a6b192344a1c53fc303698fd649e1316762b5c8
+            tree: 1f69ad291e53f5b06e40ce6bfa6073e4d2aba10e
+          - id: html
+            sha: 297924d066dea69fab894f1b6cdacd8596a76f71
+            tree: 0cbfa6c59fcec809ed6706ffe74f906eeb8228a7
+    name: ${{ matrix.id }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Fetch exact public highlighter PR source without credentials
+        shell: bash
+        env:
+          SHA: ${{ matrix.sha }}
+          TREE: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/ores-truffle-oreslang/html-js-css-syntax-highlighter.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c core.askPass=true fetch --no-tags --depth=1 origin "$SHA"
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SHA"
+          test "$(git -C source rev-parse HEAD^{tree})" = "$TREE"
+          test -z "$(git -C source status --porcelain)"
+          echo "EXACT_PUBLIC_TREE=PASS"
+      - name: Set Node 22.20.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.20.0'
+      - name: Install locked Playwright dependencies
+        working-directory: source
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install real Chromium
+        working-directory: source
+        run: npx playwright install --with-deps chromium
+      - name: Execute original browser smoke on exact Git tree
+        working-directory: source
+        run: |
+          node browser/browser-smoke.mjs
+          echo EXACT_HEAD_REAL_CHROMIUM=PASS
+      - name: Record evidence boundary
+        run: |
+          echo PRIVATE_SOURCE_BYTES=0
+          echo COMPILER_GUEST_PARITY=NOT_EXECUTED
