@@ -1,0 +1,44 @@
+name: Public Atto highlighter exact-head Chromium regression
+on:
+  push:
+    branches:
+      - ci/public-wave2632-five-exact-heads-20261106
+permissions:
+  contents: read
+jobs:
+  browser-dom:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact public PR Git commit without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/ores-truffle-oreslang/html-js-css-syntax-highlighter.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c core.askPass=true fetch --no-tags --depth=1 origin 837014081e3f2569d42b99a2a7f03285dd94d100
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "837014081e3f2569d42b99a2a7f03285dd94d100"
+          test "$(git -C source rev-parse HEAD^{tree})" = "c9152d8e71bb0ef16c4b4b0a8825930af74385b2"
+          test -z "$(git -C source status --porcelain)"
+          echo "EXACT_PUBLIC_BROWSER_SOURCE_TREE=PASS"
+      - name: Setup Node 22.20
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.20.0'
+      - name: Install pinned Playwright
+        working-directory: source
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install actual Chromium
+        working-directory: source
+        run: npx playwright install --with-deps chromium
+      - name: Run exact source-owned browser security test
+        working-directory: source
+        run: |
+          node browser/browser-smoke.mjs
+          echo 'EXACT_HEAD_BROWSER_DOM=PASS'
+      - name: Declare scope
+        shell: bash
+        run: |
+          echo 'PRIVATE_SOURCE_BYTES=0'
+          echo 'COMPILER_GUEST_PARITY=NOT_EXECUTED'
