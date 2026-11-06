@@ -1,0 +1,43 @@
+name: Wave7110 public exact-head highlighter tests
+on:
+  push:
+    branches:
+      - ci/wave7110-public-only-20261106
+permissions: {}
+jobs:
+  astro-pr146:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Verify exact public source and execute Astro host tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          dir="$(mktemp -d)"
+          git -c credential.helper= clone -q --no-checkout --depth=1 https://github.com/ores-truffle-oreslang/html-js-css-syntax-highlighter.git "$dir"
+          git -C "$dir" -c credential.helper= fetch -q --no-tags --depth=1 origin refs/pull/146/head
+          git -C "$dir" checkout -q --detach 4fb3df9aaf2d6857dbb25b627fcedfb1f38fde00
+          test "$(git -C "$dir" rev-parse HEAD)" = 4fb3df9aaf2d6857dbb25b627fcedfb1f38fde00
+          test "$(git -C "$dir" rev-parse 'HEAD^{tree}')" = bdd0b9d6f6490396e1516e45f78f713f54f5945d
+          test -z "$(git -C "$dir" status --porcelain --untracked-files=all)"
+          echo EXACT_PUBLIC_ASTRO_HEAD=4fb3df9aaf2d6857dbb25b627fcedfb1f38fde00
+          (cd "$dir" && npm ci --ignore-scripts --no-audit --no-fund && npm run ci && npm run pack:verify)
+  symbol-pr147:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Verify exact public source and execute symbol host tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          dir="$(mktemp -d)"
+          git -c credential.helper= clone -q --no-checkout --depth=1 https://github.com/ores-truffle-oreslang/html-js-css-syntax-highlighter.git "$dir"
+          git -C "$dir" -c credential.helper= fetch -q --no-tags --depth=1 origin refs/pull/147/head
+          git -C "$dir" checkout -q --detach cdcc487475f880361acdfdf443ec11a4a9b0d7dc
+          test "$(git -C "$dir" rev-parse HEAD)" = cdcc487475f880361acdfdf443ec11a4a9b0d7dc
+          test "$(git -C "$dir" rev-parse 'HEAD^{tree}')" = 9991796a7169494302baf3a5d14867a1bbc17272
+          test -z "$(git -C "$dir" status --porcelain --untracked-files=all)"
+          echo EXACT_PUBLIC_SYMBOL_HEAD=cdcc487475f880361acdfdf443ec11a4a9b0d7dc
+          (cd "$dir" && npm ci --ignore-scripts --no-audit --no-fund && npm run ci && npm run pack:verify)
