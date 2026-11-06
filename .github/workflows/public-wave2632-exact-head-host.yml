@@ -1,0 +1,86 @@
+name: Public Wave2632 exact-head host test proof
+on:
+  push:
+    branches:
+      - ci/public-wave2632-five-exact-heads-20261106
+permissions:
+  contents: read
+jobs:
+  source-host:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: highlighter-lookbehind
+            repository: html-js-css-syntax-highlighter
+            source_sha: b765aa81b60a07498bf22875b7a52dbcc455df3d
+            tree_sha: 44f60e132298cea5502df706e6e27ded9794cc5f
+            test_kind: highlighter
+          - id: highlighter-renderer
+            repository: html-js-css-syntax-highlighter
+            source_sha: 837014081e3f2569d42b99a2a7f03285dd94d100
+            tree_sha: c9152d8e71bb0ef16c4b4b0a8825930af74385b2
+            test_kind: highlighter
+          - id: sublime-mutable-types
+            repository: sublime-text-plugins
+            source_sha: f34b32f8ca1a5a6d766ca763b2b38d70709c2c4b
+            tree_sha: ba88d1bff0431d22c41ff1b1ed36b4881ebb1e1d
+            test_kind: sublime
+          - id: sublime-zip-metadata
+            repository: sublime-text-plugins
+            source_sha: beefc152d0da03bebdbcf930dec13648bcee754e
+            tree_sha: e090f550ee6296f597750881c40813bfd6a81768
+            test_kind: sublime
+          - id: cli-windows-magic
+            repository: oreslang-cli
+            source_sha: 170d01104c7b68b4576d01031c2387cb4c676105
+            tree_sha: fe8dc2365f4fd62ad0c0032bc4168f19fd07b04b
+            test_kind: cli
+    name: ${{ matrix.id }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Fetch pinned public source without private tokens
+        shell: bash
+        env:
+          SOURCE_REPO: ${{ matrix.repository }}
+          SOURCE_SHA: ${{ matrix.source_sha }}
+          TREE_SHA: ${{ matrix.tree_sha }}
+        run: |
+          set -euo pipefail
+          test ${#SOURCE_SHA} -eq 40
+          test ${#TREE_SHA} -eq 40
+          git init -q source
+          git -C source remote add origin "https://github.com/ores-truffle-oreslang/$SOURCE_REPO.git"
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c core.askPass=true fetch --no-tags --depth=1 origin "$SOURCE_SHA"
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git -C source rev-parse HEAD^{tree})" = "$TREE_SHA"
+          test -z "$(git -C source status --porcelain)"
+          echo "PUBLIC_EXACT_TREE=PASS"
+      - name: Execute source-owned host regressions
+        shell: bash
+        env:
+          TEST_KIND: ${{ matrix.test_kind }}
+        run: |
+          set -euo pipefail
+          cd source
+          case "$TEST_KIND" in
+            highlighter)
+              npm run check
+              npm test
+              ;;
+            sublime)
+              python3 -m unittest discover -s tests -p 'test_wave2632_gpt6_*.py' -v
+              ;;
+            cli)
+              python3 -m unittest discover -s scripts -p 'test_release_archive_wave2632_gpt6_*.py' -v
+              ;;
+            *) exit 2 ;;
+          esac
+          echo "PUBLIC_SOURCE_OWNED_HOST_TESTS=PASS"
+      - name: Evidence scope
+        shell: bash
+        run: |
+          echo "PRIVATE_SOURCE_BYTES=0"
+          echo "COMPILER_GUEST_PARITY=NOT_EXECUTED"
