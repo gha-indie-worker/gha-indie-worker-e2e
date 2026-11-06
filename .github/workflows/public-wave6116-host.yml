@@ -1,0 +1,90 @@
+name: Public Wave6116 five PR exact-tree host evidence
+on:
+  push:
+    branches: [ci/public-wave6116-five-exact-heads-20261106]
+permissions:
+  contents: read
+jobs:
+  source-host:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: highlighter-grammar
+            source_repo: html-js-css-syntax-highlighter
+            source_sha: 4a6b192344a1c53fc303698fd649e1316762b5c8
+            tree_sha: 1f69ad291e53f5b06e40ce6bfa6073e4d2aba10e
+            suite: highlighter
+          - id: highlighter-html
+            source_repo: html-js-css-syntax-highlighter
+            source_sha: 297924d066dea69fab894f1b6cdacd8596a76f71
+            tree_sha: 0cbfa6c59fcec809ed6706ffe74f906eeb8228a7
+            suite: highlighter
+          - id: vscode-machine
+            source_repo: vscode-plugins
+            source_sha: aba6266f3bbaae4b30a99daed013f8f51cebd73d
+            tree_sha: 212c0ec23db9a656095321842cb211856a69ffd1
+            suite: vscode
+          - id: vscode-nesting
+            source_repo: vscode-plugins
+            source_sha: 1e27ca0a524bcb68423c522142d3bf84b44c438e
+            tree_sha: 74b9ca4127af6e2f84a43f7be7af29189c0ba1ae
+            suite: vscode
+          - id: cli-elf
+            source_repo: oreslang-cli
+            source_sha: b4ac54ed8fe349ec63b1456f398e148434d226a7
+            tree_sha: 45faa5d2493770c97121c132b63b9cfc44b676c2
+            suite: cli
+    name: ${{ matrix.id }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch public source at exact SHA without credentials and verify Git tree
+        shell: bash
+        env:
+          REPO: ${{ matrix.source_repo }}
+          SHA: ${{ matrix.source_sha }}
+          TREE: ${{ matrix.tree_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p source
+          git -C source init -q
+          git -C source remote add origin "https://github.com/ores-truffle-oreslang/$REPO.git"
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= -c core.askPass=true fetch --no-tags --depth=1 origin "$SHA"
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SHA"
+          test "$(git -C source rev-parse HEAD^{tree})" = "$TREE"
+          test -z "$(git -C source status --porcelain)"
+          echo PUBLIC_EXACT_SOURCE_TREE=PASS
+      - name: Install pinned Node
+        if: matrix.suite != 'cli'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.20.0'
+      - name: Run exact-source original host regressions
+        shell: bash
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: |
+          set -euo pipefail
+          cd source
+          case "$SUITE" in
+            highlighter)
+              npm ci --ignore-scripts --no-audit --no-fund
+              npm run ci
+              npm run pack:verify
+              ;;
+            vscode)
+              npm ci --ignore-scripts --no-audit --no-fund
+              npm test
+              ;;
+            cli)
+              python3 -m unittest discover -s scripts -p 'test_release_archive_wave6116_linux_short_header.py' -v
+              ;;
+            *) exit 2 ;;
+          esac
+          echo SOURCE_HOST_SUITE=PASS
+      - name: Record scope
+        run: |
+          echo "PRIVATE_SOURCE_BYTES=0"
+          echo "COMPILER_GUEST_PARITY=NOT_EXECUTED"
