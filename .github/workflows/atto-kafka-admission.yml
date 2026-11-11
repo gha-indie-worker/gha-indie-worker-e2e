@@ -1,0 +1,26 @@
+name: Atto Kafka independent Actions admission probe
+on:
+  push:
+    branches:
+      - validation/atto-kafka-admission-20261111
+permissions:
+  contents: read
+jobs:
+  admission:
+    name: Kafka source-free admission - no guest evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Executed job receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "KAFKA_ALTERNATE_RUNNER=EXECUTED_PASS"
+          echo "TEST_SHA=$GITHUB_SHA"
+          echo "TREE=$(git rev-parse 'HEAD^{tree}')"
+          echo "ATTO_KAFKA_GUEST=NOT_EXECUTED"
