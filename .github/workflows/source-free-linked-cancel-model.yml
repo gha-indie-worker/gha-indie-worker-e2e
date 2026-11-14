@@ -1,0 +1,90 @@
+name: Source-free directed cancellation model
+on:
+  push:
+    branches:
+      - audit/source-free-task-cancel-20261018
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  directed-cancel-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Execute independent graph and cancellation-depth oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=commonjs <<'NODE'
+          const assert = require('node:assert/strict');
+          // Independently authored graph oracle. No Oreslang source or Git checkout.
+          let active = false;
+          const queue = [];
+          let maxQueue = 0;
+          let assertions = 0;
+          const ok = x => { assert.ok(x); assertions++; };
+          function enqueue(source) {
+            queue.push(source);
+            maxQueue = Math.max(maxQueue, queue.length);
+            if (active) return;
+            active = true;
+            try {
+              while (queue.length) queue.shift().cancel();
+            } finally {
+              queue.length = 0;
+              active = false;
+            }
+          }
+          class Source {
+            constructor(){ this.cancelled = false; this.listeners = new Set(); this.count = 0; }
+            subscribe(callback) {
+              if (this.cancelled) { callback(); return () => {}; }
+              this.listeners.add(callback);
+              return () => this.listeners.delete(callback);
+            }
+            cancel() {
+              if (this.cancelled) return false;
+              this.cancelled = true;
+              this.count++;
+              const callbacks = Array.from(this.listeners);
+              this.listeners.clear();
+              for (const cb of callbacks) cb();
+              return true;
+            }
+          }
+          const link = (parents) => {
+            const child = new Source();
+            const detach = parents.map(p => p.subscribe(() => enqueue(child)));
+            child.subscribe(() => { for (const stop of detach) stop(); });
+            return child;
+          };
+          const nodes = [new Source()];
+          for (let i = 0; i < 8192; i++) nodes.push(link([nodes[nodes.length - 1]]));
+          const tail = nodes[nodes.length - 1];
+          let tailNotices = 0;
+          tail.subscribe(() => { tailNotices++; });
+          ok(nodes[0].cancel());
+          ok(tailNotices === 1);
+          for (const n of nodes) { ok(n.cancelled && n.count === 1); ok(n.listeners.size === 0); }
+          const root = new Source();
+          const unrelated = new Source();
+          const a = link([root]), b = link([root]), leaf = link([a,b]);
+          ok(root.cancel());
+          ok(a.cancelled && b.cancelled && leaf.cancelled);
+          ok(leaf.count === 1);
+          ok(!unrelated.cancelled);
+          for (let seed = 0; seed < 10000; seed++) {
+            const p = new Source(), q = new Source();
+            const child = link([p,q]);
+            const pattern = ((seed * 1103515245 + 12345) >>> 0) % 4;
+            if (pattern & 1) p.cancel();
+            if (pattern & 2) q.cancel();
+            ok(child.cancelled === (pattern !== 0));
+            ok(child.count === (pattern === 0 ? 0 : 1));
+            if (!child.cancelled) child.cancel();
+          }
+          ok(!active && queue.length === 0);
+          console.log('SOURCE_FREE_DIRECTED_CANCEL_PASS assertions=' + assertions +
+            ' depth=8192 diamond=true schedules=10000 maxQueue=' + maxQueue +
+            ' source_export=false');
+          NODE

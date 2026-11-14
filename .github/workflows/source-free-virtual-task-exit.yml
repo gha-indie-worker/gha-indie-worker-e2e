@@ -1,0 +1,30 @@
+name: Source-free Java Task physical-exit oracle
+on:
+  push:
+    branches:
+      - audit/source-free-task-cancel-20261018
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  task-exit-oracle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source-free model repository
+        uses: actions/checkout@v4
+      - name: Use JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Compile independently authored Java oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          javac -d /tmp models/TaskExitOracle.java
+      - name: Run physical-exit stress and retry scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -cp /tmp TaskExitOracle
