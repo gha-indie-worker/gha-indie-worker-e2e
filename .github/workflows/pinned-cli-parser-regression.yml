@@ -1,0 +1,48 @@
+# Read-only exact-commit testing of the public CLI parser on an independently scheduled runner.
+# No private sources, tokens beyond contents:read, Docker, or secret access.
+name: Pinned public CLI parser regression
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/pinned-cli-parser-regression.yml'
+permissions:
+  contents: read
+jobs:
+  parser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact public CLI commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: gha-indie-worker/gha-indie-worker-cli
+          ref: 421f38ba387d9b6dd0b8ce7924dd7b85b44057a5
+          path: public-cli
+          persist-credentials: false
+      - name: Verify immutable commit and exact Rust source blob
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C public-cli rev-parse HEAD)" = 421f38ba387d9b6dd0b8ce7924dd7b85b44057a5
+          test "$(git -C public-cli hash-object src/args.rs)" = c3da81c393e5d243c0b638ff2a630db525cefe58
+      - name: Compile and execute production parser's Rust unit tests without remote dependencies
+        working-directory: public-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > cli_parser_fixture.rs <<'RS'
+          #![forbid(unsafe_code)]
+          mod error {
+              #[derive(Debug)]
+              pub enum CliError {
+                  Usage(String),
+              }
+          }
+          #[path = "src/args.rs"]
+          mod args;
+          RS
+          rustc --edition=2021 --test cli_parser_fixture.rs -o "$RUNNER_TEMP/cli_parser_tests"
+          "$RUNNER_TEMP/cli_parser_tests" --nocapture
+      - name: Validate exact public source formatting
+        working-directory: public-cli
+        run: cargo fmt --all -- --check
