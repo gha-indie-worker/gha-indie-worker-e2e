@@ -47,3 +47,23 @@ jobs:
           test "$PROBE_READY" = true
           test "$CONDITION_PASSED" = yes
           printf 'Hosted runner YAML baseline passed on %s\n' "$RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
+  failure-semantics:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Deliberate source-free failure under continue-on-error
+        id: sentinel
+        shell: bash
+        continue-on-error: true
+        run: exit 23
+      - name: Enforce raw outcome versus final step conclusion
+        shell: bash
+        env:
+          RAW_OUTCOME: ${{ steps.sentinel.outcome }}
+          POST_CONTINUATION_CONCLUSION: ${{ steps.sentinel.conclusion }}
+        run: |
+          set -euo pipefail
+          test "$RAW_OUTCOME" = failure
+          test "$POST_CONTINUATION_CONCLUSION" = success
+          printf 'Failure propagation semantics verified on %s\n' "$RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
