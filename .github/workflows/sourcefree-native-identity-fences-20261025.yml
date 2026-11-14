@@ -1,0 +1,322 @@
+name: Source-free native identity fences
+
+on:
+  push:
+    branches:
+      - audit/source-free-actor-ref-rt-bootstrap-20261025
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-identity-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: No private Oreslang payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e private-oreslang-source
+          echo "private_source_bytes=0"
+          echo "model_for_llvm_nio_head=c8f8b1f9c8cc90affd439dfaac83978df722f731"
+          echo "model_for_llvm_http_head=a78ab3b5c5b022be3fa442af0b1d583c893f778d"
+          echo "model_for_llvm_envelope_head=0fa71cd8bc5ddef2ba70f5d697bbd4a46bdf9019"
+          echo "model_for_llvm_cleanup_head=a7559f3a9bd8eb1547cdee96724d99c5bec97cbf"
+          echo "model_for_llvm_send_stop_head=8f787a6d034b402aba325c099330902c92ac7927"
+      - name: Build and run scheduler identity model
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/sourcefree-native-identity"
+          mkdir -p "$work"
+          cat > "$work/model.cpp" <<'CPP'
+          #include <atomic>
+          #include <cstdint>
+          #include <cstdlib>
+          #include <iostream>
+          #include <limits>
+          #include <memory>
+          #include <map>
+          #include <utility>
+
+          struct ActorRef {
+              std::uint64_t scheduler_domain{};
+              std::uint64_t actor_slot{};
+              std::uint64_t generation{};
+          };
+
+          struct Scheduler {
+              std::uint64_t domain{};
+              bool actor_live{true};
+          };
+
+          struct Ticket {
+              Scheduler* scheduler{};
+              ActorRef scheduler_actor{};
+          };
+
+          struct ControlTicket {
+              std::uint64_t nonce{};
+          };
+
+          struct GroupRef {
+              std::uint64_t runtime{};
+              std::uint64_t actor{};
+              std::uint64_t generation{};
+              std::shared_ptr<ControlTicket> ticket;
+          };
+
+          struct Owner {
+              std::uint64_t generation{};
+              std::uint64_t group{};
+              std::shared_ptr<ControlTicket> ticket;
+          };
+
+          struct OwnerRegistry {
+              std::map<std::pair<std::uint64_t, std::uint64_t>, Owner> live;
+
+              bool adopt(const GroupRef& ref, std::uint64_t group) {
+                  return live.emplace(
+                      std::make_pair(ref.runtime, ref.actor),
+                      Owner{ref.generation, group, ref.ticket}).second;
+              }
+
+              bool finalize(const GroupRef& ref, std::uint64_t group) {
+                  auto it = live.find({ref.runtime, ref.actor});
+                  if (it == live.end()
+                      || it->second.generation != ref.generation
+                      || it->second.group != group
+                      || it->second.ticket != ref.ticket)
+                      return false;
+                  live.erase(it);
+                  return true;
+              }
+          };
+
+          static std::atomic<std::uint64_t> next_domain{1};
+
+          static std::uint64_t allocate_domain() {
+              auto candidate = next_domain.load(std::memory_order_relaxed);
+              while (candidate != 0 && candidate != std::numeric_limits<std::uint64_t>::max()) {
+                  if (next_domain.compare_exchange_weak(
+                          candidate, candidate + 1,
+                          std::memory_order_relaxed,
+                          std::memory_order_relaxed))
+                      return candidate;
+              }
+              return 0;
+          }
+
+          static bool same_actor(ActorRef a, ActorRef b) {
+              return a.scheduler_domain != 0
+                  && a.scheduler_domain == b.scheduler_domain
+                  && a.actor_slot == b.actor_slot
+                  && a.generation == b.generation;
+          }
+
+          static bool matches_scheduler_incarnation(
+                  const Ticket& ticket, std::uint64_t control_generation,
+                  Scheduler* scheduler, ActorRef actor) {
+              return control_generation == actor.generation
+                  && scheduler != nullptr
+                  && ticket.scheduler == scheduler
+                  && same_actor(ticket.scheduler_actor, actor)
+                  && scheduler->actor_live
+                  && scheduler->domain == actor.scheduler_domain;
+          }
+
+          static bool valid_scheduler_binding(
+                  std::uint64_t control_generation,
+                  Scheduler* scheduler,
+                  ActorRef actor) {
+              const bool has_actor = actor.scheduler_domain != 0
+                  || actor.actor_slot != 0
+                  || actor.generation != 0;
+              if ((scheduler == nullptr) != !has_actor) return false;
+              if (!scheduler) return true;
+              return actor.scheduler_domain != 0
+                  && actor.generation != 0
+                  && actor.generation == control_generation
+                  && scheduler->actor_live
+                  && scheduler->domain == actor.scheduler_domain;
+          }
+
+          struct HttpExchange {
+              ActorRef owner{};
+              bool queued{};
+
+              bool enqueue(ActorRef actor) {
+                  if (!actor.scheduler_domain || !actor.generation || queued) return false;
+                  owner = actor;
+                  queued = true;
+                  return true;
+              }
+
+              bool claim(ActorRef actor) const {
+                  return queued && same_actor(owner, actor);
+              }
+          };
+
+          struct CleanupRecord {
+              std::uint64_t allocation_domain{};
+              std::uint64_t allocation_owner{};
+              std::uint64_t actor_generation{};
+              std::uint64_t execution_runtime_domain{};
+          };
+
+          static bool cleanup_claimed(
+                  const CleanupRecord& record,
+                  std::uint64_t ticket_actor,
+                  std::uint64_t ticket_generation) {
+              return record.allocation_domain != 0
+                  && record.allocation_owner == ticket_actor
+                  && record.actor_generation == ticket_generation
+                  && record.execution_runtime_domain == record.allocation_domain;
+          }
+
+          struct SendAdmission {
+              bool stop_requested{};
+              int allocated{};
+
+              bool start() {
+                  if (stop_requested) return false;
+                  ++allocated;
+                  return true;
+              }
+          };
+
+          static void require(bool value, const char* message) {
+              if (!value) {
+                  std::cerr << "FAIL: " << message << '\n';
+                  std::exit(1);
+              }
+          }
+
+          int main() {
+              next_domain.store(std::numeric_limits<std::uint64_t>::max() - 1,
+                                std::memory_order_relaxed);
+              const auto final_valid = allocate_domain();
+              const auto exhausted = allocate_domain();
+              const auto still_exhausted = allocate_domain();
+              require(final_valid == std::numeric_limits<std::uint64_t>::max() - 1,
+                      "last valid domain was not allocated");
+              require(exhausted == 0 && still_exhausted == 0,
+                      "scheduler-domain allocator wrapped after exhaustion");
+
+              Scheduler original{41, true};
+              Scheduler foreign{42, true};
+              ActorRef owner{41, 7, 9};
+              ActorRef same_fields{41, 7, 9};
+              ActorRef stale_generation{41, 7, 8};
+              ActorRef foreign_same_slot_generation{42, 7, 9};
+              Ticket exact{&original, owner};
+
+              require(valid_scheduler_binding(owner.generation, &original, owner),
+                      "exact scheduler binding rejected before publication");
+              require(!valid_scheduler_binding(owner.generation + 1, &original, owner),
+                      "split control/scheduler generation published");
+              require(!valid_scheduler_binding(owner.generation, &original,
+                                               foreign_same_slot_generation),
+                      "foreign complete scheduler ref published");
+              require(!valid_scheduler_binding(owner.generation, nullptr, owner),
+                      "complete scheduler actor accepted without scheduler");
+              ActorRef incomplete{0, owner.actor_slot, owner.generation};
+              require(!valid_scheduler_binding(owner.generation, &original, incomplete),
+                      "incomplete scheduler actor accepted before publication");
+
+              require(matches_scheduler_incarnation(exact, owner.generation, &original, owner),
+                      "exact scheduler incarnation rejected");
+              require(matches_scheduler_incarnation(exact, owner.generation, &original, same_fields),
+                      "value-equivalent exact native actor ref rejected");
+              require(!matches_scheduler_incarnation(exact, owner.generation, &original, stale_generation),
+                      "stale generation accepted");
+              require(!matches_scheduler_incarnation(
+                          exact, owner.generation + 1, &original, owner),
+                      "split control/scheduler generation accepted");
+              require(!matches_scheduler_incarnation(exact, owner.generation, &foreign, foreign_same_slot_generation),
+                      "foreign scheduler accepted same slot/generation");
+              require(!matches_scheduler_incarnation(exact, owner.generation, &foreign, owner),
+                      "wrong scheduler pointer accepted original numeric actor");
+              original.actor_live = false;
+              require(!matches_scheduler_incarnation(exact, owner.generation, &original, owner),
+                      "retired actor accepted");
+
+              Scheduler replacement_same_numeric_domain{41, true};
+              require(!matches_scheduler_incarnation(
+                          exact, owner.generation,
+                          &replacement_same_numeric_domain, owner),
+                      "replacement scheduler object accepted old opaque ticket");
+
+              Ticket replacement_ticket{&replacement_same_numeric_domain, owner};
+              require(matches_scheduler_incarnation(
+                          replacement_ticket, owner.generation,
+                          &replacement_same_numeric_domain, owner),
+                      "fresh replacement ticket rejected");
+
+              OwnerRegistry registry;
+              auto first_ticket = std::make_shared<ControlTicket>(ControlTicket{1});
+              auto forged_ticket = std::make_shared<ControlTicket>(ControlTicket{2});
+              GroupRef first{91, 17, 9, first_ticket};
+              GroupRef forged_same_numeric{91, 17, 9, forged_ticket};
+              require(registry.adopt(first, 5),
+                      "owner registry rejected first incarnation");
+              require(!registry.finalize(forged_same_numeric, 5),
+                      "same-label same-generation forged ticket retired live owner");
+              require(registry.live.size() == 1,
+                      "failed forged finalization mutated owner registry");
+              require(registry.finalize(first, 5),
+                      "exact opaque owner ticket could not finalize");
+              require(registry.adopt(forged_same_numeric, 5),
+                      "replacement with same numeric identity could not be adopted");
+              require(!registry.finalize(first, 5),
+                      "stale exact ticket retired replacement incarnation");
+              require(registry.live.size() == 1,
+                      "stale finalizer erased replacement owner");
+              require(registry.finalize(forged_same_numeric, 5),
+                      "replacement exact opaque ticket could not finalize");
+
+              HttpExchange exchange;
+              require(exchange.enqueue(owner),
+                      "HTTP exchange rejected exact actor incarnation");
+              require(exchange.claim(owner),
+                      "HTTP exchange rejected exact owner claim");
+              require(!exchange.claim(stale_generation),
+                      "HTTP exchange accepted stale generation");
+              require(!exchange.claim(foreign_same_slot_generation),
+                      "HTTP exchange accepted foreign scheduler domain");
+
+              CleanupRecord cleanup{77, 17, 9, 77};
+              require(cleanup_claimed(cleanup, 17, 9),
+                      "cleanup binding rejected exact owner/domain/generation");
+              require(!cleanup_claimed(cleanup, 77, 9),
+                      "cleanup binding confused runtime domain with actor owner");
+              require(!cleanup_claimed(cleanup, 17, 10),
+                      "cleanup binding accepted wrong actor generation");
+              CleanupRecord mismatched_domain{77, 17, 9, 78};
+              require(!cleanup_claimed(mismatched_domain, 17, 9),
+                      "cleanup binding accepted execution/allocation domain mismatch");
+
+              SendAdmission send;
+              require(send.start() && send.allocated == 1,
+                      "pre-stop send admission rejected");
+              send.stop_requested = true;
+              require(!send.start() && send.allocated == 1,
+                      "post-stop send allocated a new async descriptor");
+
+              std::cout
+                  << "NATIVE_IDENTITY_FENCE_MODEL_OK cases=34 private_source_bytes=0\n";
+              return 0;
+          }
+          CPP
+          g++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror "$work/model.cpp" -o "$work/model-gcc"
+          "$work/model-gcc"
+          clang++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror "$work/model.cpp" -o "$work/model-clang"
+          "$work/model-clang"
+          clang++ -std=c++20 -O1 -g -Wall -Wextra -Wpedantic -Werror             -fsanitize=address,undefined -fno-omit-frame-pointer             "$work/model.cpp" -o "$work/model-sanitize"
+          "$work/model-sanitize"
+          echo "SOURCE_FREE_NATIVE_IDENTITY_PASS compilers=3 private_source_bytes=0"

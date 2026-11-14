@@ -1,0 +1,376 @@
+name: Source-free actor identity and RT bootstrap
+
+on:
+  push:
+    branches:
+      - audit/source-free-actor-ref-rt-bootstrap-20261025
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actor-ref-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Install JDK 25
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
+        with:
+          java-version: '25'
+          distribution: temurin
+      - name: No private Oreslang payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e private-oreslang-source
+          echo "private_source_bytes=0"
+          echo "model_for_java_head=49fab070734ae9c450d34df9229473ac03edfb84"
+      - name: Compile and run exact-incarnation model
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/sourcefree-actor-ref"
+          mkdir -p "$work"
+          cat > "$work/ActorRefModel.java" <<'JAVA'
+          public final class ActorRefModel {
+              record Id(long value) {}
+              static final ThreadLocal<Ref> CURRENT = new ThreadLocal<>();
+              static final class Ref {
+                  final Object runtime;
+                  final Id id;
+                  final long generation;
+                  Ref(Object runtime, long id, long generation) {
+                      this.runtime = runtime;
+                      this.id = new Id(id);
+                      this.generation = generation;
+                  }
+              }
+              static final class Lease {
+                  final Object runtime;
+                  final Ref owner;
+                  Lease(Object runtime, Ref owner) {
+                      this.runtime = runtime;
+                      this.owner = owner;
+                  }
+                  boolean ownedBy(Object candidateRuntime, Ref candidate) {
+                      return runtime == candidateRuntime && owner == candidate;
+                  }
+                  boolean ownedBy(Object candidateRuntime, Id logicalId) {
+                      Ref current = CURRENT.get();
+                      return logicalId != null
+                              && current != null
+                              && current.id.equals(logicalId)
+                              && ownedBy(candidateRuntime, current);
+                  }
+              }
+              static final class Exchange {
+                  Object stateOwner;
+                  long stateGeneration;
+                  final Object owner;
+                  final long generation;
+                  Exchange(Object stateOwner, long stateGeneration) {
+                      this.stateOwner = stateOwner;
+                      this.stateGeneration = stateGeneration;
+                      this.owner = stateOwner;
+                      this.generation = stateGeneration;
+                  }
+                  boolean accessibleBy(Object currentOwner) {
+                      return generation == stateGeneration
+                              && owner == stateOwner
+                              && owner == currentOwner;
+                  }
+                  Exchange moveTo(Ref destination) {
+                      stateGeneration++;
+                      stateOwner = destination;
+                      return new Exchange(stateOwner, stateGeneration);
+                  }
+              }
+              static final class Group {
+                  final java.util.Map<Id, Ref> members = new java.util.HashMap<>();
+                  final java.util.Map<Ref, java.util.Set<Integer>> reverse =
+                          new java.util.IdentityHashMap<>();
+                  final java.util.Set<Ref> stopping =
+                          java.util.Collections.newSetFromMap(
+                                  new java.util.IdentityHashMap<>());
+                  void join(Ref ref) {
+                      Ref existing = members.get(ref.id);
+                      if (existing == ref) return;
+                      if (existing != null) {
+                          throw new IllegalStateException("logical id already bound");
+                      }
+                      members.put(ref.id, ref);
+                      reverse.computeIfAbsent(
+                              ref, ignored -> new java.util.HashSet<>()).add(1);
+                  }
+                  boolean isMember(Ref ref) {
+                      return members.get(ref.id) == ref;
+                  }
+                  void leave(Ref ref) {
+                      if (!members.remove(ref.id, ref)) return;
+                      reverse.remove(ref);
+                  }
+                  void markStopping(Ref ref) {
+                      stopping.add(ref);
+                  }
+              }
+              static final class Subscription {
+                  final Ref owner;
+                  boolean closed;
+                  Subscription(Ref owner) { this.owner = owner; }
+                  void retire(Ref ref) {
+                      if (owner == ref) closed = true;
+                  }
+              }
+              static final class Reservation {
+                  final Ref owner;
+                  boolean released;
+                  Reservation(Ref owner) { this.owner = owner; }
+                  boolean close(Ref current) {
+                      if (current != owner) return false;
+                      released = true;
+                      return true;
+                  }
+              }
+              static final class BehaviorState {
+                  final Ref owner;
+                  BehaviorState(Ref owner) { this.owner = owner; }
+                  boolean validateAfterTurn(Ref current) {
+                      return current == owner;
+                  }
+              }
+              private static void require(boolean value, String message) {
+                  if (!value) throw new AssertionError(message);
+              }
+              public static void main(String[] args) {
+                  Object runtime = new Object();
+                  Object foreignRuntime = new Object();
+                  Ref owner = new Ref(runtime, 7, 41);
+                  Ref restarted = new Ref(runtime, 7, 42);
+                  Ref forgedSameFields = new Ref(runtime, 7, 41);
+                  Ref foreignRuntimeRef = new Ref(foreignRuntime, 7, 41);
+                  Lease lease = new Lease(runtime, owner);
+
+                  require(lease.ownedBy(runtime, owner), "exact owner rejected");
+                  require(!lease.ownedBy(runtime, restarted), "new generation accepted as exact ref");
+                  require(!lease.ownedBy(runtime, forgedSameFields), "forged equal fields accepted as exact ref");
+
+                  CURRENT.set(owner);
+                  require(lease.ownedBy(runtime, new Id(7)),
+                          "legacy logical id rejected for exact current owner");
+
+                  CURRENT.set(restarted);
+                  require(!lease.ownedBy(runtime, new Id(7)),
+                          "restarted same-id incarnation gained legacy authority");
+
+                  CURRENT.set(foreignRuntimeRef);
+                  require(!lease.ownedBy(runtime, new Id(7)),
+                          "foreign runtime gained legacy authority");
+
+                  CURRENT.remove();
+                  require(!lease.ownedBy(runtime, new Id(7)),
+                          "ambient host gained legacy ActorId authority");
+
+                  Object host = new Object();
+                  Exchange hostExchange = new Exchange(host, 0);
+                  require(hostExchange.accessibleBy(host), "host exchange owner rejected");
+                  Exchange moved = hostExchange.moveTo(owner);
+                  require(moved.accessibleBy(owner), "exact HTTP actor owner rejected");
+                  require(!moved.accessibleBy(restarted),
+                          "same-id restarted actor inherited HTTP exchange authority");
+                  require(!moved.accessibleBy(forgedSameFields),
+                          "forged same-fields ref inherited HTTP exchange authority");
+
+                  Group group = new Group();
+                  group.join(owner);
+                  require(group.isMember(owner), "exact group member rejected");
+                  require(!group.isMember(restarted), "same-id restart inherited group membership");
+                  require(!group.isMember(forgedSameFields), "forged ref inherited group membership");
+                  boolean collisionRejected = false;
+                  try { group.join(restarted); }
+                  catch (IllegalStateException expected) { collisionRejected = true; }
+                  require(collisionRejected, "replacement overtook live same-id group member");
+                  require(group.reverse.containsKey(owner),
+                          "reverse membership index lost exact owner ref");
+                  require(!group.reverse.containsKey(restarted),
+                          "same-id replacement inherited reverse membership quota");
+                  group.markStopping(owner);
+                  require(group.stopping.contains(owner),
+                          "exact owner missing from stop-admission ledger");
+                  require(!group.stopping.contains(restarted),
+                          "same-id replacement inherited stop-admission state");
+
+                  Subscription subscription = new Subscription(owner);
+                  subscription.retire(forgedSameFields);
+                  require(!subscription.closed,
+                          "forged same-fields ref closed exact-owner subscription");
+
+                  group.leave(owner);
+                  group.join(restarted);
+                  require(group.isMember(restarted), "replacement could not explicitly rejoin after retirement");
+                  group.leave(owner);
+                  require(group.isMember(restarted), "stale retirement evicted replacement membership");
+                  require(group.reverse.containsKey(restarted),
+                          "replacement reverse membership not keyed by exact ref");
+
+                  subscription.retire(owner);
+                  require(subscription.closed,
+                          "exact owner retirement failed to close subscription");
+
+                  Reservation reservation = new Reservation(owner);
+                  require(!reservation.close(restarted),
+                          "same-id replacement retired private reservation");
+                  require(!reservation.close(forgedSameFields),
+                          "forged same-fields ref retired private reservation");
+                  require(!reservation.close(null),
+                          "ambient host retired private reservation");
+                  require(reservation.close(owner),
+                          "exact private reservation owner was rejected");
+
+                  BehaviorState behaviorState = new BehaviorState(owner);
+                  require(behaviorState.validateAfterTurn(owner),
+                          "post-turn private-state validator rejected exact ref");
+                  require(!behaviorState.validateAfterTurn(restarted),
+                          "post-turn private-state validator accepted restarted same-id ref");
+                  require(!behaviorState.validateAfterTurn(forgedSameFields),
+                          "post-turn private-state validator accepted forged same-fields ref");
+
+                  System.out.println("ACTOR_SHARD_EXACT_REF_MODEL_OK cases=30 private_source_bytes=0");
+              }
+          }
+          JAVA
+          javac --release 25 -Xlint:all -Werror "$work/ActorRefModel.java"
+          java -cp "$work" ActorRefModel
+
+  rt-bootstrap-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: No private Oreslang payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e private-oreslang-source
+          echo "private_source_bytes=0"
+          echo "model_for_llvm_head=a59e187155da94cbcfba3fa1ff3844a3f4bae226"
+      - name: Build and run C11 state model with GCC Clang and sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/sourcefree-rt-bootstrap"
+          mkdir -p "$work"
+          cat > "$work/model.c" <<'C'
+          #include <stddef.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+
+          typedef struct {
+              size_t worker_count;
+              size_t started_workers;
+              size_t accepted;
+              size_t outstanding;
+              size_t runnable_lanes;
+              int retired;
+              int rt_preallocated;
+              int rt_failed;
+              long fail_after;
+              long create_attempts;
+          } Scheduler;
+
+          static void require(int value, const char *message) {
+              if (!value) {
+                  fprintf(stderr, "FAIL: %s\n", message);
+                  exit(1);
+              }
+          }
+
+          static int create_worker(Scheduler *s) {
+              if (s->fail_after >= 0 && s->create_attempts++ >= s->fail_after) return 0;
+              ++s->started_workers;
+              return 1;
+          }
+
+          static int ensure_workers(Scheduler *s, size_t required) {
+              if (required > s->worker_count) required = s->worker_count;
+              if (s->rt_failed) return 0;
+              if (s->rt_preallocated) return s->started_workers >= required;
+              while (s->started_workers < required) {
+                  if (!create_worker(s)) break;
+              }
+              return s->started_workers >= required;
+          }
+
+          static int prestart_throughput(Scheduler *s) {
+              if (s->retired || s->accepted != 0 || s->outstanding != 0 || s->runnable_lanes != 0)
+                  return 0;
+              return ensure_workers(s, s->worker_count);
+          }
+
+          static int prestart_rt(Scheduler *s) {
+              if (s->retired || s->rt_preallocated || s->rt_failed
+                      || s->started_workers != 0 || s->accepted != 0
+                      || s->outstanding != 0 || s->runnable_lanes != 0)
+                  return 0;
+              if (ensure_workers(s, s->worker_count)) {
+                  s->rt_preallocated = 1;
+                  return 1;
+              }
+              s->rt_failed = 1;
+              return 0;
+          }
+
+          static int admit_lane(Scheduler *s) {
+              size_t required = s->runnable_lanes + 1;
+              if (!ensure_workers(s, required)) return 0;
+              ++s->runnable_lanes;
+              ++s->accepted;
+              ++s->outstanding;
+              return 1;
+          }
+
+          int main(void) {
+              Scheduler promoted = {.worker_count=1, .fail_after=-1};
+              require(prestart_throughput(&promoted), "throughput prestart failed");
+              require(promoted.started_workers == 1, "wrong throughput worker count");
+              require(!prestart_rt(&promoted), "throughput scheduler promoted to RT");
+
+              Scheduler partial = {.worker_count=2, .fail_after=1};
+              require(!prestart_throughput(&partial), "partial throughput unexpectedly complete");
+              require(partial.started_workers == 1, "partial throughput did not retain one worker");
+              require(!prestart_rt(&partial), "partial throughput promoted to RT");
+              require(!partial.rt_failed, "RT rejection poisoned throughput retry");
+              partial.fail_after = -1;
+              require(prestart_throughput(&partial), "throughput retry failed");
+              require(partial.started_workers == 2, "throughput retry did not finish");
+
+              Scheduler poisoned = {.worker_count=2, .fail_after=1};
+              require(!prestart_rt(&poisoned), "partial RT unexpectedly succeeded");
+              require(poisoned.rt_failed, "failed RT did not poison scheduler");
+              require(poisoned.started_workers == 1, "failed RT partial worker count wrong");
+              poisoned.fail_after = -1;
+              require(!prestart_rt(&poisoned), "poisoned RT retried");
+              require(!prestart_throughput(&poisoned), "poisoned scheduler healed via throughput");
+              require(!admit_lane(&poisoned), "poisoned scheduler admitted live work");
+
+              Scheduler clean = {.worker_count=2, .fail_after=-1};
+              require(prestart_rt(&clean), "clean RT bootstrap failed");
+              require(clean.rt_preallocated, "RT success flag missing");
+              require(clean.started_workers == 2, "RT did not prestart full carrier set");
+              require(admit_lane(&clean), "RT could not reuse prestarted carrier");
+              require(clean.started_workers == 2, "RT live admission created a carrier");
+              require(!prestart_rt(&clean), "second RT bootstrap succeeded");
+
+              puts("RT_BOOTSTRAP_MODEL_OK cases=4 private_source_bytes=0");
+              return 0;
+          }
+          C
+          gcc -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror "$work/model.c" -o "$work/model-gcc"
+          "$work/model-gcc"
+          clang -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror "$work/model.c" -o "$work/model-clang"
+          "$work/model-clang"
+          clang -std=c11 -O1 -g -Wall -Wextra -Wpedantic -Werror             -fsanitize=address,undefined -fno-omit-frame-pointer             "$work/model.c" -o "$work/model-sanitize"
+          "$work/model-sanitize"
+          echo "SOURCE_FREE_RT_MODEL_PASS compilers=3 private_source_bytes=0"
