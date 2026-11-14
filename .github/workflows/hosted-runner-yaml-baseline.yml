@@ -1,0 +1,49 @@
+# PR-only hosted baseline for the source-free manual self-hosted runner probe.
+# No checkout, third-party actions, secrets, or untrusted shell input.
+name: Hosted baseline for runner YAML conformance
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/hosted-runner-yaml-baseline.yml'
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.emit.outputs.ready }}
+    steps:
+      - name: Validate source-free GitHub Actions contexts
+        shell: bash
+        env:
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = pull_request
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test -d "$GITHUB_WORKSPACE"
+          test -d "$RUNNER_TEMP"
+      - name: Emit a step output for downstream evaluation
+        id: emit
+        shell: bash
+        run: printf 'ready=true\n' >> "$GITHUB_OUTPUT"
+  verify:
+    needs: probe
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Conditional step
+        id: conditional
+        if: ${{ needs.probe.outputs.ready == 'true' }}
+        shell: bash
+        run: printf 'passed=yes\n' >> "$GITHUB_OUTPUT"
+      - name: Assert both output boundaries
+        shell: bash
+        env:
+          PROBE_READY: ${{ needs.probe.outputs.ready }}
+          CONDITION_PASSED: ${{ steps.conditional.outputs.passed }}
+        run: |
+          set -euo pipefail
+          test "$PROBE_READY" = true
+          test "$CONDITION_PASSED" = yes
+          printf 'Hosted runner YAML baseline passed on %s\n' "$RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
