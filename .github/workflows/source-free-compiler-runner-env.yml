@@ -1,0 +1,66 @@
+name: Source-free compiler runner environment oracle
+on:
+  push:
+    branches:
+      - ci/source-free-compiler-runner-env-20261018
+  pull_request:
+    paths:
+      - '.github/workflows/source-free-compiler-runner-env.yml'
+permissions:
+  contents: read
+jobs:
+  source-free-runner-environment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Exercise independent synthetic Maven Java Git environment policy (no checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          
+          shell = '''set -euo pipefail
+          for key in MAVEN_OPTS MAVEN_ARGS JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_CONFIG_COUNT PYTHONPATH PYTHONHOME; do
+            if [[ -v "$key" && -n "${!key}" ]]; then exit 23; fi
+          done
+          for file in .mvn/maven.config .mvn/jvm.config .mvn/extensions.xml; do
+            if [[ -e "$file" || -L "$file" ]]; then exit 24; fi
+          done
+          '''
+          keys = ['MAVEN_OPTS', 'MAVEN_ARGS', 'JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS',
+                  'JDK_JAVA_OPTIONS', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+                  'GIT_CONFIG_COUNT', 'PYTHONPATH', 'PYTHONHOME']
+          configs = ['.mvn/maven.config', '.mvn/jvm.config', '.mvn/extensions.xml']
+          checks = 0
+          
+          def evaluate(injections=None, config=None):
+              with tempfile.TemporaryDirectory() as td:
+                  root = Path(td)
+                  (root / '.mvn').mkdir()
+                  if config is not None:
+                      (root / config).write_text('fake unreviewed data')
+                  env = {'PATH': os.defpath, 'HOME': td}
+                  env.update(injections or {})
+                  return subprocess.run(['bash', '--noprofile', '--norc', '-e', '-c', shell],
+                                        cwd=root, env=env, capture_output=True, timeout=10).returncode
+          
+          assert evaluate() == 0
+          checks += 1
+          for key in keys:
+              assert evaluate({key: 'unreviewed'}) == 23, key
+              checks += 1
+          for cfg in configs:
+              assert evaluate(config=cfg) == 24, cfg
+              checks += 1
+          assert evaluate({'MAVEN_OPTS': ''}) == 0
+          checks += 1
+          print(json.dumps({'kind': 'INDEPENDENT_SOURCE_FREE_RUNNER_ENV_ORACLE',
+                            'cases': checks, 'status': 'PASS',
+                            'private_source_present': False, 'compiler_executed': False,
+                            'guest_executed': False}, sort_keys=True))
+          PY
