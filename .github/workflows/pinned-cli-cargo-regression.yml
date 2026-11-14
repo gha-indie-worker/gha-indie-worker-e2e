@@ -15,15 +15,16 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: gha-indie-worker/gha-indie-worker-cli
-          ref: 91751a64ebb8a9de8d8e8de09d593df963dd38fd
+          ref: 747249c39be619f32453c303042535e17c965691
           path: public-cli
           persist-credentials: false
       - name: Verify exact source commit
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git -C public-cli rev-parse HEAD)" = 91751a64ebb8a9de8d8e8de09d593df963dd38fd
+          test "$(git -C public-cli rev-parse HEAD)" = 747249c39be619f32453c303042535e17c965691
           test "$(git -C public-cli hash-object src/args.rs)" = 390f8497817b6ddcf6395918dfdd9dc96cf71ea6
+          test "$(git -C public-cli hash-object Cargo.lock)" = 7ecc7a2f8e1a6a94ff9c3f8bff2e091f9464b81d
       - name: Execute locked Rust regression suite
         working-directory: public-cli
         run: cargo test --all-targets --locked
