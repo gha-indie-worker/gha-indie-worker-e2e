@@ -1,0 +1,37 @@
+name: Atto control memory GCC-Clang source-free runner capacity
+on:
+  push:
+    branches:
+      - ci/atto-control-sourcefree-20261121
+permissions:
+  contents: read
+jobs:
+  sourcefree-native-toolchain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Execute C11 compiler and scalar width witness (NO source export)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'ATTO_PRIVATE_SOURCE_COPIED=FALSE'
+          echo 'ATTO_COMPILED_GUEST_VERIFIED=FALSE'
+          cat > /tmp/atto-sourcefree-width.c <<'EOF'
+          #include <stdint.h>
+          #include <stdio.h>
+          #include <limits.h>
+          #include <string.h>
+          typedef struct { uint32_t ref32; uint64_t low, high; } StandaloneModel;
+          int main(void) {
+            StandaloneModel m = {UINT32_MAX, UINT64_C(0x0123456789abcdef), UINT64_C(0xfedcba9876543210)};
+            if (sizeof(m.ref32) != 4 || sizeof(m.low) != 8 || sizeof(m.high) != 8) return 1;
+            if ((uint64_t)m.ref32 != UINT64_C(4294967295)) return 2;
+            if (m.low != UINT64_C(0x0123456789abcdef) || m.high != UINT64_C(0xfedcba9876543210)) return 3;
+            puts("SOURCE_FREE_C11_WIDTH_MODEL_PASS_NOT_GUEST");
+            return 0;
+          }
+          EOF
+          for cc in gcc clang; do
+            "$cc" -std=c11 -O2 -Wall -Wextra -Werror -pedantic /tmp/atto-sourcefree-width.c -o "/tmp/atto-width-$cc"
+            "/tmp/atto-width-$cc" | grep -Fx 'SOURCE_FREE_C11_WIDTH_MODEL_PASS_NOT_GUEST'
+          done
