@@ -52,5 +52,25 @@ jobs:
           if (!d.records.every(r => r.suite === 'atto-actor-critical-v1' && r.validation_status === 'unvalidated')) process.exit(5);
           console.log('33/33 inventory; 0/11 compiler guest executions claimed');
           NODE
+      - name: Deny unverified and adapterless actor guest certification
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          cargo run --manifest-path tools/parity-runner/Cargo.toml --locked -- --actor-critical --backend java --execute --output actor-unvalidated.json
+          rc1=$?
+          cargo run --manifest-path tools/parity-runner/Cargo.toml --locked -- --actor-critical --backend java --execute --allow-unvalidated --output actor-missing-adapter.json
+          rc2=$?
+          set -e
+          test "$rc1" -ne 0
+          test "$rc2" -ne 0
+          node - <<'NODE'
+          const strict = require('./actor-unvalidated.json');
+          const permissive = require('./actor-missing-adapter.json');
+          if (strict.summary.unvalidated !== 3 || strict.records.length !== 3) process.exit(3);
+          if (permissive.summary.backend_not_configured !== 3 || permissive.records.length !== 3) process.exit(4);
+          if (![...strict.records, ...permissive.records].every(r => !r.compile && !r.run)) process.exit(5);
+          console.log('UNVERIFIED_AND_UNCONFIGURED_GUEST_EXECUTION=DENIED');
+          NODE
       - name: No host-only evidence promotion
         run: echo "HOST_RUNNER_ONLY; ACTUAL_ATTO_COMPILER_GUESTS=NOT_EXECUTED"
