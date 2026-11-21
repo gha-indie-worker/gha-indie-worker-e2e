@@ -1,0 +1,93 @@
+{
+  "java": {
+    "integer_range": [
+      "integer literal overflows signed 64-bit:"
+    ],
+    "type_mismatch": [
+      "return value has type FLOAT but expected INT"
+    ],
+    "arity": [
+      "call arity mismatch"
+    ],
+    "unknown_identifier": [
+      "unknown name 'missing'"
+    ],
+    "duplicate_symbol": [
+      "module/top-level overload identity is name + arity only"
+    ],
+    "actor_lexical_isolation": [
+      "cannot implicitly access file/module callable"
+    ],
+    "unsupported_nb_prefix": [
+      "'nb' must prefix readch, writech, select, or cb writech"
+    ]
+  },
+  "js": {
+    "integer_range": [
+      "int literal outside provisional signed i64"
+    ],
+    "arity": [
+      "call arity mismatch"
+    ],
+    "unknown_identifier": [
+      "unresolved identifier"
+    ],
+    "duplicate_symbol": [
+      "duplicate caller-visible arity"
+    ],
+    "unsupported_feature": [
+      "division unsupported in provisional int profile",
+      "expected module, found actor"
+    ],
+    "unsupported_select": [
+      "static select requires checked channel/future arbitration"
+    ]
+  },
+  "llvm": {
+    "integer_range": [
+      "integer literal overflows signed 64-bit"
+    ],
+    "arity": [
+      "call arity mismatch"
+    ],
+    "unknown_identifier": [
+      "unknown parameter 'missing'"
+    ],
+    "duplicate_symbol": [
+      "parameter and return types do not select overloads"
+    ],
+    "unsupported_nb_prefix": [
+      "nb applies to channel/select operations, not dispatch arms"
+    ],
+    "unsupported_select": [
+      "native async/channel/select boundary unsupported"
+    ]
+  },
+  "wasm": {
+    "unsupported_select": [
+      "native async/channel/select boundary unsupported"
+    ]
+  },
+  "dotnet": {
+    "unsupported_select": [
+      "static select requires checked channel/future arbitration"
+    ]
+  },
+  "forge": {
+    "integer_range": [
+      "invalid i64"
+    ],
+    "arity": [
+      "function arity mismatch:"
+    ],
+    "duplicate_symbol": [
+      "duplicate function at byte"
+    ],
+    "unsupported_feature": [
+      "source imports require verified module graph lowering",
+      "class/actor methods require typed native lowering",
+      "runtime ownership operation requires typed lowering in Forge"
+    ]
+  },
+  "cranelift": {}
+}

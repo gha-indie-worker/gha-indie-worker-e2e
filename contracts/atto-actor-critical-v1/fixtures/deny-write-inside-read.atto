@@ -1,0 +1,50 @@
+use namespace guest;
+
+// Identical native Atto fixture in NATS/Kafka/RMQ/Redis.
+// Checks two actor-local logical states, not physical heap segregation.
+// Production actor arena allocation, cross-actor pointer denial and physical
+// retirement require separate compiler/runtime instrumentation and tests.
+// No production network/FS I/O; stdout below is TEST-ONLY and may block
+// the root runner. It is NOT evidence of an async I/O implementation.
+// No mutable actor-state loan crosses await.
+define actor ArenaIsolationProbe as
+  state {
+    let int counter = 0;
+  }
+
+  receive(ActorMail<int> mail): void {
+    if mail.value == 1 then
+      self.handle_state(critical-write |s| -> {
+        s.counter = s.counter + 1;
+      });
+      // Intentional compiler-negative: a critical-read view cannot mutate
+      // its actor-owned state, even when this value is a scalar.
+      self.handle_state(critical-read |s| -> {
+        s.counter = s.counter + 1;
+      });
+      self.send(1);
+    fi
+    self.end();
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val first = spawn ArenaIsolationProbe();
+  val second = spawn ArenaIsolationProbe();
+  await first.get_ready();
+  await second.get_ready();
+  first.send(1);
+  second.send(1);
+  val int a = (await first.outputs.next()).value.unwrap().value;
+  val int b = (await second.outputs.next()).value.unwrap().value;
+  await first.get_done();
+  await second.get_done();
+  // Only a deterministic test receipt, not production I/O on actor carriers.
+  if a == 1 && b == 1 then
+    stdio.println("ATTO_TWO_ACTOR_LOGICAL_ISOLATION=PASS");
+  else
+    stdio.println("ATTO_TWO_ACTOR_LOGICAL_ISOLATION=FAIL");
+  fi
+  return;
+}

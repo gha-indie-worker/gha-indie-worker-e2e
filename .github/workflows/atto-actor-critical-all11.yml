@@ -1,0 +1,56 @@
+name: Atto actor-critical all-11 SHA-verified host runner
+on:
+  push:
+    branches: [ci/atto-actor-critical-all11-20261121]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  actor-critical-runner:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify exact carrier and source blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD:tools/parity-runner/Cargo.toml)" = "b375f79eca9615812394e2635efd88fe97766fb6"
+          test "$(git rev-parse HEAD:tools/parity-runner/Cargo.lock)" = "050ff73cc776b484cc051c56de37509448c2c086"
+          test "$(git rev-parse HEAD:tools/parity-runner/src/main.rs)" = "27b8e8703a8a4163f7e713116fe53635e416834f"
+          test "$(git rev-parse HEAD:tools/parity-runner/tests/actor_critical_eleven_backend.rs)" = "21839cb9583c149fe2ae98076f013e56b5b94398"
+          test "$(git rev-parse HEAD:contracts/atto-actor-critical-v1/all-eleven-backend-admission.json)" = "8eb861340173fa2fed1f5622a83bf3b4fe92c098"
+          test "$(git rev-parse HEAD:contracts/atto-actor-critical-v1/contract.json)" = "fabab3f1e0bf6201d55009d9fef50a54db1cbe3b"
+          test "$(git rev-parse HEAD:contracts/atto-actor-critical-v1/fixtures/deny-send-inside-read.atto)" = "89eb278a139eb13079e8eda69a943f94591671cc"
+          test "$(git rev-parse HEAD:contracts/atto-actor-critical-v1/fixtures/deny-write-inside-read.atto)" = "b279055abc2ee5175299a74fe5b66662581a87cf"
+          test "$(git rev-parse HEAD:contracts/atto-actor-critical-v1/fixtures/two-actor-snapshot-positive.atto)" = "a6189d92c813426ecf54a09cf535c3874de45942"
+          test "$(git rev-parse HEAD:diagnostics.json)" = "7e4a716106f7e39ff2bba222a37714d52bb4161e"
+          echo "EXACT_SOURCE_BLOBS=10/10; SOURCE_TREE_MIRROR=SUBSET_ONLY"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: 1.99.1
+          components: clippy,rustfmt
+      - name: Rust format check
+        run: cargo fmt --manifest-path tools/parity-runner/Cargo.toml --all -- --check
+      - name: Clippy fail on warnings
+        run: cargo clippy --manifest-path tools/parity-runner/Cargo.toml --locked --all-targets -- -D warnings
+      - name: Execute registry and binary Rust tests
+        run: cargo test --manifest-path tools/parity-runner/Cargo.toml --locked
+      - name: Inventory three canonical Atto guests across eleven backend profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --manifest-path tools/parity-runner/Cargo.toml --locked -- --actor-critical --output actor-inventory.json
+          node - <<'NODE'
+          const d = require('./actor-inventory.json');
+          if (d.cases !== 3 || d.backends.length !== 11 || d.records.length !== 33) process.exit(3);
+          if (d.summary.not_run !== 33 || d.executed) process.exit(4);
+          if (!d.records.every(r => r.suite === 'atto-actor-critical-v1' && r.validation_status === 'unvalidated')) process.exit(5);
+          console.log('33/33 inventory; 0/11 compiler guest executions claimed');
+          NODE
+      - name: No host-only evidence promotion
+        run: echo "HOST_RUNNER_ONLY; ACTUAL_ATTO_COMPILER_GUESTS=NOT_EXECUTED"

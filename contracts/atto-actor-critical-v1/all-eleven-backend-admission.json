@@ -1,0 +1,173 @@
+{
+  "schema_version": 1,
+  "contract_id": "atto-actor-critical-all-eleven-v1",
+  "status": "AUTHORED_NOT_EXECUTED",
+  "purpose": "Fail-closed same-source admission inventory across every atto-source.* repository. NO compiled guest, proof of physical isolation, or backend parity certified.",
+  "canonical_contract": {
+    "path": "contracts/atto-actor-critical-v1/contract.json",
+    "id": "atto-actor-critical-v1",
+    "positive_fixture": "contracts/atto-actor-critical-v1/fixtures/two-actor-snapshot-positive.atto",
+    "positive_git_blob_sha": "a6189d92c813426ecf54a09cf535c3874de45942",
+    "negative_cases": [
+      {
+        "id": "deny-send-inside-read",
+        "path": "contracts/atto-actor-critical-v1/fixtures/deny-send-inside-read.atto",
+        "git_blob_sha": "89eb278a139eb13079e8eda69a943f94591671cc",
+        "expected_category": "actor_state_loan_escape_to_mailbox"
+      },
+      {
+        "id": "deny-write-inside-read",
+        "path": "contracts/atto-actor-critical-v1/fixtures/deny-write-inside-read.atto",
+        "git_blob_sha": "b279055abc2ee5175299a74fe5b66662581a87cf",
+        "expected_category": "write_through_read_only_actor_loan"
+      }
+    ]
+  },
+  "reference_rust_model": {
+    "repository": "atto-lang/atto-borrow-checker.rs",
+    "source_head_sha": "cf4d63d58ab4c88e6bd10dd383aa477e014c6602",
+    "root_tree_sha": "924dde1ed3f12ced1de10a246fc75d56c45fd1ae",
+    "evidence_tier": "HOST_MODEL_ONLY",
+    "guest_parity": "NOT_EXECUTED"
+  },
+  "required_backend_repositories": [
+    {
+      "backend": "java",
+      "repository": "atto-lang/atto-source.java",
+      "source_head_sha": "12ded133d89dafb21f48391e9aa3d5a7fb7f80f6",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    },
+    {
+      "backend": "llvm",
+      "repository": "atto-lang/atto-source.llvm",
+      "source_head_sha": "fe4f253b5932f8f00ab4a20f9b9bc2019d17553b",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    },
+    {
+      "backend": "dotnet",
+      "repository": "atto-lang/atto-source.net",
+      "source_head_sha": "5ed2444f3526b8b6685c7be0b038bbb8e6bc6f51",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    },
+    {
+      "backend": "rs",
+      "repository": "atto-lang/atto-source.rs",
+      "source_head_sha": "7f893323f761e4a71e4b2e199daf75845d8f1912",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    },
+    {
+      "backend": "wasm",
+      "repository": "atto-lang/atto-source.wasm",
+      "source_head_sha": "16ba74ab9f9959cc15d21dcb6e54a18e1c325fef",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    },
+    {
+      "backend": "forge",
+      "repository": "atto-lang/atto-source.forge",
+      "source_head_sha": "f5dd299c277376cabe9e536edbbb4e662a267ad4",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    },
+    {
+      "backend": "cranelift",
+      "repository": "atto-lang/atto-source.cranelift",
+      "source_head_sha": "e867c0a5cf8b94f98ce9b1212d2c735b76bc4120",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    },
+    {
+      "backend": "js",
+      "repository": "atto-lang/atto-source.js",
+      "source_head_sha": "b8e48b19c33b61e5faa4628bf03bddf2823f403d",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    },
+    {
+      "backend": "hdl",
+      "repository": "atto-lang/atto-source.hdl",
+      "source_head_sha": "023455e496bb9cfbdd157ccc94bb69f31eec44ea",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    },
+    {
+      "backend": "realtime",
+      "repository": "atto-lang/atto-source.realtime",
+      "source_head_sha": "4f6449470ab075cdad17884c7a1aee2a6e2ab54c",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    },
+    {
+      "backend": "atto",
+      "repository": "atto-lang/atto-source.atto",
+      "source_head_sha": "5b9a274490a4567ed9d1088fd1ff304dbe383357",
+      "compiler_guest_status": "NOT_EXECUTED",
+      "semantic_negative_status": "NOT_EXECUTED",
+      "physical_loan_status": "NOT_VERIFIED",
+      "provenance_binding_status": "NOT_VERIFIED",
+      "receipt": null
+    }
+  ],
+  "admission": {
+    "source_bytes": "SAME_THREE_PINNED_ATTO_BLOBS_FOR_ALL_BACKENDS",
+    "requires": [
+      "compiler_exact_head_and_tree",
+      "real_backend_compiler_invocation",
+      "positive_guest_actual_stdout_exact",
+      "both_negative_semantic_diagnostics_not_generic_parse_errors",
+      "compiler_lowered_actor_state_and_borrow_checks",
+      "runtime_minted_ref_and_authenticated_actor_incarnation",
+      "physical_rw_guard_held_through_load_store",
+      "stop_panic_cancel_quiescence_before_reclaim",
+      "nonzero_actions_runner_and_executed_steps",
+      "no_backend_substitution",
+      "nativeaot_not_hosted_coreclr",
+      "no_host_only_rust_model_as_guest_receipt"
+    ],
+    "forbid": [
+      "SKIPPED_AS_PASS",
+      "HOST_MODEL_AS_GUEST",
+      "SIMULATED_GUEST",
+      "ZERO_STEP_RUN_AS_PASS",
+      "SYNTHETIC_GUEST_RECEIPT",
+      "UNSAFE_FALLBACK",
+      "BACKEND_SPECIFIC_SOURCE_REWRITE",
+      "UNVERIFIED_PROVENANCE_BINDING"
+    ]
+  },
+  "note": "Backend SHAs are audit snapshot identities only; this registry makes no execution claim. Every new compiler commit requires independently refreshed exact-head proof."
+}

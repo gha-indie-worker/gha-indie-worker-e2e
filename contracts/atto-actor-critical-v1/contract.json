@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "contract_id": "atto-actor-critical-v1",
+  "status": "AUTHORED_NOT_EXECUTED",
+  "source_policy": {
+    "canonical_extension": ".atto",
+    "legacy": ".ores FOR EXPLICIT COMPATIBILITY ONLY",
+    "guest_first": true,
+    "host_substitution_denied": true
+  },
+  "positive": {
+    "id": "two-actor-snapshot-positive",
+    "path": "contracts/atto-actor-critical-v1/fixtures/two-actor-snapshot-positive.atto",
+    "git_blob_sha": "a6189d92c813426ecf54a09cf535c3874de45942",
+    "status": "AUTHORED_NOT_EXECUTED",
+    "expected_stdout_line": "ATTO_TWO_ACTOR_LOGICAL_ISOLATION=PASS",
+    "runtime_claim": "LOGICAL_ACTOR_ISOLATION_ONLY"
+  },
+  "negatives": [
+    {
+      "id": "deny-send-inside-read",
+      "path": "contracts/atto-actor-critical-v1/fixtures/deny-send-inside-read.atto",
+      "expected_category": "actor_state_loan_escape_to_mailbox",
+      "status": "AUTHORED_NOT_EXECUTED"
+    },
+    {
+      "id": "deny-write-inside-read",
+      "path": "contracts/atto-actor-critical-v1/fixtures/deny-write-inside-read.atto",
+      "expected_category": "write_through_read_only_actor_loan",
+      "status": "AUTHORED_NOT_EXECUTED"
+    }
+  ],
+  "required_backends": [
+    "java",
+    "llvm",
+    "dotnet"
+  ],
+  "backend_results": {
+    "java": "NOT_EXECUTED",
+    "llvm": "NOT_EXECUTED",
+    "dotnet": "NOT_EXECUTED"
+  },
+  "mirrors": [
+    {
+      "repo": "atto-poc/atto-nats-clone.atto",
+      "pr": 31,
+      "commit": "6defe3db3f4e9b69163e81124817c610f9816996"
+    },
+    {
+      "repo": "atto-poc/atto-kafka-clone.atto",
+      "pr": 34,
+      "commit": "570c269c10639a90a59841cdae1bfd4ee8856006"
+    },
+    {
+      "repo": "atto-poc/atto-rmq-clone.atto",
+      "pr": 25,
+      "commit": "18de4fdccc975b951f8115330bec675c38a4366f"
+    },
+    {
+      "repo": "ores-truffle-oreslang/atto-redis-clone.atto",
+      "pr": 42,
+      "commit": "969a5fed428d634b8e9c4ec0ec30d5430bfd0f54"
+    }
+  ],
+  "admission": {
+    "requires": [
+      "unchanged_atto_file",
+      "independent_compiler_head_and_tree",
+      "actual_parser_type_and_borrow_checker",
+      "executed_guest_output",
+      "targeted_semantic_diagnostic_not_generic_parse_error",
+      "nonzero_runner_and_steps",
+      "no_backend_substitution",
+      "native_llvm_optimized_and_unoptimized",
+      "nativeaot_not_hosted_clr",
+      "actor_heap_and_stack_separate_physical_proof",
+      "nonblocking_io_separate_runtime_proof"
+    ],
+    "prohibited_evidence": [
+      "source_only_test",
+      "zero_step_job",
+      "java_as_llvm",
+      "java_as_dotnet",
+      "host_only_csharp_cpp_or_rust_model",
+      "synthetic_receipt",
+      "different_file_per_backend"
+    ]
+  },
+  "performance_gate": {
+    "status": "NOT_BENCHMARKED",
+    "minimum_median_ratio": 0.7,
+    "not_proved_by_fixture": true
+  }
+}
