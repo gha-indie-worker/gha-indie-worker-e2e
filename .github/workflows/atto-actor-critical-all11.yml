@@ -21,7 +21,7 @@ jobs:
           test -z "$(git status --porcelain)"
           test "$(git rev-parse HEAD:tools/parity-runner/Cargo.toml)" = "b375f79eca9615812394e2635efd88fe97766fb6"
           test "$(git rev-parse HEAD:tools/parity-runner/Cargo.lock)" = "050ff73cc776b484cc051c56de37509448c2c086"
-          test "$(git rev-parse HEAD:tools/parity-runner/src/main.rs)" = "27b8e8703a8a4163f7e713116fe53635e416834f"
+          test "$(git rev-parse HEAD:tools/parity-runner/src/main.rs)" = "e45926522eeeffeb25a11677c6e11a0337c437a2"
           test "$(git rev-parse HEAD:tools/parity-runner/tests/actor_critical_eleven_backend.rs)" = "21839cb9583c149fe2ae98076f013e56b5b94398"
           test "$(git rev-parse HEAD:contracts/atto-actor-critical-v1/all-eleven-backend-admission.json)" = "8eb861340173fa2fed1f5622a83bf3b4fe92c098"
           test "$(git rev-parse HEAD:contracts/atto-actor-critical-v1/contract.json)" = "fabab3f1e0bf6201d55009d9fef50a54db1cbe3b"

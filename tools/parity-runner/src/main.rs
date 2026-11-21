@@ -528,8 +528,7 @@ fn load_actor_critical_cases(root: &Path) -> Result<(Vec<TestCase>, Corpus), Str
     )
     .map_err(|e| e.to_string())?;
     if canonical["status"] != "AUTHORED_NOT_EXECUTED"
-        || canonical["positive"]["expected_stdout_line"]
-            != "ATTO_TWO_ACTOR_LOGICAL_ISOLATION=PASS"
+        || canonical["positive"]["expected_stdout_line"] != "ATTO_TWO_ACTOR_LOGICAL_ISOLATION=PASS"
     {
         return Err("canonical actor-critical guest expectations changed".into());
     }
@@ -552,7 +551,9 @@ fn load_actor_critical_cases(root: &Path) -> Result<(Vec<TestCase>, Corpus), Str
             .file_type()
             .is_symlink()
         {
-            return Err(format!("actor-critical source must be a regular file: {path}"));
+            return Err(format!(
+                "actor-critical source must be a regular file: {path}"
+            ));
         }
         let output = Command::new("git")
             .arg("hash-object")
@@ -587,7 +588,11 @@ fn load_actor_critical_cases(root: &Path) -> Result<(Vec<TestCase>, Corpus), Str
             // No backend has a certified compiler+guest receipt yet. Even
             // explicit --execute --allow-unvalidated is exploratory only.
             validation_status: "unvalidated".into(),
-            features: vec!["actor".into(), "sealed-state".into(), "critical-loan".into()],
+            features: vec![
+                "actor".into(),
+                "sealed-state".into(),
+                "critical-loan".into(),
+            ],
         });
     }
     Ok((
@@ -958,7 +963,11 @@ fn main() -> Result<(), String> {
     let mut records = Vec::new();
     for case in &cases {
         for &(backend, env_name) in &BACKENDS {
-            if !is_backend_selected(backend, selected_backend.as_deref(), all_backends || actor_critical) {
+            if !is_backend_selected(
+                backend,
+                selected_backend.as_deref(),
+                all_backends || actor_critical,
+            ) {
                 continue;
             }
             records.push(evaluate_case(
@@ -984,7 +993,13 @@ fn main() -> Result<(), String> {
         corpus,
         backends: BACKENDS
             .iter()
-            .filter(|entry| is_backend_selected(entry.0, selected_backend.as_deref(), all_backends || actor_critical))
+            .filter(|entry| {
+                is_backend_selected(
+                    entry.0,
+                    selected_backend.as_deref(),
+                    all_backends || actor_critical,
+                )
+            })
             .map(|entry| entry.0.to_string())
             .collect(),
         records,
