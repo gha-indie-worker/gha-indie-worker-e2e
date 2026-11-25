@@ -1,0 +1,36 @@
+name: Atto browser exact public source validation
+on:
+  push:
+    branches: ['validation/atto-browser-pr21-8700441928d6']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Fetch immutable public source without credentials and verify tree
+        shell: bash
+        run: |
+          export GIT_TERMINAL_PROMPT=0
+          git init source
+          cd source
+          git -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-browser.git 8700441928d6f1ae0f05247df10b4c578080eaf6
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 8700441928d6f1ae0f05247df10b4c578080eaf6
+          test "$(git rev-parse HEAD^{tree})" = e711887248c41662da5610414f78fbb617c3ab4f
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Node test suite
+        working-directory: source
+        run: npm test
+      - name: Install pinned real browser harness
+        working-directory: source
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium firefox
+      - name: Real browser Worker integration
+        working-directory: source
+        run: npm run test:browser
