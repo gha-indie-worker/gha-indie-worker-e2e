@@ -1,0 +1,110 @@
+name: Atto conformance wave three
+on:
+  push:
+    branches: ['validation/atto-conformance-wave3-20261125']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 'baseline'
+            head: f13b3691f28d187bbeafe454a9cecf544342be6d
+          - pr: '593'
+            head: 76b2f84cabe45c1493dde38c29991b0a424f385e
+          - pr: '466'
+            head: e49721ab6da6e42cb874a202df233927489ddece
+          - pr: '350'
+            head: 13f455833106112fdd12ae91acb43770819e7fbd
+          - pr: '348'
+            head: 9b9b3b85d4bf93ab7f239d9dc0e1c33c903ecdae
+          - pr: '347'
+            head: 71981e96066c273b01d77bdf798090a1bd12e704
+          - pr: '345'
+            head: e83db3767c50657942f0f7a14fe2157fdb46f601
+          - pr: '335'
+            head: 42741b4bacf3be3fa0c8a7a3c7fdb9dbb60e8c2e
+          - pr: '333'
+            head: 080674f6e87024e2b97570888f5cbb800ebcfbb1
+          - pr: '330'
+            head: 687c519abc75352ea941651de6a159dd53b6c3b2
+          - pr: '319'
+            head: ab01c1ca2c955f759743e66367d2ef29099df1d4
+          - pr: '304'
+            head: a066a068bc8422aa1efda78edd5880019eefab00
+          - pr: '301'
+            head: f87f700f33a13ab16b5441117df6b0f743bcb0f9
+          - pr: '299'
+            head: 677344370305f1d90fbc987536d008de0af8c794
+          - pr: '298'
+            head: 1c18689718d6648b533685fcf3aa0886c33f619f
+          - pr: '297'
+            head: c31a04e1d6c3ee70b4df2486cc2ee375e047b887
+          - pr: '296'
+            head: 36756f78d0b1a07c0733f32e8e45507ddb9b1582
+          - pr: '294'
+            head: 776f58337b41bc4d3c568f9400e2cf3bfe48f3f6
+          - pr: '293'
+            head: 600ac7ae0f7b3903852411df85f114cd22b800c1
+          - pr: '289'
+            head: e0e349bffe1000facc3ce573c7fa9c1c0d806fd4
+          - pr: '264'
+            head: 65a3adf0d087159caa6d8c8bc457aa513a024750
+          - pr: '358'
+            head: e239d7b6f0ce4d0fac2b930e40f16aee26523046
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Verify pinned public source and integration
+        env:
+          HEAD_SHA: ${{ matrix.head }}
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          git init source
+          git -C source -c credential.helper= fetch --no-tags https://github.com/atto-lang/atto-platform-conformance.git f13b3691f28d187bbeafe454a9cecf544342be6d "$HEAD_SHA"
+          git -C source checkout --detach f13b3691f28d187bbeafe454a9cecf544342be6d
+          git -C source -c user.name=CI -c user.email=ci@example.invalid merge --no-commit --no-ff "$HEAD_SHA"
+          echo "BASE=f13b3691f28d187bbeafe454a9cecf544342be6d HEAD=$HEAD_SHA TREE=$(git -C source write-tree)"
+      - name: Execute focused candidate tests
+        if: matrix.pr != 'baseline'
+        working-directory: source
+        env:
+          PR: ${{ matrix.pr }}
+        run: |
+          set -euo pipefail
+          case "$PR" in
+            593) node --test tests/extensible-declarations-static-imports.test.mjs ;;
+            466) node --test tests/audit-actor-ci-evidence.test.mjs ;;
+            350) node --test tests/dop-heterogeneous-soa-quota-v1.test.mjs ;;
+            348) node --test tests/atto-gpu-saxpy-g2.test.mjs ;;
+            347) node --test tests/annotation-targets-v2.test.mjs ;;
+            345) node --test tests/dop-physical-layout-v1.test.mjs ;;
+            335) node --test tests/rt-ownership-admission-v1.test.mjs ;;
+            333) node --test tests/atto-gpu-kernels-v1.test.mjs ;;
+            330) node --test tests/dop-layout-topology-v1.test.mjs ;;
+            319) node --test tests/immutable-default-receipt.test.mjs tests/immutable-default-v1.test.mjs ;;
+            304) node --test tests/mailbox-completion-bounded-interleavings-v1.test.mjs tests/mailbox-completion-v1.test.mjs ;;
+            301) node --test tests/portable-task-runner-v1.test.mjs tests/portable-task-v1.test.mjs ;;
+            299) node --test formal/pubsub_generation_manifest_contract.test.mjs ;;
+            298) node --test formal/reliable-pubsub-contract.test.mjs ;;
+            297) node --test formal/adversarial_contract.test.mjs ;;
+            296) node --test test/formal-actor-critical-state.test.mjs test/formal-actor-generation-fences.test.mjs ;;
+            294) node --test tests/concurrency-trace-admission-v1.test.mjs ;;
+            293) node --test tests/aot-release-target-profiles-v1.test.mjs ;;
+            289) node --test tests/tail-calls-v1-source-contract.test.mjs ;;
+            264) node --test tests/async_interop_contract.test.mjs ;;
+            358) node --test tests/dop-inverted-bool-i64-v1.test.mjs ;;
+            *) exit 1 ;;
+          esac
+      - name: Full regression suite
+        if: success() || failure()
+        working-directory: source
+        run: |
+          test -z "$(git ls-files -u)"
+          npm test
