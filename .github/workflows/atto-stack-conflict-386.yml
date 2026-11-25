@@ -1,0 +1,43 @@
+name: Atto stack containment conflict retest
+on:
+  push:
+    branches: ['validation/atto-stack-conflict-386-20261125-1224']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: baseline
+            head: f8adfe684b79fe40ca7eafad8767a8dfedb9f611
+            tree: 40a1d21e4b4383ecf72b8e68703d58a086a7944e
+          - label: candidate
+            head: dc92cd8ce995298a8b6504c234191ce5e6a88e28
+            tree: cdaaee97a88b570f4c94670f24a3d6834bd55eaf
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Verify public exact head and tree
+        env:
+          HEAD_SHA: ${{ matrix.head }}
+          TREE_SHA: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-platform-conformance.git "$HEAD_SHA"
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git -C source rev-parse HEAD^{tree})" = "$TREE_SHA"
+      - name: Focused stack containment tests
+        if: matrix.label == 'candidate'
+        working-directory: source
+        run: node --test test/actor-stack-containment-v1.test.mjs
+      - name: Regression suite
+        if: success() || failure()
+        working-directory: source
+        run: npm test
