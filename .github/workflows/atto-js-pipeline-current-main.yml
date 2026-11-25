@@ -1,0 +1,30 @@
+name: Atto JS pipeline current-main exact head
+on:
+  push:
+    branches: ['validation/atto-js-pipeline-current-main-20261125']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Verify immutable source head and tree
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-source.js.git cfa37b273e534748217a63f3418479c18b894f24
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = cfa37b273e534748217a63f3418479c18b894f24
+          test "$(git -C source rev-parse HEAD^{tree})" = 813804d2291db9c608c0e102eb1387cb241ef348
+          test -z "$(git -C source status --porcelain)"
+      - name: Execute actual compiled functional guest and CLI tests
+        working-directory: source
+        run: node --test tests/functional-pipeline-guest.test.mjs tests/functional-pipeline-cli.test.mjs
+      - name: Execute complete existing compiler and runtime tests
+        working-directory: source
+        run: npm test
