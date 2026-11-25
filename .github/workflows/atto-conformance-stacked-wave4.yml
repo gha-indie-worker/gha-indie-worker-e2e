@@ -1,0 +1,93 @@
+name: Atto stacked conformance wave four
+on:
+  push:
+    branches: [validation/atto-conformance-stacked-wave4-20261125]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 594
+            head: '36b60ab2659d85d3beaac3fd16543e94cfbe1495'
+            base: '39dd0850f6f9516d1e195ed13ceb60d3e91112ad'
+          - pr: 481
+            head: '6bebdf19c8ce328965d627c6b3ac00c6c26a8782'
+            base: '536652c2e1ca1959caa3d7e7feee5cf4ac66aa07'
+          - pr: 477
+            head: '24b6dffed5a6384583c34137fd1825efdb900ef0'
+            base: '4ae61b5e4b3c7c27ad07ca44b5fd02f4654350d8'
+          - pr: 462
+            head: '0bdec4460cf9cae0b8905f77c8279035b4dc6b5d'
+            base: '06a263b64c67b7f26ec3fb53d73efe2c870a2a31'
+          - pr: 451
+            head: '85ab75d20ae95db470badc09c53689f6ea2c4dc0'
+            base: '152d8889b7e2418d6a6d19cb1efc55659693ae74'
+          - pr: 410
+            head: '4bff01d99da68bd958e9d7a62c1611bbc5336012'
+            base: '076e4ea52accc29b0573e07b1620ea3404629e73'
+          - pr: 390
+            head: 'c44fc2602a368a8d302b75a020cbb00b0b4b5a02'
+            base: '7d1841d0ab85765ca779674e034cd61a0d70cb26'
+          - pr: 371
+            head: 'ac222657d7d5aafb54a9fed9b7d43c05a5ab3a89'
+            base: 'b9a806bb3675b97736deeb472bfde3ae56537ef2'
+          - pr: 363
+            head: 'e4d10ab76fb7ad2946c1bf0021d7e0a56a5cda53'
+            base: '04de389b6e3606ebecbc1e72ebb570afca712fe4'
+          - pr: 361
+            head: '4f6df613188f0171c34b2640ce70f8f555537998'
+            base: 'a377ea19440e6a69d87e4bfea73625ba247a3fee'
+          - pr: 360
+            head: '42f883ac29750abd8a590ab8c8e0cc8eeec819ef'
+            base: '1461cd82722a799210c3f41c2344b9a534cd4079'
+          - pr: 344
+            head: 'b9a806bb3675b97736deeb472bfde3ae56537ef2'
+            base: '489609abd9efa0180e5157398b0a1746c371c199'
+          - pr: 339
+            head: '62eb179ba55b7963064ca040cc1b5fd92c4bf042'
+            base: 'e4bc75bb4ca6db5eca03b944fef1658637a7635f'
+          - pr: 318
+            head: '220a4f7755544083d1ae9d107ff35c74ca3e25fb'
+            base: 'ebffa81813ed61c82c2a4cd8f6861afac641931e'
+          - pr: 311
+            head: '9605e4dc19f88d9a6c17c4dc61d5e239114e386e'
+            base: 'a377ea19440e6a69d87e4bfea73625ba247a3fee'
+          - pr: 290
+            head: 'a564e1250a1c69084ab6468a088478e41fcf5d82'
+            base: 'e0e349bffe1000facc3ce573c7fa9c1c0d806fd4'
+          - pr: 118
+            head: '402fd98f46054b1e6df6b0c353505773ab1ae635'
+            base: '79a660f8c744cbd4b1b1547576813a373386de1d'
+          - pr: 117
+            head: 'ba10cd097a5ce6cbabcd29d7f3fe7da4a29ebc1b'
+            base: '79a660f8c744cbd4b1b1547576813a373386de1d'
+          - pr: 116
+            head: '79a660f8c744cbd4b1b1547576813a373386de1d'
+            base: '497bbb53697aed391ac31aa11abba976571f83d3'
+    env:
+      BASE_SHA: ${{ matrix.base }}
+      HEAD_SHA: ${{ matrix.head }}
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Exact public source integration
+        run: |
+          git init source
+          git -C source remote add origin https://github.com/atto-lang/atto-platform-conformance.git
+          git -C source fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA"
+          git -C source checkout --detach "$BASE_SHA"
+          git -C source -c user.name=CI -c user.email=ci@example.invalid merge --no-commit --no-ff "$HEAD_SHA"
+          echo "BASE=$BASE_SHA HEAD=$HEAD_SHA TREE=$(git -C source write-tree)"
+      - name: Execute changed tests
+        working-directory: source
+        run: |
+          mapfile -t tests < <(git diff --cached --name-only --diff-filter=AM | grep -E '\.test\.mjs$' || true)
+          if [ "${#tests[@]}" -eq 0 ]; then echo NO_CHANGED_NODE_TESTS; exit 1; fi
+          printf '%s\n' "${tests[@]}"
+          node --test "${tests[@]}"
