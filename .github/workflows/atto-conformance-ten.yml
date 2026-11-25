@@ -1,0 +1,83 @@
+name: Atto conformance ten exact integration heads
+on:
+  push:
+    branches: ['validation/atto-conformance-ten-20261125']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: '459'
+            head: bc000df4a3becd9e4b8ce40d893d4fded6119ff9
+            tree: 378380c035b34c153aea63a95166f96ab4c7bfa7
+          - pr: '458'
+            head: 610fc4237a90621eae696b511131b8bd59c5b4fc
+            tree: b9f8c837c30229c035e6194f674706df3c62c01e
+          - pr: '492'
+            head: efb07880c52d22814b2917f2faa9e1546c0ae4eb
+            tree: 4c9a681e5b207dfb0c48d78d52b431d73fdf9c57
+          - pr: '474'
+            head: 9ad230de996a5be2db5ef7f374b8205cae6b4c93
+            tree: a1c5479b773ee6ecb1aa55065f12deea65dfb0a1
+          - pr: '442'
+            head: a8b2cc79b38a6d5db84a17b0ef31402d433a96d2
+            tree: 77790a8e4511ad177dbc23396ebf8b4ff8dd343b
+          - pr: '445'
+            head: 4b026a3259a6525e6e55b261ab8356bc3baf2bc6
+            tree: 5f5d97e2e12bb40d5647a45a53c364e2ede677e4
+          - pr: '444'
+            head: d6fa9bea2c05ee489fbd514c5975e2e3775b9f31
+            tree: c32e7c8755638264316ba20eeb4b1768a955d4bd
+          - pr: '453'
+            head: 21175359fa5b2462aa0fd1eccb13f424e5a3b4d3
+            tree: 7f4dabe90c572528f7116565f703c36ba1d2ecea
+          - pr: '428'
+            head: a6d8163728518521b7fdcf9ce18d665e755637ce
+            tree: aa5cf096e92aec55ad8a1374138f1457cb01da74
+          - pr: '430'
+            head: 73c76d6c08f4efc78194bc74e7eac9b140d9aa6a
+            tree: 49225e75f8e8ae57acf111e398e78f0c06fb9f66
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Fetch and verify exact public integration head and tree
+        env:
+          HEAD_SHA: ${{ matrix.head }}
+          TREE_SHA: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-platform-conformance.git "$HEAD_SHA"
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git -C source rev-parse HEAD^{tree})" = "$TREE_SHA"
+          test -z "$(git -C source status --porcelain)"
+      - name: Execute PR-specific tests
+        working-directory: source
+        env:
+          PR: ${{ matrix.pr }}
+        run: |
+          set -euo pipefail
+          case "$PR" in
+            459) node --test tests/collection-factory-manifest.test.mjs ;;
+            458) node fixtures/select-source-v1/verify-manifest.mjs && node --test fixtures/select-source-v1/verify-manifest.test.mjs ;;
+            492) python3 -m unittest discover -s contracts/effects-lifetimes-v1 -p test_contract.py -v ;;
+            474) node --test verification/actor-stack-parity-evidence.test.mjs ;;
+            442) node --test tests/task-capture-region-proof-v1.test.mjs ;;
+            445) node --test tests/guarded-match-false-edge-v1.test.mjs ;;
+            444) node --test tests/guarded-match-move-v1-strict.test.mjs tests/guarded-match-move-v1.test.mjs ;;
+            453) node --test tests/receive-invocation-stack-oracle.test.mjs ;;
+            428) node --test tests/runaway-guest-matrix.test.mjs ;;
+            430) node --test tests/immutable-containers-critical-v1.test.mjs ;;
+            *) exit 1 ;;
+          esac
+      - name: Execute full existing Node regression suite
+        working-directory: source
+        run: npm test
