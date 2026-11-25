@@ -1,0 +1,92 @@
+name: Atto conformance next wave
+on:
+  push:
+    branches: ['validation/atto-conformance-next-wave-20261125-1224']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 'baseline'
+            head: bb8f3920e66bcd5f29752bfa2424c462ffb89d51
+          - pr: '591'
+            head: 18b794e324264afab35aef34d1a6e1ed6b6b7e34
+          - pr: '507'
+            head: e2727af66162e369b36ce117b2a38e0caaaab899
+          - pr: '498'
+            head: 430f347bc4fa6589a46d6ef890259fa929d3c92d
+          - pr: '537'
+            head: 47aa1267f9bcaad2636fe6f82c10e6526eb1508c
+          - pr: '538'
+            head: 76b2e4144515f0a8d0c8d7d2555238713f11adb4
+          - pr: '503'
+            head: a1b2cf3587ed4b1395fd161498cf044ec0b44f1b
+          - pr: '584'
+            head: b899615b4333cd91664c56c9297bc0a98b31b2e0
+          - pr: '394'
+            head: f9b3ef0f085155ab00d277557d64233505e5490a
+          - pr: '388'
+            head: 1b2e09f5dac5849fd1d2bc3926f037c6ea919c31
+          - pr: '387'
+            head: d3fb7a6cfdb517845af1325981e7df03f446fb4e
+          - pr: '386'
+            head: e9bc2af1fc2f6dcb8eea829e9efb44400f8bc3bc
+          - pr: '389'
+            head: c7e51a5d64334073b731314712ab85c447b086fb
+          - pr: '470'
+            head: f5a38fe26746540121f4b2dc7346f76de345fdf4
+          - pr: '455'
+            head: 4e83f023e788c0c8e14ebf93c67b2ecb0d9d4505
+          - pr: '446'
+            head: 800c592642f425fc55be7fb9f1e98eecd0b7b122
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Verify pinned source and integration
+        env:
+          HEAD_SHA: ${{ matrix.head }}
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          git init source
+          git -C source -c credential.helper= fetch --no-tags https://github.com/atto-lang/atto-platform-conformance.git bb8f3920e66bcd5f29752bfa2424c462ffb89d51 "$HEAD_SHA"
+          git -C source checkout --detach bb8f3920e66bcd5f29752bfa2424c462ffb89d51
+          git -C source -c user.name=CI -c user.email=ci@example.invalid merge --no-commit --no-ff "$HEAD_SHA"
+          echo "BASE=bb8f3920e66bcd5f29752bfa2424c462ffb89d51 HEAD=$HEAD_SHA TREE=$(git -C source write-tree)"
+      - name: Execute focused candidate tests
+        if: matrix.pr != 'baseline'
+        working-directory: source
+        env:
+          PR: ${{ matrix.pr }}
+        run: |
+          set -euo pipefail
+          case "$PR" in
+            591) node --test tests/static-import-v2-corpus.test.mjs ;;
+            507) node --test tests/explicit-return-flow-v1.test.mjs ;;
+            498) node --test tests/platform-portable-core-integrity.test.mjs ;;
+            537) cargo test --manifest-path tools/actor-dispatch-ticket-oracle/Cargo.toml ;;
+            538) cargo test --manifest-path tools/actor-message-contract-v1/Cargo.toml ;;
+            503) python3 contracts/source-parity/check_five_backend_shared_contract_shas.py --help ;;
+            584) node --test tests/verified-core-quantity-expansion.test.mjs ;;
+            394) node --test tests/universal-hotload-matrix.test.mjs ;;
+            388) node --test tests/scoped-local-evidence.test.mjs tests/scoped-local-github.test.mjs ;;
+            387) node --test tests/thread-task-actor-local-v1.test.mjs ;;
+            386) node --test test/actor-stack-containment-v1.test.mjs ;;
+            389) node --test tests/nio-actor-parity-v1.test.mjs ;;
+            470) node --test tests/actor-supervisor-region-v1.test.mjs ;;
+            455) node --test tests/cooperation-128-regressions-20261109.test.mjs ;;
+            446) node --test tests/option-result-trap-v4-integrity.test.mjs tests/option-result-trap-v4-source-contract.test.mjs ;;
+            *) exit 1 ;;
+          esac
+      - name: Full regression suite
+        if: success() || failure()
+        working-directory: source
+        run: |
+          test -z "$(git ls-files -u)"
+          npm test
