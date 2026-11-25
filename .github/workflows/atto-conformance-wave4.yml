@@ -1,0 +1,80 @@
+name: Atto conformance wave four
+on:
+  push:
+    branches: [validation/atto-conformance-wave4-20261125]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 0
+            head: '2aec98e9c0f4b3b09cdca9cbc35e92a05dc76127'
+          - pr: 550
+            head: 'c1836678e97ddf3a70ec08578ec7004a7625ddc3'
+          - pr: 406
+            head: '4ed2eb76bf1f584f0f40cc0f90ed4663c2e66c76'
+          - pr: 397
+            head: '09e87a77fc7a3b23c11688a9d6e62a4b048c63c1'
+          - pr: 395
+            head: 'b3fd2458e4ace40c37d1f7616035ac09b1a7c070'
+          - pr: 332
+            head: 'e7d839603c9873f03e0004a2bf0fa57434b1122b'
+          - pr: 326
+            head: 'fc408ae890a4fd59172b05a3ff528d42473f8d3b'
+          - pr: 301
+            head: 'f87f700f33a13ab16b5441117df6b0f743bcb0f9'
+          - pr: 235
+            head: 'e3d426261bd5496a5acda87b9b233a3a64b5795a'
+          - pr: 112
+            head: 'b838ccc0ed5dd7c64d0123997fb114515b5a822b'
+          - pr: 110
+            head: '4117ade5710ecd2436d823fe69c16421e96f7c4c'
+          - pr: 104
+            head: 'd6be1aae1ca5076342c48ce35766c252a3eb6650'
+          - pr: 89
+            head: '19ec708121ffe5f92b04f144840cf4991947dc72'
+          - pr: 72
+            head: '665bea016112074a5800d1f43934e1bb788331e3'
+          - pr: 52
+            head: 'b88c15ca2ae7d3656ea6e9ef5f73a1f802da1b6a'
+          - pr: 50
+            head: '14d12c6ef029b4c6b45e3f5a895e2a17a90b1e01'
+          - pr: 483
+            head: '614b3c78d51917fb97725716330c85a4c1a22d22'
+    env:
+      BASE_SHA: '2aec98e9c0f4b3b09cdca9cbc35e92a05dc76127'
+      HEAD_SHA: ${{ matrix.head }}
+      PR: ${{ matrix.pr }}
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Exact public source integration
+        run: |
+          git init source
+          git -C source remote add origin https://github.com/atto-lang/atto-platform-conformance.git
+          git -C source fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA"
+          git -C source checkout --detach "$BASE_SHA"
+          if [ "$PR" != 0 ]; then
+            git -C source -c user.name=CI -c user.email=ci@example.invalid merge --no-commit --no-ff "$HEAD_SHA"
+          fi
+          echo "BASE=$BASE_SHA HEAD=$HEAD_SHA TREE=$(git -C source write-tree)"
+      - name: Execute changed test files
+        if: matrix.pr != 0
+        working-directory: source
+        run: |
+          mapfile -t tests < <(git diff --cached --name-only --diff-filter=AM | grep -E '\.test\.mjs$' || true)
+          if [ "${#tests[@]}" -eq 0 ]; then echo 'NO_CHANGED_NODE_TESTS'; exit 1; fi
+          printf '%s\n' "${tests[@]}"
+          node --test "${tests[@]}"
+      - name: Full Node regression suite
+        if: always()
+        working-directory: source
+        run: |
+          test -z "$(git ls-files -u)"
+          npm test
