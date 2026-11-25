@@ -1,0 +1,78 @@
+name: Atto stacked conformance wave five
+on:
+  push:
+    branches: [validation/atto-conformance-stacked-wave5-20261125]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 477
+            head: '24b6dffed5a6384583c34137fd1825efdb900ef0'
+            base: 'f085c303683311f3416164414c082d3408206b8f'
+          - pr: 375
+            head: 'e506db5b066451247bd8474f69a4623bfe394400'
+            base: 'f1694a156c30481aaf93e22acd997c3e90b7dfa5'
+          - pr: 349
+            head: '89908728eb7d6ec5c90d543e37944e3858c82454'
+            base: '147c7b11f6b734d6291f2a15b0e4505fab710c5e'
+          - pr: 340
+            head: '3a0e0e3ce59b401aa5a986d2ed46c5c485a100b7'
+            base: 'fbdeb0be3d85e4b91b6c15e701819d5e00fd425c'
+          - pr: 338
+            head: 'da83b2108e7ded9d735375f54189e8caf4ef83e0'
+            base: 'df360c2907b1cd0b34d745cbd186e175f4ecd9c1'
+          - pr: 327
+            head: '5d6e49c03be6fdc73de2f8eade5aec60fc06d734'
+            base: '78d7ca9ef80a202bba0f12c62c05afe1663d0a3e'
+          - pr: 316
+            head: 'fbdeb0be3d85e4b91b6c15e701819d5e00fd425c'
+            base: '978211a03187e9364154a58412b8a4ec888fea85'
+          - pr: 284
+            head: '570a83999503551e72153c69b8cb4ef1b00b1a17'
+            base: '79bf3aad31530ac8fc46c479e21756ab6e2cb673'
+          - pr: 269
+            head: 'f085c303683311f3416164414c082d3408206b8f'
+            base: '9f2f882a5383fb77645d74a287cc96413c56f939'
+          - pr: 258
+            head: '22ee31cfda62c940808d53f14d266ed219c5156f'
+            base: 'a739178ab4cb5efc5ffae819b8306b28081fad09'
+          - pr: 247
+            head: '361123b0256d007d298e3bd32516a1dc38848842'
+            base: 'b2ca386d347407c347b177c0a087268295857f5b'
+          - pr: 117
+            head: 'ba10cd097a5ce6cbabcd29d7f3fe7da4a29ebc1b'
+            base: '938c69db9da154adb4e576f99722a91609673160'
+          - pr: 116
+            head: '938c69db9da154adb4e576f99722a91609673160'
+            base: '497bbb53697aed391ac31aa11abba976571f83d3'
+          - pr: 40
+            head: 'd02e05bb6d85b14655a047b349a2a7fdfda26e73'
+            base: '3549460c343d7f96f220462ccfb09e81cd2902ed'
+    env:
+      BASE_SHA: ${{ matrix.base }}
+      HEAD_SHA: ${{ matrix.head }}
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Exact public source integration
+        run: |
+          git init source
+          git -C source remote add origin https://github.com/atto-lang/atto-platform-conformance.git
+          git -C source fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA"
+          git -C source checkout --detach "$BASE_SHA"
+          git -C source -c user.name=CI -c user.email=ci@example.invalid merge --no-commit --no-ff "$HEAD_SHA"
+          echo "BASE=$BASE_SHA HEAD=$HEAD_SHA TREE=$(git -C source write-tree)"
+      - name: Execute changed tests
+        working-directory: source
+        run: |
+          mapfile -t tests < <(git diff --cached --name-only --diff-filter=AM | grep -E '\.test\.mjs$' || true)
+          if [ "${#tests[@]}" -eq 0 ]; then echo NO_CHANGED_NODE_TESTS; exit 1; fi
+          printf '%s\n' "${tests[@]}"
+          node --test "${tests[@]}"
