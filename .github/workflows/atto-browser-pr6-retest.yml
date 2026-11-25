@@ -1,7 +1,7 @@
 name: Atto browser exact public heads and compiler-backed Worker verification
 on:
   push:
-    branches: ['validation/atto-browser-next-five-20261125']
+    branches: ['validation/atto-browser-pr6-retest-20261125']
 permissions:
   contents: read
 jobs:
@@ -12,21 +12,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pr: '19'
-            head: 8e109b19d057ba3b6e55601ec4b788189e616ee8
-            tree: 64c5128644709924a0c640e717c2c4b49578879c
-          - pr: '28'
-            head: b482c2a11d2edf76dffda58286da4184e1eab644
-            tree: 62f9baa9b2e5e6b8f2c3a7af941d2a4eaa83cd14
-          - pr: '29'
-            head: 3b7aef012945c4df169a89f33f8adb634bee9ce1
-            tree: bc3f1d4bf78ccd9d4c6f9ed3be0fe91818b1e99d
-          - pr: '5'
-            head: 961767a9f32453620f85a6d33326bc4850b4c825
-            tree: b8fc4e18a2e3b91edd86b836becbb9f14962dde6
           - pr: '6'
-            head: f8011ea314d384f4c77c9fe45d5e7dce4ddc4ab7
-            tree: dcd2f5ff26ec642d2aa2766f6ab6b5bc9b547723
+            head: 1a51a772006501c40122663e02f2420bda6cef72
+            tree: eec57c5a70e25168e14513345cda6678495bc804
     steps:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
