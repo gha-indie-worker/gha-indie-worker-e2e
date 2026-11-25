@@ -1,0 +1,67 @@
+name: Atto browser exact public Qt and portable ABI stack
+on:
+  push:
+    branches: ['validation/atto-browser-qt-stack-20261125']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: '29'
+            head: 3b7aef012945c4df169a89f33f8adb634bee9ce1
+            tree: bc3f1d4bf78ccd9d4c6f9ed3be0fe91818b1e99d
+          - pr: '30'
+            head: db239dcf37997e3338f1a7807349068dcb07538a
+            tree: a749ac18ca351069baa298d0c310f82e2a84260a
+          - pr: '31'
+            head: 681cd850f754cd9f90be9e5a5debf3a011e5a7f6
+            tree: d632352d9a9eb49b37f1b10623b77df58ac2ed84
+          - pr: '33'
+            head: c9a6b50080089787f436bcc90c99e57366fe0c37
+            tree: 9df97b78925f69f927af460e7e5096b90510f27f
+    steps:
+      - name: Verify immutable public browser source
+        env:
+          HEAD_SHA: ${{ matrix.head }}
+          TREE_SHA: ${{ matrix.tree }}
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          git init source
+          git -C source -c credential.helper= fetch --depth=1 https://github.com/atto-lang/atto-browser.git "$HEAD_SHA"
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$HEAD_SHA"
+          test "$(git -C source rev-parse HEAD^{tree})" = "$TREE_SHA"
+          test -z "$(git -C source status --porcelain --untracked-files=all)"
+      - name: Execute source audit and portable ABI tests
+        working-directory: source
+        run: |
+          sh ci/check-source.sh
+          sh tests/ci/test-mirror-identity.sh
+          sh -n ci/verify-native.sh
+          sh -n ci/verify-backend-ffi.sh
+          sh ci/check-qt-ffi.sh
+      - name: Execute backend origin denial matrix without loading a library
+        if: matrix.pr == '33'
+        working-directory: source
+        run: sh ci/check-backend-origin-admission.sh
+      - name: Install Qt6 native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ pkg-config qt6-base-dev qt6-declarative-dev qt6-declarative-dev-tools libgl1-mesa-dev
+      - name: Build actual Qt desktop shell and tests
+        working-directory: source
+        run: |
+          cmake -S desktop/qt -B "$RUNNER_TEMP/ores-browser-qt" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build "$RUNNER_TEMP/ores-browser-qt" --parallel 2
+      - name: Execute actual offline Qt event-loop CTests
+        if: matrix.pr != '29'
+        run: |
+          QT_QPA_PLATFORM=offscreen ctest --test-dir "$RUNNER_TEMP/ores-browser-qt" --output-on-failure --no-tests=error
+      - name: Report native execution boundary
+        run: echo 'Qt host verification only; real compiler-generated native backend integration remains unexecuted.'
