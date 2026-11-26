@@ -15,10 +15,10 @@ jobs:
           cmake --version
           git init -q source
           git -C source remote add origin https://github.com/atto-lang/atto-source.forge.git
-          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 49ddbdb7e788ee950d931d909507b89943c4b14b
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 94c2ed0e71d29d83be872863b592aef06fc25bc1
           git -C source checkout -q --detach FETCH_HEAD
-          test "$(git -C source rev-parse HEAD)" = 49ddbdb7e788ee950d931d909507b89943c4b14b
-          test "$(git -C source rev-parse 'HEAD^{tree}')" = 1912c78bdda965e1f041f150abe91e5539dd69cf
+          test "$(git -C source rev-parse HEAD)" = 94c2ed0e71d29d83be872863b592aef06fc25bc1
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = d6b1ded453f2ffb18a251ad3af615952bfd99e04
           test -z "$(git -C source status --porcelain)"
           git -C source log -1 --format='%H %T'
       - name: Build exact compiler and execute native guests
