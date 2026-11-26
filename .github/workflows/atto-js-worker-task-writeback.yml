@@ -15,10 +15,10 @@ jobs:
           node -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(1)'
           git init -q source
           git -C source remote add origin https://github.com/atto-lang/atto-source.js.git
-          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin e793d999eb7f6568278880845d20b1ca79c43a8d
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin e116fff519fd0eff998d222ce126937564b25b20
           git -C source checkout -q --detach FETCH_HEAD
-          test "$(git -C source rev-parse HEAD)" = e793d999eb7f6568278880845d20b1ca79c43a8d
-          test "$(git -C source rev-parse 'HEAD^{tree}')" = 5df7f17c8fcebf9a932b29d7cfc2c41c21eec591
+          test "$(git -C source rev-parse HEAD)" = e116fff519fd0eff998d222ce126937564b25b20
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 2b778cc1cdc90f7482dc19e0184539455e4e533e
           test -z "$(git -C source status --porcelain)"
           git -C source log -1 --format='%H %T'
       - name: Execute real generated worker guest modules and syntax negatives
@@ -26,7 +26,7 @@ jobs:
           set -euo pipefail
           cd source
           node --check src/transpile-worker.mjs
-          node --test tests/sync-task-inline.test.mjs tests/java-canonical-worker-operators.test.mjs tests/transpile-worker.test.mjs
+          node --test tests/sync-task-inline.test.mjs tests/java-canonical-worker-operators.test.mjs tests/transpile-worker.test.mjs tests/inline-task-cli.test.mjs tests/execution-domain-admission.test.mjs
       - name: Full Node regression suite
         if: ${{ !cancelled() }}
         run: |
