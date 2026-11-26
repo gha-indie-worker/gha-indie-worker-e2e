@@ -1,0 +1,43 @@
+name: Atto exact public task writeback carrier
+on:
+  push:
+    branches: [ci/atto-inline-task-writeback-20261125]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [llvm, rs, js, cranelift, hdl]
+    steps:
+      - name: Fetch exact public conformance commit without credentials
+        run: |
+          set -euo pipefail
+          git init -q suite
+          git -C suite remote add origin https://github.com/atto-lang/atto-compilers-parity-testing.git
+          GIT_TERMINAL_PROMPT=0 git -C suite -c credential.helper= fetch --depth=1 origin 2fcd964adde942a8010489bf98ba730035212799
+          git -C suite checkout -q --detach FETCH_HEAD
+          test "$(git -C suite rev-parse HEAD)" = 2fcd964adde942a8010489bf98ba730035212799
+          test "$(git -C suite rev-parse 'HEAD^{tree}')" = 94623f53defde2666f6b108dfc89348d9b894f54
+          test -z "$(git -C suite status --porcelain)"
+          git -C suite log -1 --format='%H %T'
+          node --version
+          rustc --version
+      - name: Execute exact public backend snapshot
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          set -euo pipefail
+          cd suite
+          bash -n tools/run-inline-task-writeback-v1.sh
+          bash tools/run-inline-task-writeback-v1.sh "$BACKEND" | tee ../inline-task-writeback.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: atto-inline-task-${{ matrix.backend }}
+          path: inline-task-writeback.log
+          if-no-files-found: warn
