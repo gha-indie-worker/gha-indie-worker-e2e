@@ -1,0 +1,92 @@
+name: Atto public Java and NET exact task regression
+on:
+  push:
+    branches: [ci/atto-java-net-task-recheck-20261125]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  java:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Fetch exact public Java candidate
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.java.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 326dab66fb381fb5f3e8c83c31f7f2901d7656fa
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 326dab66fb381fb5f3e8c83c31f7f2901d7656fa
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 08e793ba668ef185b287582dbcd210a771ead917
+          test -z "$(git -C source status --porcelain)"
+      - uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: graalvm
+          github-token: ${{ github.token }}
+      - name: Build and run focused strict tests
+        run: |
+          set -euo pipefail
+          cd source
+          java -version
+          mvn -B -ntp -Dmaven.test.skip=true package
+          mvn -B -ntp -q dependency:build-classpath -DincludeScope=test -Dmdep.outputFile=target/inline-junit-classpath.txt
+          mkdir -p target/test-classes
+          javac -proc:none -cp "target/classes:$(cat target/inline-junit-classpath.txt)" -d target/test-classes src/test/java/dev/oreslang/InlineTaskTerminalReturnTest.java
+          mvn -B -ntp -Dtest=InlineTaskTerminalReturnTest -DfailIfNoTests=true surefire:test
+          grep -E 'tests="24"' target/surefire-reports/TEST-dev.oreslang.InlineTaskTerminalReturnTest.xml
+      - name: Execute historical and new exact source fixtures
+        if: ${{ !cancelled() }}
+        env:
+          EXPECTED_HEAD: 326dab66fb381fb5f3e8c83c31f7f2901d7656fa
+        run: |
+          set -euo pipefail
+          cd source
+          test -f target/classes/dev/oreslang/launcher/OresMain.class
+          mvn -B -ntp -q dependency:build-classpath -Dmdep.outputFile=target/conformance-classpath.txt
+          status=0
+          python3 tools/run-inline-task-net-parity.py jvm || status=1
+          bash tools/run-inline-task-branch-parity.sh jvm || status=1
+          exit "$status"
+  net:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            profile: coreclr
+          - runner: macos-15
+            profile: macos-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - name: Fetch exact public NET candidate
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.net.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin aab9f2ce9afbf3001d798099fd23b5c362725891
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = aab9f2ce9afbf3001d798099fd23b5c362725891
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 6664ec4d5fd35689ea409ff401d1872ad81d3c31
+          test -z "$(git -C source status --porcelain)"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: '10.0.x'
+      - name: Managed source regression
+        run: |
+          set -euo pipefail
+          cd source
+          dotnet --info
+          dotnet run --project verification/Ores.Net.Tests/Ores.Net.Tests.csproj -c Release
+      - name: Exact compiled task guests
+        if: ${{ !cancelled() }}
+        env:
+          PROFILE: ${{ matrix.profile }}
+          EXPECTED_HEAD: aab9f2ce9afbf3001d798099fd23b5c362725891
+        run: |
+          set -euo pipefail
+          cd source
+          bash ci/test-task-inline-cil.sh "$PROFILE"
