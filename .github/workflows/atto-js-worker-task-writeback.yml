@@ -1,0 +1,35 @@
+name: Atto public JS worker task exact source
+on:
+  push:
+    branches: [ci/atto-js-worker-task-writeback-20261125]
+permissions: {}
+jobs:
+  guest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Verify runner and public source snapshot
+        run: |
+          set -euo pipefail
+          node --version
+          node -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(1)'
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.js.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 78baa12f24e9aacbc765fa949986f609bfb488ca
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 78baa12f24e9aacbc765fa949986f609bfb488ca
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 2ca95cc554c79ae1c088d475809af6edbb61b6a3
+          test -z "$(git -C source status --porcelain)"
+          git -C source log -1 --format='%H %T'
+      - name: Execute real generated worker guest modules and syntax negatives
+        run: |
+          set -euo pipefail
+          cd source
+          node --check src/transpile-worker.mjs
+          node --test tests/sync-task-inline.test.mjs tests/java-canonical-worker-operators.test.mjs tests/transpile-worker.test.mjs
+      - name: Full Node regression suite
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          cd source
+          npm test
