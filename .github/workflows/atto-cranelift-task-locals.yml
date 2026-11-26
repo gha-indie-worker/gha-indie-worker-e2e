@@ -15,10 +15,10 @@ jobs:
           cargo --version
           git init -q source
           git -C source remote add origin https://github.com/atto-lang/atto-source.cranelift.git
-          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 5cfa0e075163c98ce0543eeaeb87a812bc4d1576
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 79d21b65fe3b57e921fef89c3fbcc6057fbb72b3
           git -C source checkout -q --detach FETCH_HEAD
-          test "$(git -C source rev-parse HEAD)" = 5cfa0e075163c98ce0543eeaeb87a812bc4d1576
-          test "$(git -C source rev-parse 'HEAD^{tree}')" = 027f7a3554edcce64bd1280129753428c0a19383
+          test "$(git -C source rev-parse HEAD)" = 79d21b65fe3b57e921fef89c3fbcc6057fbb72b3
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 71c96af3750bf63b172624375a0418bc2a9991a9
           test -z "$(git -C source status --porcelain)"
           git -C source log -1 --format='%H %T'
       - name: Real Cranelift JIT guest execution
