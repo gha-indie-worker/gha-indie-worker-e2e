@@ -15,10 +15,10 @@ jobs:
           node -e 'if(Number(process.versions.node.split(".")[0])<22)process.exit(1)'
           git init -q source
           git -C source remote add origin https://github.com/atto-lang/atto-source.js.git
-          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 78baa12f24e9aacbc765fa949986f609bfb488ca
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin df92e81033c4d298a3d37c48748b68fe11381052
           git -C source checkout -q --detach FETCH_HEAD
-          test "$(git -C source rev-parse HEAD)" = 78baa12f24e9aacbc765fa949986f609bfb488ca
-          test "$(git -C source rev-parse 'HEAD^{tree}')" = 2ca95cc554c79ae1c088d475809af6edbb61b6a3
+          test "$(git -C source rev-parse HEAD)" = df92e81033c4d298a3d37c48748b68fe11381052
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 8005b42e8880851fe2838c5519fb922ea8391993
           test -z "$(git -C source status --porcelain)"
           git -C source log -1 --format='%H %T'
       - name: Execute real generated worker guest modules and syntax negatives
