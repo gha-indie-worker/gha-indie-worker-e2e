@@ -1,0 +1,35 @@
+name: Atto public Cranelift exact task locals
+on:
+  push:
+    branches: [ci/atto-cranelift-public-task-locals-20261125]
+permissions: {}
+jobs:
+  guest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Pin public source identity and toolchain
+        run: |
+          set -euo pipefail
+          rustc --version
+          cargo --version
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.cranelift.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 56d0e26ab907a4c8851eb292805a4c2935c4f554
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 56d0e26ab907a4c8851eb292805a4c2935c4f554
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 6c64a7ca4b08b2504528b0fe0eb1b00c8d3c8ce4
+          test -z "$(git -C source status --porcelain)"
+          git -C source log -1 --format='%H %T'
+      - name: Real Cranelift JIT guest execution
+        run: |
+          set -euo pipefail
+          cd source
+          cargo test --locked --test inline_sync_task -- --nocapture
+      - name: Full regression and lint
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          cd source
+          cargo test --locked --all-targets --no-fail-fast
+          cargo clippy --locked --all-targets -- -D warnings
