@@ -1,0 +1,31 @@
+name: Atto public Forge native inline task exact source
+on:
+  push:
+    branches: [ci/atto-forge-public-inline-task-20261125]
+permissions: {}
+jobs:
+  guest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Verify runner and public source snapshot
+        run: |
+          set -euo pipefail
+          c++ --version
+          cmake --version
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.forge.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin f69134bcdd51d97609fb6c1efa69f6b610caa630
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = f69134bcdd51d97609fb6c1efa69f6b610caa630
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = d3a4433e27db353b4e731e6ac258d44a97f98cb0
+          test -z "$(git -C source status --porcelain)"
+          git -C source log -1 --format='%H %T'
+      - name: Build exact compiler and execute native guests
+        run: |
+          set -euo pipefail
+          cd source
+          cmake -S . -B build -DATTO_FORGE_SANITIZERS=OFF
+          cmake --build build --target forge_scalar scalar_parser_test scalar_eval_test scalar_emit_test -j2
+          ctest --test-dir build --output-on-failure -R '^scalar_(parser|eval|emit)_test$'
+          bash tests/inline-task-native-current.sh "$PWD/build/forge_scalar"
