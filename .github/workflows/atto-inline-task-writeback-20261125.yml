@@ -12,17 +12,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, rs, js, cranelift, hdl]
+        backend: [llvm, rs, js, cranelift, forge, wasm, hdl]
     steps:
       - name: Fetch exact public conformance commit without credentials
         run: |
           set -euo pipefail
           git init -q suite
           git -C suite remote add origin https://github.com/atto-lang/atto-compilers-parity-testing.git
-          GIT_TERMINAL_PROMPT=0 git -C suite -c credential.helper= fetch --depth=1 origin 2fcd964adde942a8010489bf98ba730035212799
+          GIT_TERMINAL_PROMPT=0 git -C suite -c credential.helper= fetch --depth=1 origin 4d086cd2de3c1d9a5a53dde800841c17d1a60878
           git -C suite checkout -q --detach FETCH_HEAD
-          test "$(git -C suite rev-parse HEAD)" = 2fcd964adde942a8010489bf98ba730035212799
-          test "$(git -C suite rev-parse 'HEAD^{tree}')" = 94623f53defde2666f6b108dfc89348d9b894f54
+          test "$(git -C suite rev-parse HEAD)" = 4d086cd2de3c1d9a5a53dde800841c17d1a60878
+          test "$(git -C suite rev-parse 'HEAD^{tree}')" = ed02f53b4c45115b606dbf45898b850b8331686a
           test -z "$(git -C suite status --porcelain)"
           git -C suite log -1 --format='%H %T'
           node --version
