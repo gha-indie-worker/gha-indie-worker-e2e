@@ -1,0 +1,52 @@
+name: Atto public NET exact task and regression
+on:
+  push:
+    branches: [ci/atto-net-public-task-regression-20261125]
+permissions:
+  contents: read
+jobs:
+  guest:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            profile: coreclr
+          - runner: macos-15
+            profile: macos-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Pin public source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.net.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 22869d354fbb0135cacd6b431d0ac5aa92a53852
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 22869d354fbb0135cacd6b431d0ac5aa92a53852
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = 6caf0cece1fd657680923300f079abe6d7ae227c
+          test -z "$(git -C source status --porcelain)"
+          git -C source log -1 --format='%H %T'
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: '10.0.x'
+      - name: Execute managed compiler regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd source
+          dotnet --info
+          dotnet run --project verification/Ores.Net.Tests/Ores.Net.Tests.csproj -c Release
+      - name: Execute exact compiled task guests
+        if: ${{ !cancelled() }}
+        env:
+          EXPECTED_HEAD: 22869d354fbb0135cacd6b431d0ac5aa92a53852
+          PROFILE: ${{ matrix.profile }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd source
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          bash ci/test-task-inline-cil.sh "$PROFILE"
