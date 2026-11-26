@@ -23,10 +23,10 @@ jobs:
           set -euo pipefail
           git init -q source
           git -C source remote add origin https://github.com/atto-lang/atto-source.net.git
-          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 90323c202e87cae13a4f2d08cabb2bf05991afbd
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 0774cc2c8fe4c59c96f5cd8ab346fb2f72e946cc
           git -C source checkout -q --detach FETCH_HEAD
-          test "$(git -C source rev-parse HEAD)" = 90323c202e87cae13a4f2d08cabb2bf05991afbd
-          test "$(git -C source rev-parse 'HEAD^{tree}')" = 7aa292af7ea99ae9c7ab38707b3d9d2c8fc037d1
+          test "$(git -C source rev-parse HEAD)" = 0774cc2c8fe4c59c96f5cd8ab346fb2f72e946cc
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = da136ff72e37ca6b19d6413a74645a8e3b292b2c
           test -z "$(git -C source status --porcelain)"
           git -C source log -1 --format='%H %T'
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
@@ -42,7 +42,7 @@ jobs:
       - name: Execute exact compiled task guests
         if: ${{ !cancelled() }}
         env:
-          EXPECTED_HEAD: 90323c202e87cae13a4f2d08cabb2bf05991afbd
+          EXPECTED_HEAD: 0774cc2c8fe4c59c96f5cd8ab346fb2f72e946cc
           PROFILE: ${{ matrix.profile }}
         shell: bash
         run: |
