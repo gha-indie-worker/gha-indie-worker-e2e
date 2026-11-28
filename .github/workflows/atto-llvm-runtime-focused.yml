@@ -1,0 +1,39 @@
+name: Atto LLVM real continuation and scheduler host tests
+on:
+  push:
+    branches: [ci/atto-runtime-qualification-20261127-02]
+permissions: {}
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Execute actual public native runtime sources
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.llvm.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin e86d51b1ef71fe547f39818f1ee02044f4f8f163
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = e86d51b1ef71fe547f39818f1ee02044f4f8f163
+          cd source
+          for sha in a2cc1e1d825fd792b45cb69bba9a8a94dde0b009 1c8c8f0b2c81884b755f339a80329badd023d1f8; do
+            GIT_TERMINAL_PROMPT=0 git -c credential.helper= fetch --depth=1 origin "$sha"
+            test "$(git rev-parse FETCH_HEAD)" = "$sha"
+          done
+          git checkout a2cc1e1d825fd792b45cb69bba9a8a94dde0b009 -- src/main/cpp/oreslang/runtime/AsyncIoContinuationGate.hpp tests/async_io_continuation_gate_test.cpp
+          git checkout 1c8c8f0b2c81884b755f339a80329badd023d1f8 -- tests/native_actor_scheduler_test.c
+          test "$(git hash-object src/main/cpp/oreslang/runtime/AsyncIoContinuationGate.hpp)" = 0bf3538f1446ecccc3cc32c3c1f3e0ad705e6bbe
+          test "$(git hash-object tests/async_io_continuation_gate_test.cpp)" = 3f6aa67ecb32410e987825b19f00308c8a00f698
+          test "$(git hash-object tests/native_actor_scheduler_test.c)" = fa979ed93b62756714b7f76f6479ad042d48dd4d
+          echo "INTEGRATED_TREE=$(git write-tree)"
+          R=src/main/cpp/oreslang/runtime
+          for file in NativeExecutionContextStore NativeContinuationStore NativeAwaitTraceBridge; do
+            gcc -std=c11 -O2 -pthread -Wall -Wextra -Werror -Isrc/main/cpp -c "$R/$file.c" -o "/tmp/$file.o"
+          done
+          g++ -std=c++17 -O2 -pthread -Wall -Wextra -Werror -Isrc/main/cpp tests/async_io_continuation_gate_test.cpp /tmp/NativeExecutionContextStore.o /tmp/NativeContinuationStore.o /tmp/NativeAwaitTraceBridge.o -o /tmp/continuation-test
+          timeout 90 /tmp/continuation-test
+          echo CONTINUATION_TEST_PASS
+          gcc -std=c11 -O2 -pthread -Wall -Wextra -Werror -Isrc/main/cpp tests/native_actor_scheduler_test.c "$R/NativeActorScheduler.c" -o /tmp/scheduler-test
+          timeout 90 /tmp/scheduler-test
+          echo SCHEDULER_TEST_PASS
