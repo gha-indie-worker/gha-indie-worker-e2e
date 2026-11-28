@@ -1,0 +1,29 @@
+name: Atto LLVM nonparking heap exact host tests
+on:
+  push:
+    branches: [ci/atto-runtime-next-ten-20261127]
+permissions: {}
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Compile and run exact native heap lifecycle with GCC and Clang sanitizers
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.llvm.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin b211cc242811fe2f792fdb29aecdb747c002f17b
+          git -C source checkout -q --detach FETCH_HEAD
+          cd source
+          test "$(git rev-parse HEAD)" = b211cc242811fe2f792fdb29aecdb747c002f17b
+          echo "TREE=$(git rev-parse HEAD^{tree})"
+          test "$(git hash-object src/main/cpp/oreslang/runtime/ActorOwnedI64Heap.c)" = 926cefd4706ef0ed5683780cc3dfd97885ef497a
+          test "$(git hash-object tests/actor_owned_heap_lifecycle_test.cpp)" = b8d904a754baa1456ad1e19e57e493a3c61430c5
+          for mode in gcc clang; do
+            if [ "$mode" = gcc ]; then cc=gcc; cxx=g++; flags="-O2 -Wall -Wextra -Werror"; else cc=clang; cxx=clang++; flags="-O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"; fi
+            $cc -std=c11 $flags -Isrc/main/cpp -c src/main/cpp/oreslang/runtime/ActorOwnedI64Heap.c -o /tmp/heap.o
+            $cxx -std=c++17 $flags -UNDEBUG -pthread -Isrc/main/cpp tests/actor_owned_heap_lifecycle_test.cpp /tmp/heap.o -o /tmp/heap-test
+            timeout 60 /tmp/heap-test
+            echo "HEAP_LIFECYCLE_PASS $mode"
+          done
