@@ -1,0 +1,51 @@
+name: Atto LLVM late actor spawn heap turnover
+on:
+  push:
+    branches: [ci/atto-llvm-heap-turnover-539-receipt-20261128]
+permissions: {}
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Compile immutable candidate and execute real guest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.llvm.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin fce9b6d984fad15d53cef03941ce93e0dd687627
+          git -C source checkout -q --detach FETCH_HEAD
+          cd source
+          test "$(git rev-parse HEAD)" = fce9b6d984fad15d53cef03941ce93e0dd687627
+          test "$(git rev-parse 'HEAD^{tree}')" = 281b93120c875789df630e1bf4fbac4775f724c1
+          test -z "$(git status --porcelain --untracked-files=all)"
+          llvm_cmake="$(find /usr/lib/llvm-* -path '*/lib/cmake/llvm/LLVMConfig.cmake' -print 2>/dev/null | sort -V | tail -1 || true)"
+          if [[ -z "$llvm_cmake" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y llvm-dev
+            llvm_cmake="$(find /usr/lib/llvm-* -path '*/lib/cmake/llvm/LLVMConfig.cmake' -print | sort -V | tail -1)"
+          fi
+          test -f "$llvm_cmake"
+          cmake -S . -B build/runtime-qualification -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DLLVM_DIR="$(dirname "$llvm_cmake")"
+          cmake --build build/runtime-qualification --target oreslang-llvmc -j 2
+          compiler="$PWD/build/runtime-qualification/oreslang-llvmc"
+          for mode in normal sanitized; do
+            flags=()
+            if [[ "$mode" = sanitized ]]; then flags+=(--sanitize); fi
+            for fixture in source-actor-heap-turnover.ores source-actor-interleaved-stop.ores source-actor-two-owned-heaps.ores; do
+              python3 tests/source_actor_e2e.py --compiler "$compiler" --clang "$(command -v clang)" --root "$PWD" --positive-case "$fixture" "${flags[@]}"
+            done
+          done
+          for pair in 'before-send|actor message sent before spawn' 'missing-stop|actor reference must be stopped' 'duplicate|duplicate actor reference' 'await|late actor spawn requires straight-line synchronous root actor bootstrap'; do
+            IFS='|' read -r name diagnostic <<< "$pair"
+            set +e
+            "$compiler" "tests/fixtures/source-actor-late-spawn-$name-reject.atto" >/tmp/negative.ll 2>/tmp/negative.err
+            status=$?
+            set -e
+            test "$status" -eq 1
+            test ! -s /tmp/negative.ll
+            grep -Fq "$diagnostic" /tmp/negative.err
+            echo "NEGATIVE_PASS $name"
+          done
+          echo TURNOVER_NATIVE_QUALIFICATION_PASS
