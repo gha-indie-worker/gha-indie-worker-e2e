@@ -23,7 +23,7 @@ jobs:
           for mode in gcc clang; do
             if [ "$mode" = gcc ]; then cc=gcc; cxx=g++; flags="-O2 -Wall -Wextra -Werror"; else cc=clang; cxx=clang++; flags="-O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"; fi
             $cc -std=c11 $flags -Isrc/main/cpp -c src/main/cpp/oreslang/runtime/ActorOwnedI64Heap.c -o /tmp/heap.o
-            $cxx -std=c++17 $flags -UNDEBUG -pthread -Isrc/main/cpp tests/actor_owned_heap_lifecycle_test.cpp /tmp/heap.o -o /tmp/heap-test
+            $cxx -std=c++17 $flags -UNDEBUG -pthread -Isrc/main/cpp tests/actor_owned_heap_lifecycle_test.cpp /tmp/heap.o -Wl,--wrap=calloc -Wl,--wrap=free -o /tmp/heap-test
             timeout 60 /tmp/heap-test
             echo "HEAP_LIFECYCLE_PASS $mode"
           done
