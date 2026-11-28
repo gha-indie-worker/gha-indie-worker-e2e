@@ -1,0 +1,53 @@
+name: Atto Java directory identity positive and negative control
+on:
+  push:
+    branches: [ci/atto-runtime-qualification-20261127-02]
+permissions: {}
+jobs:
+  directory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Pin public Java source and execute production directory regression
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.java.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 1c542a4ecd0ff28eb0afcf3a94481282bb83c487
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 1c542a4ecd0ff28eb0afcf3a94481282bb83c487
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = ae9102726d3168ee2f76d478fe57616d51427bd5
+          test -z "$(git -C source status --porcelain)"
+          if [ -n "${JAVA_HOME_25_X64:-}" ] && [ -x "$JAVA_HOME_25_X64/bin/java" ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64"
+          else
+            curl --fail --silent --show-error --location --retry 3 'https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse' > /tmp/jdk25.json
+            link=$(jq -er '.[0].binary.package.link' /tmp/jdk25.json)
+            checksum=$(jq -er '.[0].binary.package.checksum' /tmp/jdk25.json)
+            [[ "$link" = https://github.com/adoptium/temurin25-binaries/releases/download/* ]]
+            [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]]
+            curl --fail --silent --show-error --location --retry 3 "$link" -o /tmp/jdk25.tar.gz
+            echo "$checksum  /tmp/jdk25.tar.gz" | sha256sum -c -
+            mkdir -p /tmp/atto-jdk25
+            tar -xzf /tmp/jdk25.tar.gz --strip-components=1 -C /tmp/atto-jdk25
+            export JAVA_HOME=/tmp/atto-jdk25
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version
+          mvn -version
+          cd source
+          mvn -B -ntp '-Dtest=VirtualActorSupervisorDirectoryTest#onePhysicalWorkerCannotBackTwoLogicalIdentities' -DfailIfNoTests=true test
+          report=target/surefire-reports/TEST-dev.oreslang.runtime.VirtualActorSupervisorDirectoryTest.xml
+          grep -q 'name="onePhysicalWorkerCannotBackTwoLogicalIdentities"' "$report"
+          grep -q 'failures="0"' "$report"
+          grep -q 'errors="0"' "$report"
+          echo CANDIDATE_IDENTITY_PASS
+          git fetch --depth=1 origin 0ff63b7ae8babb248690cc70a95f9144fa65040e
+          git checkout FETCH_HEAD -- src/main/java/dev/oreslang/runtime/VirtualActorSupervisorDirectory.java
+          if mvn -B -ntp '-Dtest=VirtualActorSupervisorDirectoryTest#onePhysicalWorkerCannotBackTwoLogicalIdentities' -DfailIfNoTests=true test; then
+            echo "Negative control unexpectedly passed"; exit 1
+          fi
+          grep -q 'name="onePhysicalWorkerCannotBackTwoLogicalIdentities"' "$report"
+          grep -q 'failures="1"' "$report"
+          grep -q 'errors="0"' "$report"
+          echo BASELINE_NEGATIVE_CONTROL_PASS
