@@ -1,0 +1,29 @@
+name: Atto LLVM nonparking heap admission
+on:
+  push:
+    branches: [ci/atto-runtime-419-retry-20261127]
+permissions: {}
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Test exact public native heap source with GCC and Clang sanitizers
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.llvm.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin b211cc242811fe2f792fdb29aecdb747c002f17b
+          git -C source checkout -q --detach FETCH_HEAD
+          cd source
+          test "$(git rev-parse HEAD)" = b211cc242811fe2f792fdb29aecdb747c002f17b
+          test "$(git rev-parse 'HEAD^{tree}')" = a0fe38bd061f1592a15b2ae66348272d2fde56a9
+          R=src/main/cpp/oreslang/runtime
+          gcc -std=c11 -O2 -Wall -Wextra -Werror -pthread -Isrc/main/cpp -c "$R/ActorOwnedI64Heap.c" -o /tmp/heap.o
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Isrc/main/cpp tests/actor_owned_heap_lifecycle_test.cpp /tmp/heap.o -Wl,--wrap=calloc,--wrap=free -o /tmp/heap-test
+          timeout 90 /tmp/heap-test
+          echo GCC_HEAP_PASS
+          clang -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -pthread -Isrc/main/cpp -c "$R/ActorOwnedI64Heap.c" -o /tmp/heap-san.o
+          clang++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -pthread -Isrc/main/cpp tests/actor_owned_heap_lifecycle_test.cpp /tmp/heap-san.o -Wl,--wrap=calloc,--wrap=free -o /tmp/heap-san-test
+          timeout 90 /tmp/heap-san-test
+          echo SANITIZER_HEAP_PASS
