@@ -1,0 +1,25 @@
+name: Atto Java cooperation cadence and scheduler debt
+on:
+  push:
+    branches: [ci/atto-runtime-1469-20261127]
+permissions: {}
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Execute exact trusted soft quantum smoke
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.java.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 076e266a8475859d8459f00fae7af638136e2559
+          git -C source checkout -q --detach FETCH_HEAD
+          cd source
+          test "$(git rev-parse HEAD)" = 076e266a8475859d8459f00fae7af638136e2559
+          test "$(git rev-parse 'HEAD^{tree}')" = f492aef76bac754befe9c67556f9b99996b1b6c8
+          java -version
+          mkdir -p /tmp/atto-quantum-smoke
+          javac -Xlint:all -Werror -d /tmp/atto-quantum-smoke src/main/java/dev/oreslang/runtime/SourceCooperationQuantum.java tests/SourceCooperationCadenceBoundarySmoke.java
+          java -cp /tmp/atto-quantum-smoke SourceCooperationCadenceBoundarySmoke
+          echo QUANTUM_SMOKE_PASS
