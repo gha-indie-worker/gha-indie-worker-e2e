@@ -1,0 +1,27 @@
+name: Atto LLVM Ensemble source compiler admission
+on:
+  push:
+    branches: [ci/atto-runtime-1116-20261127]
+permissions: {}
+jobs:
+  compiler:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Exact source real compiler and admission regressions
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.llvm.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 678fb97668dcb4d9100bd611d8187dd59aef27e5
+          git -C source checkout -q --detach FETCH_HEAD
+          cd source
+          test "$(git rev-parse HEAD)" = 678fb97668dcb4d9100bd611d8187dd59aef27e5
+          test "$(git rev-parse 'HEAD^{tree}')" = 65fa8b6ca9c6160ea4a2a6a9e2d74fb09c30c529
+          test "$(git hash-object tests/fixtures/atto-ensemble-v1/canonical-unlowered-try-publish.atto)" = c562ad380bb283da9ffa26160653c1186ab63462
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential cmake clang llvm-dev
+          cmake -S . -B build/ensemble -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build/ensemble --target oreslang-llvmc --parallel 2
+          sh tests/ensemble_alias_admission.sh "$PWD/build/ensemble/oreslang-llvmc" "$PWD/tests/fixtures/atto-ensemble-v1/canonical-unlowered-try-publish.atto"
+          echo ENSEMBLE_ADMISSION_PASS
