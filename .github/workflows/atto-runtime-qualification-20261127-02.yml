@@ -1,0 +1,98 @@
+name: Atto exact public runtime qualification
+on:
+  push:
+    branches: ['ci/atto-runtime-qualification-20261127-02']
+permissions: {}
+jobs:
+  llvm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 1112
+            sha: a2cc1e1d825fd792b45cb69bba9a8a94dde0b009
+          - pr: 1120
+            sha: 1c8c8f0b2c81884b755f339a80329badd023d1f8
+    steps:
+      - name: Fetch exact public source and current-main integration
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ matrix.sha }}
+        run: |
+          set -euo pipefail
+          git init src
+          cd src
+          git remote add origin https://github.com/atto-lang/atto-source.llvm.git
+          git fetch --no-tags --depth=1 origin "$SOURCE_SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          echo "SOURCE_HEAD=$SOURCE_SHA TREE=$(git rev-parse HEAD^{tree})"
+          git fetch --no-tags --depth=1 origin e86d51b1ef71fe547f39818f1ee02044f4f8f163
+          git checkout --detach FETCH_HEAD
+          if [ "$SOURCE_SHA" = a2cc1e1d825fd792b45cb69bba9a8a94dde0b009 ]; then
+            git checkout "$SOURCE_SHA" -- src/main/cpp/oreslang/runtime/AsyncIoContinuationGate.hpp tests/async_io_continuation_gate_test.cpp
+          else
+            git checkout "$SOURCE_SHA" -- tests/native_actor_scheduler_test.c
+          fi
+          echo "INTEGRATED_TREE=$(git write-tree)"
+          git diff --cached --stat
+      - name: Execute production native tests GCC and Clang ASan UBSan
+        shell: bash
+        env:
+          PR: ${{ matrix.pr }}
+        run: |
+          set -euo pipefail
+          cd src
+          R=src/main/cpp/oreslang/runtime
+          for mode in gcc clang; do
+            if [ "$mode" = gcc ]; then
+              cc=gcc; cxx=g++; flags="-O2 -Wall -Wextra -Werror"
+            else
+              cc=clang; cxx=clang++; flags="-O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
+            fi
+            if [ "$PR" = 1112 ]; then
+              for file in NativeExecutionContextStore NativeContinuationStore NativeAwaitTraceBridge; do
+                $cc -std=c11 -pthread $flags -Isrc/main/cpp -c "$R/$file.c" -o "/tmp/$file.o"
+              done
+              $cxx -std=c++17 -pthread $flags -Isrc/main/cpp tests/async_io_continuation_gate_test.cpp /tmp/NativeExecutionContextStore.o /tmp/NativeContinuationStore.o /tmp/NativeAwaitTraceBridge.o -o /tmp/atto-test
+            else
+              $cc -std=c11 -pthread $flags -Isrc/main/cpp tests/native_actor_scheduler_test.c "$R/NativeActorScheduler.c" -o /tmp/atto-test
+            fi
+            timeout 90 /tmp/atto-test
+            echo "EXECUTED_PASS PR=$PR MODE=$mode"
+          done
+  java:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact public source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init src
+          cd src
+          git remote add origin https://github.com/atto-lang/atto-source.java.git
+          git fetch --depth=1 --no-tags origin 1c542a4ecd0ff28eb0afcf3a94481282bb83c487
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 1c542a4ecd0ff28eb0afcf3a94481282bb83c487
+          test "$(git rev-parse HEAD^{tree})" = ae9102726d3168ee2f76d478fe57616d51427bd5
+      - uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: graalvm
+      - name: Execute actual virtual actor directory and generation tests
+        working-directory: src
+        run: |
+          set -euo pipefail
+          mvn -B -ntp -Dtest=VirtualActorSupervisorDirectoryTest,VirtualActorCurrentMainDirectoryTest,VirtualActorGenerationFenceCurrentMainTest,VirtualActorTerminalControlCurrentMainTest -DfailIfNoTests=true test
+          for suite in VirtualActorSupervisorDirectoryTest VirtualActorCurrentMainDirectoryTest VirtualActorGenerationFenceCurrentMainTest VirtualActorTerminalControlCurrentMainTest; do
+            report="target/surefire-reports/TEST-dev.oreslang.runtime.${suite}.xml"
+            test -s "$report"
+            grep -Eq 'tests="[1-9][0-9]*"' "$report"
+            ! grep -Eq 'failures="[1-9]|errors="[1-9]|skipped="[1-9]' "$report"
+          done
+          grep -q 'name="onePhysicalWorkerCannotBackTwoLogicalIdentities"' target/surefire-reports/TEST-dev.oreslang.runtime.VirtualActorSupervisorDirectoryTest.xml
+          echo EXECUTED_JAVA_DIRECTORY_PASS
