@@ -1,0 +1,53 @@
+name: Atto Java scheduled Future candidate and negative control
+on:
+  push:
+    branches: [ci/atto-runtime-next-ten-20261127]
+permissions: {}
+jobs:
+  jvm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Compile exact public candidate and run guest regression
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.java.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin c9e60ff395ffd636381cce1bedefa05fb6645440
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = c9e60ff395ffd636381cce1bedefa05fb6645440
+          echo "TREE=$(git -C source rev-parse HEAD^{tree})"
+          if [ -n "${JAVA_HOME_25_X64:-}" ] && [ -x "$JAVA_HOME_25_X64/bin/java" ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64"
+          else
+            curl -fsSL --retry 3 'https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse' > /tmp/jdk25.json
+            link=$(jq -er '.[0].binary.package.link' /tmp/jdk25.json)
+            checksum=$(jq -er '.[0].binary.package.checksum' /tmp/jdk25.json)
+            [[ "$link" = https://github.com/adoptium/temurin25-binaries/releases/download/* ]]
+            [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]]
+            curl -fsSL --retry 3 "$link" -o /tmp/jdk25.tar.gz
+            echo "$checksum  /tmp/jdk25.tar.gz" | sha256sum -c -
+            mkdir -p /tmp/atto-jdk25
+            tar -xzf /tmp/jdk25.tar.gz --strip-components=1 -C /tmp/atto-jdk25
+            export JAVA_HOME=/tmp/atto-jdk25
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version
+          cd source
+          mvn -B -ntp '-Dtest=GenericHasFutureAwaitTest#scheduledExplicitFutureMethodPreservesSingleFuturePayload+affineFutureFieldCannotBeReturnedThroughReadonlyReceiver' -DfailIfNoTests=true test
+          report=target/surefire-reports/TEST-dev.oreslang.GenericHasFutureAwaitTest.xml
+          grep -q 'name="scheduledExplicitFutureMethodPreservesSingleFuturePayload"' "$report"
+          grep -q 'name="affineFutureFieldCannotBeReturnedThroughReadonlyReceiver"' "$report"
+          grep -q 'tests="2"' "$report"
+          grep -q 'failures="0"' "$report"
+          grep -q 'errors="0"' "$report"
+          grep -q 'skipped="0"' "$report"
+          echo CANDIDATE_FUTURE_PASS
+          git fetch --depth=1 origin 274c48ae93bf6f13655a96da4e50ba2cfa0b6d37
+          git checkout FETCH_HEAD -- src/main/java/dev/oreslang/nodes/OresEvalRootNode.java
+          if mvn -B -ntp '-Dtest=GenericHasFutureAwaitTest#scheduledExplicitFutureMethodPreservesSingleFuturePayload' -DfailIfNoTests=true test; then
+            echo "Negative control unexpectedly passed"; exit 1
+          fi
+          grep -q 'name="scheduledExplicitFutureMethodPreservesSingleFuturePayload"' "$report"
+          grep -Eq '(failures|errors)="1"' "$report"
+          echo BASELINE_NEGATIVE_CONTROL_PASS
