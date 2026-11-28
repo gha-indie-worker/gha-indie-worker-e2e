@@ -1,0 +1,27 @@
+name: Atto LLVM actor heap turnover guest
+on:
+  push:
+    branches: [ci/atto-runtime-539-retry-20261127]
+permissions: {}
+jobs:
+  guest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Compile exact source and execute actor guest regressions
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.llvm.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin ebae776d0b34e445e4f1189db23f87dd25a97ea5
+          git -C source checkout -q --detach FETCH_HEAD
+          cd source
+          test "$(git rev-parse HEAD)" = ebae776d0b34e445e4f1189db23f87dd25a97ea5
+          test "$(git rev-parse 'HEAD^{tree}')" = 7d6903cd12921e3f7515847d29ce3c39e69b64bf
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential cmake clang llvm-dev
+          cmake -S . -B build/actor -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build/actor --target oreslang-llvmc --parallel 2
+          python3 tests/source_actor_e2e.py --compiler "$PWD/build/actor/oreslang-llvmc" --clang "$(command -v clang)" --root "$PWD" --positive-case source-actor-heap-turnover.ores
+          python3 tests/source_actor_e2e.py --compiler "$PWD/build/actor/oreslang-llvmc" --clang "$(command -v clang)" --root "$PWD" --sanitize --positive-case source-actor-heap-turnover.ores
+          echo ACTOR_TURNOVER_PASS
