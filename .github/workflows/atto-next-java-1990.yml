@@ -1,0 +1,46 @@
+name: Atto Java bounded retry and reversible turn runtime
+on:
+  push:
+    branches: [ci/atto-runtime-next-ten-20261127]
+permissions: {}
+jobs:
+  jvm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Compile exact public candidate and run guest regression
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.java.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 4f85d3352ce597554b7e218206125ae4bf743f4f
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 4f85d3352ce597554b7e218206125ae4bf743f4f
+          echo "TREE=$(git -C source rev-parse HEAD^{tree})"
+          if [ -n "${JAVA_HOME_25_X64:-}" ] && [ -x "$JAVA_HOME_25_X64/bin/java" ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64"
+          else
+            curl -fsSL --retry 3 'https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse' > /tmp/jdk25.json
+            link=$(jq -er '.[0].binary.package.link' /tmp/jdk25.json)
+            checksum=$(jq -er '.[0].binary.package.checksum' /tmp/jdk25.json)
+            [[ "$link" = https://github.com/adoptium/temurin25-binaries/releases/download/* ]]
+            [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]]
+            curl -fsSL --retry 3 "$link" -o /tmp/jdk25.tar.gz
+            echo "$checksum  /tmp/jdk25.tar.gz" | sha256sum -c -
+            mkdir -p /tmp/atto-jdk25
+            tar -xzf /tmp/jdk25.tar.gz --strip-components=1 -C /tmp/atto-jdk25
+            export JAVA_HOME=/tmp/atto-jdk25
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version
+          cd source
+          test "$(git rev-parse HEAD^{tree})" = 5549970b6570fdfdb18c23721b81f8e9467e933c
+          test "$(git hash-object src/main/java/dev/oreslang/runtime/BoundedRetryPolicyV1.java)" = e37cebab2b6891106756a282d688324871c62e54
+          test "$(git hash-object src/main/java/dev/oreslang/runtime/ReversibleScalarTurnV1.java)" = 1481d23cc218c791c9f021928ab59b040b78285d
+          mvn -B -ntp -Dtest=ReversibleScalarTurnV1Test -DfailIfNoTests=true test
+          report=target/surefire-reports/TEST-dev.oreslang.runtime.ReversibleScalarTurnV1Test.xml
+          grep -q 'tests="3"' "$report"
+          grep -q 'failures="0"' "$report"
+          grep -q 'errors="0"' "$report"
+          grep -q 'skipped="0"' "$report"
+          echo REVERSIBLE_TURN_JUNIT_PASS
