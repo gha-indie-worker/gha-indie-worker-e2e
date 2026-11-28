@@ -1,0 +1,51 @@
+name: Atto Java supervisor restart window three exact heads
+on:
+  push:
+    branches: [ci/atto-runtime-next-ten-20261127]
+permissions: {}
+jobs:
+  jvm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Compile exact public candidate and run guest regression
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.java.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 326e7ffe496bdaee3affc800dad286269aa12745
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 326e7ffe496bdaee3affc800dad286269aa12745
+          echo "TREE=$(git -C source rev-parse HEAD^{tree})"
+          if [ -n "${JAVA_HOME_25_X64:-}" ] && [ -x "$JAVA_HOME_25_X64/bin/java" ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64"
+          else
+            curl -fsSL --retry 3 'https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse' > /tmp/jdk25.json
+            link=$(jq -er '.[0].binary.package.link' /tmp/jdk25.json)
+            checksum=$(jq -er '.[0].binary.package.checksum' /tmp/jdk25.json)
+            [[ "$link" = https://github.com/adoptium/temurin25-binaries/releases/download/* ]]
+            [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]]
+            curl -fsSL --retry 3 "$link" -o /tmp/jdk25.tar.gz
+            echo "$checksum  /tmp/jdk25.tar.gz" | sha256sum -c -
+            mkdir -p /tmp/atto-jdk25
+            tar -xzf /tmp/jdk25.tar.gz --strip-components=1 -C /tmp/atto-jdk25
+            export JAVA_HOME=/tmp/atto-jdk25
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version
+          cd source
+          for pair in 326e7ffe496bdaee3affc800dad286269aa12745:c5cc15a36f972134f03c5d0161e30081de9ad28a:857:10 ff44de8d4810ed977cf6c4b8178726c1ca372244:48f7b80a5079f1bfb44f916dacc42d8219e1ddff:859:12 ef87ad09fd5972c65aa605c660a6aa1b0048b68f:aa89c7124ec7639e07119532faf5c52879badf56:868:13; do
+            IFS=: read -r sha tree pr expected <<< "$pair"
+            git -c credential.helper= fetch --depth=1 origin "$sha"
+            git checkout -q --detach FETCH_HEAD
+            test "$(git rev-parse HEAD)" = "$sha"
+            test "$(git rev-parse HEAD^{tree})" = "$tree"
+            rm -rf target/surefire-reports
+            mvn -B -ntp -Dtest=SupervisorRestartWindowTest -DfailIfNoTests=true test
+            report=target/surefire-reports/TEST-dev.oreslang.runtime.SupervisorRestartWindowTest.xml
+            grep -q "tests=\"$expected\"" "$report"
+            grep -q 'failures="0"' "$report"
+            grep -q 'errors="0"' "$report"
+            grep -q 'skipped="0"' "$report"
+            echo "RESTART_WINDOW_PASS PR=$pr TESTS=$expected TREE=$tree"
+          done
