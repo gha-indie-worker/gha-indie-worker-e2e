@@ -1,0 +1,25 @@
+name: Atto LLVM shared arena lease fencing
+on:
+  push:
+    branches: [ci/atto-runtime-414-20261127]
+permissions: {}
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Execute exact native shared arena source with GCC and Clang
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.llvm.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin c3ab7c32c58a88ad38a775216a2524e43a8d8a3f
+          git -C source checkout -q --detach FETCH_HEAD
+          cd source
+          test "$(git rev-parse HEAD)" = c3ab7c32c58a88ad38a775216a2524e43a8d8a3f
+          test "$(git rev-parse 'HEAD^{tree}')" = 5a400df180017110500a475dd24f2a2ba034a961
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -pthread -Isrc/main/cpp tests/native_shared_domain_arena_test.cpp -o /tmp/arena-test
+          timeout 90 /tmp/arena-test
+          clang++ -std=c++17 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -pthread -Isrc/main/cpp tests/native_shared_domain_arena_test.cpp -o /tmp/arena-san
+          timeout 90 /tmp/arena-san
+          echo SHARED_DOMAIN_ARENA_PASS
