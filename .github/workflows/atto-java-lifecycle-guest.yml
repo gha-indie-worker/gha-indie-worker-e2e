@@ -1,0 +1,44 @@
+name: Atto Java reusable lifecycle Future guest tests
+on:
+  push:
+    branches: [ci/atto-runtime-1205-20261127]
+permissions: {}
+jobs:
+  directory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Pin public Java source and execute production directory regression
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.java.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 1739560aff2b96f9603fbce894fac24b8ea5c998
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 1739560aff2b96f9603fbce894fac24b8ea5c998
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = d248ce4724ce10091934ac1009a310b13e4477bd
+          test -z "$(git -C source status --porcelain)"
+          if [ -n "${JAVA_HOME_25_X64:-}" ] && [ -x "$JAVA_HOME_25_X64/bin/java" ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64"
+          else
+            curl --fail --silent --show-error --location --retry 3 'https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse' > /tmp/jdk25.json
+            link=$(jq -er '.[0].binary.package.link' /tmp/jdk25.json)
+            checksum=$(jq -er '.[0].binary.package.checksum' /tmp/jdk25.json)
+            [[ "$link" = https://github.com/adoptium/temurin25-binaries/releases/download/* ]]
+            [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]]
+            curl --fail --silent --show-error --location --retry 3 "$link" -o /tmp/jdk25.tar.gz
+            echo "$checksum  /tmp/jdk25.tar.gz" | sha256sum -c -
+            mkdir -p /tmp/atto-jdk25
+            tar -xzf /tmp/jdk25.tar.gz --strip-components=1 -C /tmp/atto-jdk25
+            export JAVA_HOME=/tmp/atto-jdk25
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version
+          mvn -version
+          cd source
+          mvn -B -ntp '-Dtest=SourceActorSpawnExecutionTest#actorLifecycleAwaitObserversAreReusableAndDirectAwaitMeansReady+actorLifecycleReadyPersistsAfterPhysicalDone' -DfailIfNoTests=true test
+          report=target/surefire-reports/TEST-dev.oreslang.SourceActorSpawnExecutionTest.xml
+          test -s "$report"
+          grep -q 'tests="2"' "$report"
+          ! grep -Eq 'failures="[1-9]|errors="[1-9]|skipped="[1-9]' "$report"
+          echo LIFECYCLE_GUEST_PASS
