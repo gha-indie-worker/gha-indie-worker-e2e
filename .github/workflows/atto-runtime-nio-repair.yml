@@ -1,0 +1,80 @@
+name: Atto Java NIO carrier compilation repair qualification
+on:
+  push:
+    branches: [ci/atto-runtime-nio-repair-20261128]
+permissions: {}
+jobs:
+  qualification:
+    name: ${{ matrix.kind }}-PR-${{ matrix.pr }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: java
+            pr: 1198
+            head: a2c2ffbdd741f8303141af37f34a494d1bcdcf56
+            tree: ec795072cdc3d3c6ef698f4de3cfc0db773700e6
+            tests: 'NioReadinessCarrierSaturationTest,NioReadinessShutdownDrainTest,NioReadinessTerminalRaceTest,OresCarrierPermitConcurrentCloseTest'
+          - kind: java
+            pr: 1238
+            head: 8fde48f0fd84107fe18f4f4b821662b14d0dc26e
+            tree: a42bda98afcb4f19ea3be2eb414331d073b7f5ed
+            tests: 'NativeNioFutureReactorTest'
+    env:
+      SOURCE_KIND: ${{ matrix.kind }}
+      SOURCE_PR: ${{ matrix.pr }}
+      SOURCE_HEAD: ${{ matrix.head }}
+      SOURCE_TREE: ${{ matrix.tree }}
+      JAVA_TESTS: ${{ matrix.tests }}
+    steps:
+      - name: Fetch pinned public Atto commit without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin "https://github.com/atto-lang/atto-source.$SOURCE_KIND.git"
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin "$SOURCE_HEAD"
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = "$SOURCE_TREE"
+          test -z "$(git -C source status --porcelain --untracked-files=all)"
+          echo "EXACT_HEAD=$SOURCE_HEAD EXACT_TREE=$SOURCE_TREE"
+      - name: JVM runtime qualification and nonempty JUnit receipts
+        if: matrix.kind == 'java'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${JAVA_HOME_25_X64:-}" ] && [ -x "$JAVA_HOME_25_X64/bin/java" ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64"
+          else
+            curl -fsSL --retry 3 'https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse' > /tmp/jdk25.json
+            link=$(jq -er '.[0].binary.package.link' /tmp/jdk25.json)
+            checksum=$(jq -er '.[0].binary.package.checksum' /tmp/jdk25.json)
+            [[ "$link" = https://github.com/adoptium/temurin25-binaries/releases/download/* ]]
+            [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]]
+            curl -fsSL --retry 3 "$link" -o /tmp/jdk25.tar.gz
+            echo "$checksum  /tmp/jdk25.tar.gz" | sha256sum -c -
+            mkdir -p /tmp/atto-jdk25
+            tar -xzf /tmp/jdk25.tar.gz --strip-components=1 -C /tmp/atto-jdk25
+            export JAVA_HOME=/tmp/atto-jdk25
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version
+          cd source
+          if [[ "$SOURCE_PR" = 1560 ]]; then
+            bash scripts/verify-supervisor-control-lane-port.sh
+          else
+            mvn -B -ntp "-Dtest=$JAVA_TESTS" -DfailIfNoTests=true -Dsurefire.failIfNoSpecifiedTests=true test
+          fi
+          IFS=, read -ra suites <<< "$JAVA_TESTS"
+          for suite in "${suites[@]}"; do
+            mapfile -t reports < <(find target/surefire-reports -maxdepth 1 -type f -name "TEST-*.$suite.xml")
+            test "${#reports[@]}" -eq 1
+            grep -Eq 'tests="[1-9][0-9]*"' "${reports[0]}"
+            grep -q 'failures="0"' "${reports[0]}"
+            grep -q 'errors="0"' "${reports[0]}"
+            grep -q 'skipped="0"' "${reports[0]}"
+            echo "EXECUTED_JUNIT_PASS $suite"
+          done
