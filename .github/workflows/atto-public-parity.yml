@@ -1,0 +1,81 @@
+name: Atto public exact-head parity batch
+on:
+  push:
+    branches: [ci/atto-parity-20261128-1502]
+permissions: {}
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {repo: atto-source.java, sha: 457c129cc4e9d4f1d8a48ec61705da05bf8eada7, suite: java-shift}
+          - {repo: atto-source.llvm, sha: 75210301c21c3a2ba11759c4639252219938924d, suite: llvm-shift}
+          - {repo: atto-source.llvm, sha: 9a0d9ffba5806bf18fb915ace9cca60a3ebe4a0e, suite: llvm-timer}
+          - {repo: atto-source.java, sha: 17b31d70ba8a5d8dac2ff8989bed3ab31c197ad5, suite: java-timer}
+          - {repo: atto-source.forge, sha: 2fc70f5fde7137f0548d3fc309626403d9b081d5, suite: forge-product}
+          - {repo: atto-source.wasm, sha: 371dafd8509a812fca5912e5779846a33b872d59, suite: wasm-host}
+    env:
+      SOURCE_REPO: ${{ matrix.repo }}
+      SOURCE_HEAD: ${{ matrix.sha }}
+      SUITE: ${{ matrix.suite }}
+      GIT_TERMINAL_PROMPT: '0'
+      GIT_CONFIG_NOSYSTEM: '1'
+      GIT_CONFIG_GLOBAL: /dev/null
+    steps:
+      - name: Anonymous public exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/source"
+          cd "$RUNNER_TEMP/source"
+          git init -q
+          git -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$SOURCE_REPO.git" "$SOURCE_HEAD"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git write-tree)" = "$(git rev-parse 'HEAD^{tree}')"
+          git diff --exit-code HEAD --
+          git rev-parse HEAD 'HEAD^{tree}'
+      - name: Execute real focused suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          case "$SUITE" in
+            java-shift)
+              export JAVA_HOME="$JAVA_HOME_21_X64"; export PATH="$JAVA_HOME/bin:$PATH"
+              mvn -B -Dtest=CompoundShiftAssignTest,Odb1ScalarShiftGuestTest -Dsurefire.failIfNoSpecifiedTests=true test
+              ;;
+            java-timer)
+              export JAVA_HOME="$JAVA_HOME_21_X64"; export PATH="$JAVA_HOME/bin:$PATH"
+              mvn -B -Dtest=OresTimerWheelTest,OresTimersTest,ExecutionAffineSleepRuntimeTest -Dsurefire.failIfNoSpecifiedTests=true test
+              ;;
+            llvm-shift)
+              cmake -S . -B "$RUNNER_TEMP/build" -DCMAKE_BUILD_TYPE=Release
+              cmake --build "$RUNNER_TEMP/build" --target oreslang-llvmc -j2
+              ORESLANG_LLVMC="$RUNNER_TEMP/build/oreslang-llvmc" bash tests/native_odb1_bitshift_source_execution.sh
+              ;;
+            llvm-timer)
+              for cc in gcc clang; do
+                for opt in 1 2; do
+                  "$cc" -std=c11 -D_POSIX_C_SOURCE=200809L -O"$opt" -g -Wall -Wextra -Wpedantic -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -Isrc/main/cpp tests/native_timer_wheel_test.c src/main/cpp/oreslang/runtime/NativeTimerWheel.c src/main/cpp/oreslang/runtime/NativeTimerDriver.c -o "$RUNNER_TEMP/timer"
+                  ASAN_OPTIONS=abort_on_error=1 UBSAN_OPTIONS=halt_on_error=1 "$RUNNER_TEMP/timer"
+                done
+              done
+              ;;
+            forge-product)
+              cmake -S . -B "$RUNNER_TEMP/build" -DCMAKE_BUILD_TYPE=Release
+              cmake --build "$RUNNER_TEMP/build" --target scalar_parser_test forge_scalar -j2
+              ctest --test-dir "$RUNNER_TEMP/build" --output-on-failure --no-tests=error -R '^(scalar_parser_test|scalar_guest_pipeline)$'
+              ;;
+            wasm-host)
+              node --version
+              npm test
+              ;;
+            *) exit 2 ;;
+          esac
+          test "$(git rev-parse HEAD)" = "$SOURCE_HEAD"
+          git diff --exit-code HEAD --
+          echo "ATTO_EXACT_HEAD_FOCUSED_PASS $SOURCE_REPO $SOURCE_HEAD $SUITE"
