@@ -1,0 +1,51 @@
+name: Atto scheduler nonparking guard and negative control
+on:
+  push:
+    branches: [ci/atto-current-main-future-2089-reconciled-20261128]
+permissions: {}
+jobs:
+  jvm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Compile exact public candidate and run guest regression
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.java.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 8017e6b151dda14f318d1db66be9253da942f6e9
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 8017e6b151dda14f318d1db66be9253da942f6e9
+          test "$(git -C source rev-parse HEAD^{tree})" = d1490f2ea9e5c7887e81142980e5151119ae2174
+          if [ -n "${JAVA_HOME_25_X64:-}" ] && [ -x "$JAVA_HOME_25_X64/bin/java" ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64"
+          else
+            curl -fsSL --retry 3 'https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse' > /tmp/jdk25.json
+            link=$(jq -er '.[0].binary.package.link' /tmp/jdk25.json)
+            checksum=$(jq -er '.[0].binary.package.checksum' /tmp/jdk25.json)
+            [[ "$link" = https://github.com/adoptium/temurin25-binaries/releases/download/* ]]
+            [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]]
+            curl -fsSL --retry 3 "$link" -o /tmp/jdk25.tar.gz
+            echo "$checksum  /tmp/jdk25.tar.gz" | sha256sum -c -
+            mkdir -p /tmp/atto-jdk25
+            tar -xzf /tmp/jdk25.tar.gz --strip-components=1 -C /tmp/atto-jdk25
+            export JAVA_HOME=/tmp/atto-jdk25
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version
+          cd source
+          mvn -B -ntp '-Dtest=SchedulerFutureNonparkingTest,OresSchedulerTest,OresFutureCallbackTest' -DfailIfNoTests=true -Dsurefire.failIfNoSpecifiedTests=true test
+          report=target/surefire-reports/TEST-dev.oreslang.runtime.SchedulerFutureNonparkingTest.xml
+          grep -q 'tests="2"' "$report"
+          grep -q 'failures="0"' "$report"
+          grep -q 'errors="0"' "$report"
+          grep -q 'skipped="0"' "$report"
+          grep -q 'name="pendingHostWaitsAreRejectedOnSchedulerTurns"' "$report"
+          git fetch --depth=1 origin 5d5cc056522193aa34dffa53c70d35fcc0bd520b
+          git checkout FETCH_HEAD -- src/main/java/dev/oreslang/runtime/OresFuture.java
+          if mvn -B -ntp '-Dtest=SchedulerFutureNonparkingTest#pendingHostWaitsAreRejectedOnSchedulerTurns' -DfailIfNoTests=true test; then
+            echo "Negative control unexpectedly passed"; exit 1
+          fi
+          grep -q 'name="pendingHostWaitsAreRejectedOnSchedulerTurns"' "$report"
+          grep -Eq '(failures|errors)="1"' "$report"
+          echo BASELINE_NEGATIVE_CONTROL_PASS
