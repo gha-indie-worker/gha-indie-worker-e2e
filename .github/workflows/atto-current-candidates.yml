@@ -1,0 +1,56 @@
+name: Atto current candidate tests
+on:
+  push:
+    branches: [ci/atto-merge-campaign-20261128-v2]
+permissions: {}
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {repo: atto-source.java, sha: 47c4fd7b11c303b6b4116d53598d3c381434c463, suite: timer}
+          - {repo: atto-source.cranelift, sha: 7644a4804b7f56d354b61605046ab7b7ae14655b, suite: recursive}
+          - {repo: atto-source.rs, sha: 759aa8f07aceb5cab059fc48ee0a2f4b9d0838d7, suite: denote}
+    env:
+      REPO: ${{ matrix.repo }}
+      SHA: ${{ matrix.sha }}
+      SUITE: ${{ matrix.suite }}
+      GIT_TERMINAL_PROMPT: '0'
+      GIT_CONFIG_NOSYSTEM: '1'
+      GIT_CONFIG_GLOBAL: /dev/null
+    steps:
+      - name: Fetch exact public source without credentials
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/source"
+          cd "$RUNNER_TEMP/source"
+          git init -q
+          git -c credential.helper= -c http.extraHeader= fetch --no-tags --depth=1 "https://github.com/atto-lang/$REPO.git" "$SHA"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$SHA"
+          test "$(git write-tree)" = "$(git rev-parse 'HEAD^{tree}')"
+          git diff --exit-code HEAD --
+          git rev-parse HEAD 'HEAD^{tree}'
+      - name: Execute compiler or runtime tests
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          case "$SUITE" in
+            timer)
+              export JAVA_HOME="$JAVA_HOME_21_X64"; export PATH="$JAVA_HOME/bin:$PATH"
+              mvn -B -Dtest=OresTimerWheelTest,OresTimersTest,ExecutionAffineSleepRuntimeTest -Dsurefire.failIfNoSpecifiedTests=true test
+              ;;
+            recursive)
+              cargo test --locked --test named_recursive_native
+              ;;
+            denote)
+              cargo test --locked --test denote_scalar_types
+              ;;
+            *) exit 2 ;;
+          esac
+          test "$(git rev-parse HEAD)" = "$SHA"
+          git diff --exit-code HEAD --
+          echo "ATTO_EXACT_HEAD_TEST_PASS $REPO $SHA $SUITE"
