@@ -1,0 +1,30 @@
+name: Atto LLVM disjoint native domain IDs
+on:
+  push:
+    branches: [ci/atto-runtime-462-retry-20261127]
+permissions: {}
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Exact source allocator and exhaustion proof
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.llvm.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 72e06a06fc9465769bbf125b0fa930cdb77fe762
+          git -C source checkout -q --detach FETCH_HEAD
+          cd source
+          test "$(git rev-parse HEAD)" = 72e06a06fc9465769bbf125b0fa930cdb77fe762
+          test "$(git rev-parse 'HEAD^{tree}')" = 9241d099371d2de7699812f3390620b08717aad9
+          R=src/main/cpp/oreslang/runtime
+          for cc in gcc clang; do
+            "$cc" -std=c11 -Wall -Wextra -Werror -O2 -pthread -Isrc/main/cpp tests/native_actor_domain_id_test.c -o /tmp/domain
+            timeout 90 /tmp/domain
+            "$cc" -std=c11 -Wall -Wextra -Werror -O2 -pthread -Isrc/main/cpp tests/native_actor_domain_runtime_test.c "$R/ActorArena.c" "$R/ActorOwnedI64Heap.c" -o /tmp/runtime
+            timeout 90 /tmp/runtime
+          done
+          clang -std=c11 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -pthread -Isrc/main/cpp tests/native_actor_domain_runtime_test.c "$R/ActorArena.c" "$R/ActorOwnedI64Heap.c" -o /tmp/runtime-san
+          timeout 90 /tmp/runtime-san
+          echo DOMAIN_ID_PASS
