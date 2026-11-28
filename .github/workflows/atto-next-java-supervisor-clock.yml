@@ -34,7 +34,7 @@ jobs:
           export PATH="$JAVA_HOME/bin:$PATH"
           java -version
           cd source
-          for pair in 326e7ffe496bdaee3affc800dad286269aa12745:c5cc15a36f972134f03c5d0161e30081de9ad28a:857:10 ff44de8d4810ed977cf6c4b8178726c1ca372244:48f7b80a5079f1bfb44f916dacc42d8219e1ddff:859:12 ef87ad09fd5972c65aa605c660a6aa1b0048b68f:aa89c7124ec7639e07119532faf5c52879badf56:868:13; do
+          for pair in d4eb0091024797aead9ebb47b448820a5648f0cd:8e3cea40d6b74bf5b0bed9a904944912de892126:859:12 640f39ca80773808c01ae52aab7e7b1021ab8482:04fa6f85341eea72553776a66cf69637132e221d:868:13; do
             IFS=: read -r sha tree pr expected <<< "$pair"
             git -c credential.helper= fetch --depth=1 origin "$sha"
             git checkout -q --detach FETCH_HEAD
