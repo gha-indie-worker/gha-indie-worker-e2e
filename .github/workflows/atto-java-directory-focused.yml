@@ -1,0 +1,38 @@
+name: Atto Java exact virtual supervisor directory tests
+on:
+  push:
+    branches: [ci/atto-runtime-qualification-20261127-02]
+permissions: {}
+jobs:
+  directory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Pin public Java source identity
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.java.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 1c542a4ecd0ff28eb0afcf3a94481282bb83c487
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 1c542a4ecd0ff28eb0afcf3a94481282bb83c487
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = ae9102726d3168ee2f76d478fe57616d51427bd5
+          test -z "$(git -C source status --porcelain)"
+      - uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: graalvm
+      - name: Execute actual virtual actor directory regression
+        run: |
+          set -euo pipefail
+          cd source
+          mvn -B -ntp -Dtest=VirtualActorSupervisorDirectoryTest,VirtualActorCurrentMainDirectoryTest,VirtualActorGenerationFenceCurrentMainTest,VirtualActorTerminalControlCurrentMainTest -DfailIfNoTests=true test
+          for suite in VirtualActorSupervisorDirectoryTest VirtualActorCurrentMainDirectoryTest VirtualActorGenerationFenceCurrentMainTest VirtualActorTerminalControlCurrentMainTest; do
+            report="target/surefire-reports/TEST-dev.oreslang.runtime.${suite}.xml"
+            test -s "$report"
+            grep -Eq 'tests="[1-9][0-9]*"' "$report"
+            ! grep -Eq 'failures="[1-9]|errors="[1-9]|skipped="[1-9]' "$report"
+          done
+          grep -q 'name="onePhysicalWorkerCannotBackTwoLogicalIdentities"' target/surefire-reports/TEST-dev.oreslang.runtime.VirtualActorSupervisorDirectoryTest.xml
+          echo EXECUTED_JAVA_DIRECTORY_PASS
