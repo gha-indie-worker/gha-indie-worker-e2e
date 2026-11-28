@@ -1,0 +1,31 @@
+name: Atto LLVM shared lease and VM task bridge regressions
+on:
+  push:
+    branches: [ci/atto-runtime-native-followup-20261127]
+permissions: {}
+jobs:
+  native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Verify merged shared lease and current VM task bridge
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.llvm.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin f0a3e370fb7a675756016dfebf9087805a1c0e1a
+          git -C source checkout -q --detach FETCH_HEAD
+          cd source
+          test "$(git rev-parse HEAD)" = f0a3e370fb7a675756016dfebf9087805a1c0e1a
+          test "$(git hash-object src/main/cpp/oreslang/runtime/SharedDomainArena.hpp)" = e23363606931696378ab4aa10566ec047a56b7cc
+          test "$(git hash-object tests/native_shared_domain_arena_test.cpp)" = 870003f8f21e0771ac10ac20d937eedc6fb75039
+          test "$(git hash-object tests/native_vm_actor_task_bridge_test.c)" = 9544d73a910cc45d0956df50c7ec1f3c86460e03
+          for mode in gcc clang; do
+            if [ "$mode" = gcc ]; then cc=gcc; cxx=g++; flags="-O2 -Wall -Wextra -Werror"; else cc=clang; cxx=clang++; flags="-O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"; fi
+            $cxx -std=c++17 $flags -UNDEBUG -pthread -Isrc/main/cpp tests/native_shared_domain_arena_test.cpp -o /tmp/arena-test
+            timeout 60 /tmp/arena-test
+            echo "SHARED_LEASE_PASS $mode"
+            $cc -std=c11 $flags -UNDEBUG -pthread -Isrc/main/cpp tests/native_vm_actor_task_bridge_test.c src/main/cpp/oreslang/runtime/NativeOresVM.c src/main/cpp/oreslang/runtime/NativeActorScheduler.c src/main/cpp/oreslang/runtime/NativeActorFuture.c -o /tmp/vm-task-test
+            timeout 60 /tmp/vm-task-test
+            echo "VM_TASK_BRIDGE_PASS $mode"
+          done
