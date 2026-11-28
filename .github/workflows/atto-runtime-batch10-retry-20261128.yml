@@ -1,0 +1,189 @@
+name: Atto runtime retry and additional candidates
+on:
+  push:
+    branches: [ci/atto-runtime-batch10-retry-20261128]
+permissions: {}
+jobs:
+  qualification:
+    name: ${{ matrix.kind }}-PR-${{ matrix.pr }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: java
+            pr: 1560
+            head: 4238006ea4ba220da096367f67051c2ab1bceaaa
+            tree: 20c09b1f08b2b68356bf821b51c04087d2fc2ad0
+            tests: 'ActorSupervisorControlLanePortTest,ActorSupervisorControlAtomicTransferTest,ActorSupervisorControlCounterSaturationTest,ActorSupervisorControlV2Test,ActorSupervisorControlConservationTest'
+          - kind: java
+            pr: 1397
+            head: 4b8a7aa5412102a592c59883ab7e298ad4cb13a4
+            tree: fb1e1f74ac473477ab6449aabc069e6d40582951
+            tests: 'SupervisorChildRegistryTest'
+          - kind: java
+            pr: 1238
+            head: caa80c7fea461650f973b7d533af0dde48d4e668
+            tree: dc1ec49453343dccf25f439e7a549cb0b67af2fd
+            tests: 'NativeNioFutureReactorTest'
+          - kind: java
+            pr: 1198
+            head: 37e2d9d82aa9e148dadd4433963350f0e7918663
+            tree: 263cead13665e1bfda0e83cde800bf1b0b204c22
+            tests: 'NioReadinessCarrierSaturationTest,NioReadinessShutdownDrainTest,NioReadinessTerminalRaceTest,OresCarrierPermitConcurrentCloseTest'
+          - kind: llvm
+            pr: 573
+            head: a8d8a1ec9b66c7fbfe60956d3136f4f6621c8d74
+            tree: 9e65f90e0551c82228886858f818ed899c9b9c18
+            tests: ''
+          - kind: llvm
+            pr: 687
+            head: bcb98ca420fbdbcc0ed5b8121e0a595302d312a4
+            tree: fe09d1389d92c6bae788b53b9fa3e84ff927ca91
+            tests: ''
+          - kind: llvm
+            pr: 504
+            head: 7df9d42bf563984a1889cacd176368bfbf9e4c9f
+            tree: 94a4cd9967d67d132018b30328a0e855a013e6d5
+            tests: ''
+    env:
+      SOURCE_KIND: ${{ matrix.kind }}
+      SOURCE_PR: ${{ matrix.pr }}
+      SOURCE_HEAD: ${{ matrix.head }}
+      SOURCE_TREE: ${{ matrix.tree }}
+      JAVA_TESTS: ${{ matrix.tests }}
+    steps:
+      - name: Fetch pinned public Atto commit without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin "https://github.com/atto-lang/atto-source.$SOURCE_KIND.git"
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin "$SOURCE_HEAD"
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_HEAD"
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = "$SOURCE_TREE"
+          test -z "$(git -C source status --porcelain --untracked-files=all)"
+          echo "EXACT_HEAD=$SOURCE_HEAD EXACT_TREE=$SOURCE_TREE"
+      - name: JVM runtime qualification and nonempty JUnit receipts
+        if: matrix.kind == 'java'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${JAVA_HOME_25_X64:-}" ] && [ -x "$JAVA_HOME_25_X64/bin/java" ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64"
+          else
+            curl -fsSL --retry 3 'https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse' > /tmp/jdk25.json
+            link=$(jq -er '.[0].binary.package.link' /tmp/jdk25.json)
+            checksum=$(jq -er '.[0].binary.package.checksum' /tmp/jdk25.json)
+            [[ "$link" = https://github.com/adoptium/temurin25-binaries/releases/download/* ]]
+            [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]]
+            curl -fsSL --retry 3 "$link" -o /tmp/jdk25.tar.gz
+            echo "$checksum  /tmp/jdk25.tar.gz" | sha256sum -c -
+            mkdir -p /tmp/atto-jdk25
+            tar -xzf /tmp/jdk25.tar.gz --strip-components=1 -C /tmp/atto-jdk25
+            export JAVA_HOME=/tmp/atto-jdk25
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version
+          cd source
+          if [[ "$SOURCE_PR" = 1560 ]]; then
+            bash scripts/verify-supervisor-control-lane-port.sh
+          else
+            mvn -B -ntp "-Dtest=$JAVA_TESTS" -DfailIfNoTests=true -Dsurefire.failIfNoSpecifiedTests=true test
+          fi
+          IFS=, read -ra suites <<< "$JAVA_TESTS"
+          for suite in "${suites[@]}"; do
+            mapfile -t reports < <(find target/surefire-reports -maxdepth 1 -type f -name "TEST-*.$suite.xml")
+            test "${#reports[@]}" -eq 1
+            grep -Eq 'tests="[1-9][0-9]*"' "${reports[0]}"
+            grep -q 'failures="0"' "${reports[0]}"
+            grep -q 'errors="0"' "${reports[0]}"
+            grep -q 'skipped="0"' "${reports[0]}"
+            echo "EXECUTED_JUNIT_PASS $suite"
+          done
+      - name: LLVM exact source runtime tests
+        if: matrix.kind == 'llvm'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd source
+          R=src/main/cpp/oreslang/runtime
+          case "$SOURCE_PR" in
+            573)
+              rustc --edition=2021 -D warnings --test contracts/v2/test_continuation_locality_v1.rs -o /tmp/locality
+              /tmp/locality
+              for cc in gcc clang; do
+                flags=(-std=c11 -O2 -Wall -Wextra -Wpedantic -Werror -UNDEBUG -pthread -Isrc/main/cpp)
+                if [[ "$cc" = clang ]]; then flags+=(-g -fsanitize=address,undefined -fno-sanitize-recover=all); fi
+                "$cc" "${flags[@]}" tests/native_continuation_ready_resume_test.c "$R/NativeExecutionContextStore.c" "$R/NativeContinuationStore.c" "$R/NativeAwaitTraceBridge.c" -o /tmp/continuation
+                timeout 90 /tmp/continuation
+                for test in native_actor_scheduler_test native_continuation_wake_escrow_test; do
+                  "$cc" "${flags[@]}" "tests/$test.c" "$R/NativeActorScheduler.c" -o "/tmp/$test"
+                  timeout 90 "/tmp/$test"
+                done
+              done
+              ;;
+            687)
+              for cc in gcc clang; do
+                cxx=g++; flags=(-O2 -UNDEBUG -Wall -Wextra -Wpedantic -Werror -pthread -Isrc/main/cpp)
+                if [[ "$cc" = clang ]]; then cxx=clang++; flags+=(-g -fsanitize=address,undefined -fno-sanitize-recover=all); fi
+                "$cc" -std=c11 "${flags[@]}" -c "$R/NativeActorScheduler.c" -o /tmp/scheduler.o
+                "$cxx" -std=c++17 "${flags[@]}" tests/native_request_ingress_supervisor_v1_test.cpp /tmp/scheduler.o -o /tmp/ingress
+                timeout 120 /tmp/ingress | tee /tmp/ingress.log
+                test "$(grep -c '^INGRESS_SUPERVISOR_CASE_PASS ' /tmp/ingress.log)" = 207
+                grep -qx 'REQUEST_INGRESS_SUPERVISOR_HOST_PASS total=207 races=60' /tmp/ingress.log
+              done
+              ;;
+            504)
+              for cc in gcc clang; do
+                flags=(-std=c11 -O2 -UNDEBUG -Wall -Wextra -Wpedantic -Werror -pthread -Isrc/main/cpp)
+                if [[ "$cc" = clang ]]; then flags+=(-g -fsanitize=address,undefined -fno-sanitize-recover=all); fi
+                "$cc" "${flags[@]}" tests/native_selectable_send_admission_test.c "$R/NativeActorScheduler.c" -o /tmp/select-send
+                timeout 120 /tmp/select-send
+                "$cc" "${flags[@]}" -DORESLANG_SOURCE_ACTOR_TESTING=1 tests/source_actor_select_send2_admission_test.c "$R/ActorOwnedI64Heap.c" "$R/NativeActorScheduler.c" "$R/NativeOresVM.c" "$R/NativeActorFuture.c" "$R/SourceActorBootstrap.c" "$R/NativeExecutionContextStore.c" "$R/NativeContinuationStore.c" "$R/NativeAwaitTraceBridge.c" "$R/NativeLogicalTrace.c" -o /tmp/source-select
+                timeout 120 /tmp/source-select
+              done
+              ;;
+            751)
+              for cc in gcc clang; do
+                flags=(-O2 -Wall -Wextra -Wpedantic -Werror -UNDEBUG -pthread -Isrc/main/cpp)
+                cxx=g++; if [[ "$cc" = clang ]]; then cxx=clang++; flags+=(-g -fsanitize=address,undefined -fno-sanitize-recover=all); fi
+                "$cc" -std=c11 "${flags[@]}" -c "$R/NativeActorScheduler.c" -o /tmp/scheduler.o
+                for test in native_actor_retained_data_ordering_test native_actor_retained_cleanup_unused_reservation_test native_actor_retained_cleanup_autoadmit_test native_actor_retained_data_stop_test native_actor_retained_stop_wake_race_test; do
+                  "$cc" -std=c11 "${flags[@]}" "tests/$test.c" /tmp/scheduler.o -o "/tmp/$test"
+                  timeout 120 "/tmp/$test"
+                done
+                for test in native_actor_execution_ledger_test native_actor_invocation_frames_test native_actor_ledger_scheduler_bridge_test native_actor_invocation_frame_bridge_test; do
+                  "$cxx" -std=c++17 "${flags[@]}" "tests/$test.cpp" /tmp/scheduler.o -o "/tmp/$test"
+                  timeout 90 "/tmp/$test"
+                done
+              done
+              ;;
+            1060)
+              cargo test --locked --test owned_unwind_native -- --nocapture
+              ;;
+            539|774)
+              llvm_cmake="$(find /usr/lib/llvm-* -path '*/lib/cmake/llvm/LLVMConfig.cmake' -print 2>/dev/null | sort -V | tail -1 || true)"
+              if [[ -z "$llvm_cmake" ]]; then
+                sudo apt-get update
+                sudo apt-get install -y llvm-dev
+                llvm_cmake="$(find /usr/lib/llvm-* -path '*/lib/cmake/llvm/LLVMConfig.cmake' -print | sort -V | tail -1)"
+              fi
+              test -f "$llvm_cmake"
+              cmake -S . -B build/runtime-qualification -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DLLVM_DIR="$(dirname "$llvm_cmake")"
+              cmake --build build/runtime-qualification --target oreslang-llvmc -j 2
+              if [[ "$SOURCE_PR" = 539 ]]; then
+                for mode in normal sanitized; do
+                  flags=(); if [[ "$mode" = sanitized ]]; then flags+=(--sanitize); fi
+                  python3 tests/source_actor_e2e.py --compiler "$PWD/build/runtime-qualification/oreslang-llvmc" --clang "$(command -v clang)" --root "$PWD" --positive-case source-actor-heap-turnover.ores "${flags[@]}"
+                done
+              else
+                cmake --build build/runtime-qualification --target oreslang-native-actor-owned-task-wake-test -j2
+                ctest --test-dir build/runtime-qualification --output-on-failure --no-tests=error -R 'native_actor_owned_task_wake_host_v1|native_actor_task_.*compiled_producer_(ir|actor_wake)_o0_o2|native_actor_suspends_.*denied'
+              fi
+              ;;
+            *) exit 1 ;;
+          esac
+          echo "EXECUTED_LLVM_SCOPE_PASS PR=$SOURCE_PR HEAD=$SOURCE_HEAD TREE=$SOURCE_TREE"
