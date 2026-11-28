@@ -1,0 +1,96 @@
+name: Atto Java compare directory baseline and no-Zalgo candidate
+on:
+  push:
+    branches: [ci/atto-runtime-qualification-20261127-02]
+permissions: {}
+jobs:
+  directory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Pin public Java source and execute production directory regression
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/atto-lang/atto-source.java.git
+          GIT_TERMINAL_PROMPT=0 git -C source -c credential.helper= fetch --depth=1 origin 1c542a4ecd0ff28eb0afcf3a94481282bb83c487
+          git -C source checkout -q --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = 1c542a4ecd0ff28eb0afcf3a94481282bb83c487
+          test "$(git -C source rev-parse 'HEAD^{tree}')" = ae9102726d3168ee2f76d478fe57616d51427bd5
+          test -z "$(git -C source status --porcelain)"
+          if [ -n "${JAVA_HOME_25_X64:-}" ] && [ -x "$JAVA_HOME_25_X64/bin/java" ]; then
+            export JAVA_HOME="$JAVA_HOME_25_X64"
+          else
+            curl --fail --silent --show-error --location --retry 3 'https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jdk&os=linux&vendor=eclipse' > /tmp/jdk25.json
+            link=$(jq -er '.[0].binary.package.link' /tmp/jdk25.json)
+            checksum=$(jq -er '.[0].binary.package.checksum' /tmp/jdk25.json)
+            [[ "$link" = https://github.com/adoptium/temurin25-binaries/releases/download/* ]]
+            [[ "$checksum" =~ ^[a-fA-F0-9]{64}$ ]]
+            curl --fail --silent --show-error --location --retry 3 "$link" -o /tmp/jdk25.tar.gz
+            echo "$checksum  /tmp/jdk25.tar.gz" | sha256sum -c -
+            mkdir -p /tmp/atto-jdk25
+            tar -xzf /tmp/jdk25.tar.gz --strip-components=1 -C /tmp/atto-jdk25
+            export JAVA_HOME=/tmp/atto-jdk25
+          fi
+          export PATH="$JAVA_HOME/bin:$PATH"
+          java -version
+          mvn -version
+          cd source
+          run_suite() {
+            local tag="$1"
+            shift
+            rm -rf target/surefire-reports
+            local rc=0
+            mvn -B -ntp "$@" -DfailIfNoTests=true test || rc=$?
+            echo "SUITE_RC $tag $rc"
+            test -d target/surefire-reports
+            node - "$tag" <<'NODE'
+          const fs = require('fs');
+          const tag = process.argv[2];
+          const files = fs.readdirSync('target/surefire-reports').filter(x => /^TEST-.*\.xml$/.test(x));
+          if (!files.length) process.exit(2);
+          const failures = [], passes = [];
+          for(const f of files) {
+            const xml = fs.readFileSync('target/surefire-reports/'+f,'utf8');
+            for(const m of xml.matchAll(/<testcase\b([^>]*)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
+              const name = m[1].match(/\bname="([^"]*)"/)?.[1];
+              const cls = m[1].match(/\bclassname="([^"]*)"/)?.[1];
+              if(!name || !cls) process.exit(3);
+              const caseId = cls+'#'+name;
+              if(/<(failure|error|skipped)\b/.test(m[2]||'')) failures.push(caseId);
+              else passes.push(caseId);
+            }
+          }
+          fs.writeFileSync('/tmp/'+tag+'-failures.json',JSON.stringify(failures.sort()));
+          fs.writeFileSync('/tmp/'+tag+'-passes.json',JSON.stringify(passes.sort()));
+          console.log('RESULT',tag,'PASS',passes.length,'FAIL_OR_SKIP',failures);
+          NODE
+          }
+          suites=VirtualActorSupervisorDirectoryTest,VirtualActorCurrentMainDirectoryTest,VirtualActorGenerationFenceCurrentMainTest,VirtualActorTerminalControlCurrentMainTest
+          run_suite candidate -Dtest="$suites"
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= fetch --depth=1 origin 0ff63b7ae8babb248690cc70a95f9144fa65040e
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 0ff63b7ae8babb248690cc70a95f9144fa65040e
+          run_suite baseline -Dtest="$suites"
+          node - <<'NODE'
+          const fs=require('fs');
+          const read=(tag,kind)=>JSON.parse(fs.readFileSync('/tmp/'+tag+'-'+kind+'.json','utf8'));
+          const a=read('baseline','failures'),b=read('candidate','failures');
+          const baseline=read('baseline','passes'),candidate=read('candidate','passes');
+          if(JSON.stringify(a)!==JSON.stringify(b)) throw Error('baseline and candidate failures differ');
+          if(!baseline.every(x=>candidate.includes(x))) throw Error('candidate lost baseline passes');
+          if(!candidate.includes('dev.oreslang.runtime.VirtualActorSupervisorDirectoryTest#onePhysicalWorkerCannotBackTwoLogicalIdentities')) throw Error('new regression did not execute successfully');
+          console.log('DIRECTORY_NO_NEW_FAILURES baseline='+baseline.length+' candidate='+candidate.length+' existingFailures='+a.length);
+          NODE
+          GIT_TERMINAL_PROMPT=0 git -c credential.helper= fetch --depth=1 origin 65632c6185d3d53bfc2953058eb46c1fd3006f67
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = 65632c6185d3d53bfc2953058eb46c1fd3006f67
+          test "$(git rev-parse 'HEAD^{tree}')" = 74152ea46ebecdddef17db8b49220bf58fbf85c2
+          run_suite nozalgo -Dtest=NoZalgoCallbackDispatchTest
+          node - <<'NODE'
+          const fs=require('fs');
+          const failures=JSON.parse(fs.readFileSync('/tmp/nozalgo-failures.json','utf8'));
+          const passes=JSON.parse(fs.readFileSync('/tmp/nozalgo-passes.json','utf8'));
+          if(failures.length || passes.length<10) throw Error('NoZalgo failed or missing tests');
+          console.log('NOZALGO_PASS count='+passes.length);
+          NODE
